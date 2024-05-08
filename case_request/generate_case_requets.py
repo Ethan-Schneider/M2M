@@ -1,0 +1,1 @@
+#take in synthetic data and warehouse information to construct CaseRequests = [CaseRequest], CaseRequest = (ItemID, start_loc, goal_loc), where start and goal loc are found differently depending on inbound/outbound tasks
