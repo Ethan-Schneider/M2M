@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
-import json
 import numpy as np
-import datetime
 
-def generate_data(num_data: int, outbound_to_inbound_ratio: float, id_type: str, file_name: str = None):
+def generate_data(num_data: int, outbound_to_inbound_ratio: float, id_type: str):
     """Generate synthetic inbound and outbound tasks.
 
     Args:
@@ -14,14 +12,14 @@ def generate_data(num_data: int, outbound_to_inbound_ratio: float, id_type: str,
         file_name (str): json output file name
         
     """
-    #Initilization
+    #Initilization: dataset and tasks (ID, I/O)
     dataset = {}
     tasks = generate_tasks(num_data, outbound_to_inbound_ratio)
     
     for taskID, outbound_inbound in tasks:
         dataset[int(taskID)] = {'outbound_inbound': outbound_inbound}
     
-    __save_to_json(dataset, file_name)
+    return dataset
     
     
 def generate_tasks(num_data: int, outbound_to_inbound_ratio: float):
@@ -35,14 +33,6 @@ def generate_tasks(num_data: int, outbound_to_inbound_ratio: float):
     return (I + O)
 
 
-def __save_to_json(data: list, file_name):
-    if file_name == None:
-        file_name = datetime.now()
-    file_name =  str(file_name) + ".json"
-    
-    with open(file_name, "w", encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-
 if __name__ == '__main__':
     generate_data(20, 1, 'random', 'test_set')
+    print(generate_data(20, 1, 'random'))
