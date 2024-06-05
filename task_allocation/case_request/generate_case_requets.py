@@ -5,7 +5,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import datetime
 
-from simulated_data import generate_data
+from .simulated_data import generate_data
 
 def generate_case_requests(num_data: int, outbound_to_inbound_ratio: float, id_type: str, filename: str = "test_data", save : bool = 0):
     # Generate data

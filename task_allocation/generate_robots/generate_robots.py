@@ -2,6 +2,14 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 def generate_robots(num_robots : int):
+    """Generate robots within a map's driveway
+
+    Args:
+        num_robots (int): Number of robots to generate.
+
+    Returns:
+        list[tuple[int, tuple[int, int]]]: list of robotID and start location tuples.
+    """
     _, drive_way_nodes = __import_network()
     
     startLocs = np.random.choice(len(drive_way_nodes), size=num_robots, replace=False)
