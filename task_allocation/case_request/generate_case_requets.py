@@ -22,6 +22,7 @@ def generate_case_requests(num_data: int, outbound_to_inbound_ratio: float, id_t
         else:
             data_points[data_point]['startLoc'] = aisle_nodes[np.random.choice(len(aisle_nodes))]
             data_points[data_point]['goalLoc'] = drive_way_nodes[np.random.choice(len(drive_way_nodes))]
+        del data_points[data_point]['outbound_inbound']
 
     # Save tasks to Json
     if save:

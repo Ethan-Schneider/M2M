@@ -1,0 +1,3 @@
+[submodule "task_allocation/BiG-MRTA"]
+	path = task_allocation/BiG-MRTA
+	url = https://github.com/adamslab-ub/BiG-MRTA.git
