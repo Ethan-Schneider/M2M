@@ -32,8 +32,6 @@ def task_allocation(num_robots : int, num_tasks : int, inbound_outbound_ratio : 
         case _:
             raise ValueError('{task_allocator} not a valid task allocator. Please use listed methods in docstring.')
 
-    
-    print(A)
 
 if __name__ == "__main__":
     task_allocation(10, 10, 1.0, 'random', 'random')
