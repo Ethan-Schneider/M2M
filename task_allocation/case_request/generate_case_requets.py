@@ -5,11 +5,11 @@ import xml.etree.ElementTree as ET
 import numpy as np
 import datetime
 
-from .simulated_data import generate_data
+from simulated_data.generate_data import generate_data
 
 def generate_case_requests(num_data: int, outbound_to_inbound_ratio: float, id_type: str, filename: str = "test_data", save : bool = 0):
     # Generate data
-    data_points = generate_data.generate_data(num_data, outbound_to_inbound_ratio, 'random')
+    data_points = generate_data(num_data, outbound_to_inbound_ratio, 'random')
     
     # Import network coordinates
     aisle_nodes, drive_way_nodes = __import_network()
@@ -39,7 +39,7 @@ def __import_network():
     """
     
     #Open XML File
-    tree = ET.parse('./task_allocation/network.xml')
+    tree = ET.parse('/home/Ethan/Documents/Symbotic/symbotic_tamp/task_allocation/network.xml')
 
     root = tree.getroot()
     
@@ -49,11 +49,13 @@ def __import_network():
 
     # Iterate over xml file and append (X, Y) for asile     
     for elem in root.iter('Node'):
-        if elem.attrib['SurfaceType'] == 'Aisle':
+        if elem.attrib['SurfaceType'] == 'Aisle' and elem.attrib['Orientation'] == 'North':
             aisle_nodes.append((elem.attrib['X'], elem.attrib['Y']))
         elif elem.attrib['SurfaceType'] == 'Transfer' or elem.attrib['SurfaceType'] == 'TransferCharger':
-            drive_way_nodes.append((elem.attrib['X'], elem.attrib['Y']))
-            
+            if elem.attrib['Orientation'] == 'North':
+                drive_way_nodes.append((elem.attrib['X'], elem.attrib['Y']))
+    print(len(aisle_nodes))
+    print(len(drive_way_nodes))
     return aisle_nodes, drive_way_nodes
 
 def __save_to_json(data: list, file_name: str):
