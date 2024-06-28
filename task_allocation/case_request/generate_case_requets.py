@@ -39,7 +39,7 @@ def __import_network():
     """
     
     #Open XML File
-    tree = ET.parse('/home/Ethan/Documents/Symbotic/symbotic_tamp/task_allocation/network.xml')
+    tree = ET.parse('./task_allocation/network.xml')
 
     root = tree.getroot()
     
@@ -52,10 +52,9 @@ def __import_network():
         if elem.attrib['SurfaceType'] == 'Aisle' and elem.attrib['Orientation'] == 'North':
             aisle_nodes.append((elem.attrib['X'], elem.attrib['Y']))
         elif elem.attrib['SurfaceType'] == 'Transfer' or elem.attrib['SurfaceType'] == 'TransferCharger':
-            if elem.attrib['Orientation'] == 'North':
-                drive_way_nodes.append((elem.attrib['X'], elem.attrib['Y']))
+            drive_way_nodes.append((elem.attrib['X'], elem.attrib['Y']))
+            
     print(len(aisle_nodes))
-    print(len(drive_way_nodes))
     return aisle_nodes, drive_way_nodes
 
 def __save_to_json(data: list, file_name: str):
