@@ -96,13 +96,13 @@ def convert_tasks(conversion: dict):
         if not content:
             start_position = value_list.index((data[-2]["Location"]["X"], data[-2]["Location"]["Y"]))
             goal_position = value_list.index((data[-1]["Location"]["X"], data[-1]["Location"]["Y"]))
-            output = output + str(time) + "\t"  + str(key_list[start_position]) + "\t" + str(key_list[goal_position]) + "\t0\t0\n"
+            output = output + str(time) + "  "  + str(key_list[start_position]) + "  " + str(key_list[goal_position]) + "  0  0\n"
             break
         content = json.loads(content)
         if current_task_id != content["SRETaskID"]:
             start_position = value_list.index((data[-2]["Location"]["X"], data[-2]["Location"]["Y"]))
             goal_position = value_list.index((data[-1]["Location"]["X"], data[-1]["Location"]["Y"]))
-            output = output + str(time) + "\t"  + str(key_list[start_position]) + "\t" + str(key_list[goal_position]) + "\t0\t0\n"
+            output = output + str(time) + "  "  + str(key_list[start_position]) + "  " + str(key_list[goal_position]) + "  0  0\n"
             current_task_id = content["SRETaskID"]
             time += 1
         data.append(content)
