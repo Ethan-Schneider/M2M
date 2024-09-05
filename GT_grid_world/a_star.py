@@ -1,5 +1,5 @@
 import numpy as np
-import grid
+from world_representation import grid
 import queue
 
 def a_star(graph : grid.Graph, start : tuple, goal : tuple):
