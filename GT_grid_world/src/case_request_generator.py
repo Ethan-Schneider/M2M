@@ -1,17 +1,17 @@
 import json
+import numpy as np
 
 from .item import ItemCategory
 
 class Warehouse:
-    def __init__(self) -> None:
+    def __init__(self, inventory_size: int) -> None:
         self.__inventory = {}
+        self.max_pos = inventory_size
         self.__init_inventory()
         
     def __init_inventory(self):
-        # Defined by current warehouse layout
-        max_pos = 2659
         
-        for i in range(max_pos + 1):
+        for i in range(self.max_pos):
             self.__inventory[i] = ItemCategory(1).name
     
     def printInventory(self):
@@ -34,6 +34,13 @@ class Warehouse:
                 empty.append(i)
         return empty
     
+    def findFull(self):
+        locations = []
+        for i, item in enumerate(self.__inventory):
+            if self.__inventory[item] != ItemCategory(1).name:
+                locations.append(i)
+        return locations
+    
     def find(self, target):
         locations = []
         for i, item in enumerate(self.__inventory):
@@ -50,19 +57,37 @@ class Warehouse:
         self.__inventory[pos] = ItemCategory(1).name
     
     
-def CRG(W: Warehouse, N: int, strategy: str, item : list = []) -> set:
+def CRG(J: set, W: Warehouse, DW: Warehouse, N: int, inbound_to_outbound: float, last_task_id: int, strategy: str = "uniform", item : list = []) -> set:
     """_summary_
 
     Args:
+        J (set): _description_
         W (Warehouse): _description_
+        DW (Warehouse): _description_
         N (int): _description_
-        strategy (str): _description_
+        strategy (str, optional): _description_. Defaults to uniform.
         item (list, optional): _description_. Defaults to [].
 
     Returns:
         set: _description_
     """
-    return set([9])
+    inbound_probability = inbound_to_outbound/(inbound_to_outbound + 1)
+    outbound_probability = 1 - inbound_probability
+    tasks_to_generate = np.random.choice([0, 1], size=N, p=[outbound_probability, inbound_probability])
+    J_new = set([])
+    
+    #Generate tasks uniformly throughout the warehouse without inventory information
+    if strategy == "uniform":
+        for task in tasks_to_generate:
+            #Generate inbound task
+            if task == 1:
+                J_new = J_new | set([(last_task_id + 1, np.random.choice(np.arange(DW.max_pos)), np.random.choice(np.arange(W.max_pos)))])
+                last_task_id += 1
+            #Generate outbound task
+            elif task == 0:
+                J_new = J_new | set([(last_task_id + 1, np.random.choice(np.arange(W.max_pos)), np.random.choice(np.arange(DW.max_pos)))])
+                last_task_id += 1
+    return J_new, last_task_id
     
 if __name__=="__main__":
     warehouse = Warehouse()

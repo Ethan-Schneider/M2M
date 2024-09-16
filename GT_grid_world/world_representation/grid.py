@@ -1,8 +1,8 @@
 import numpy as np
-from world_representation import node
+import node
 
 class Graph:
-    def __init__(self, ROWS: int, COLS: int, DOF:int, obstacles: list, deterministic = True) -> None:
+    def __init__(self, ROWS: int, COLS: int, DOF:int, obstacles: list, deterministic = True, file_name: str = None) -> None:
         self.width = COLS
         self.height = ROWS
         self.obstacles = obstacles
@@ -12,8 +12,19 @@ class Graph:
         else:
             self.__DOF = DOF
         self.__deterministic = deterministic
-        self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
+        if not file_name:
+            self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
+        else:
+            self.__graph = self.__load_graph(file_name)
         
+    def __load_graph(self, filename):
+        graph = []
+        cost = 4
+        
+        f = open("maps/" + filename, "r")
+        for i, line in enumerate(f):
+            pass
+    
     def __initialize_graph(self, ROWS, COLS, obstacles):
         graph = []
         cost = 4
@@ -86,10 +97,38 @@ class Graph:
     
     def get_cost(self, loc1, loc2): 
         return self.__graph[loc2[0], loc2[1]].get_cost()
+    
+    def draw_tile(self, id, style):
+        r = " . "
+        if 'number' in style and id in style['number']: r = " %-2d" % style['number'][id]
+        if 'point_to' in style and style['point_to'].get(id, None) is not None:
+            (x1, y1) = id
+            (x2, y2) = style['point_to'][id]
+            if x2 == x1 + 1: r = " > "
+            if x2 == x1 - 1: r = " < "
+            if y2 == y1 + 1: r = " v "
+            if y2 == y1 - 1: r = " ^ "
+        if 'path' in style and id in style['path']:   r = " @ "
+        if 'start' in style and id == style['start']: r = " A "
+        if 'goal' in style and id == style['goal']:   r = " Z "
+        if id in self.obstacles: r = "###"
+        return r
+
+    def draw_grid(self, **style):
+        print("___" * self.width)
+        for y in range(self.height):
+            for x in range(self.width):
+                print("%s" % self.draw_tile((x, y), style), end="")
+            print()
+        print("~~~" * self.width)
 
 def main():
-    g = Graph(8, 8, 4, [(5, 4)])
-    print(g.get_neighbors((6, 7)))
+    g = Graph(20, 20, 4, [(1, 19), (1, 18), (1, 17), 
+                          (3, 19), (3, 18), (3, 17), 
+                          (5, 19), (5, 18), (5, 17), 
+                          (7, 19), (7, 18), (7, 17),
+                          (9, 19), (9, 18), (9, 17)])
+    g.draw_grid()
 
 if __name__ == "__main__":
     main()
