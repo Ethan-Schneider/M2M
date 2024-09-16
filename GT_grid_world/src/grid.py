@@ -1,5 +1,7 @@
 import numpy as np
-import node
+
+from .node import Node
+from .case_request_generator import Warehouse
 
 class Graph:
     def __init__(self, ROWS: int, COLS: int, DOF:int, obstacles: list, deterministic = True, file_name: str = None) -> None:
@@ -12,6 +14,7 @@ class Graph:
         else:
             self.__DOF = DOF
         self.__deterministic = deterministic
+        
         if not file_name:
             self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
         else:
@@ -21,9 +24,53 @@ class Graph:
         graph = []
         cost = 4
         
-        f = open("maps/" + filename, "r")
+        # Read-in map file
+        f = open("src/maps/" + filename, "r")
+        
+        map_data = f.readline().split(" ")
+        for i in range(len(map_data)):
+            map_data[i] = int(map_data[i].replace("\n", "").replace(",", ""))
+        
+        num_warehouse_locations = map_data[2]
+        num_driveway_locations = map_data[3]
+        
+        empty_points = []
+        f.readline()
         for i, line in enumerate(f):
-            pass
+            for j, character in enumerate(line):
+                if character == ".":
+                    empty_points.append((i, j))
+                    
+        warehouse_locations = []
+        driveway_locations = []
+        robot_start_locations = []
+                
+        f = open("src/maps/" + filename, "r")
+        f.readline()
+        f.readline()
+        for i, line in enumerate(f):
+            for j, character in enumerate(line):
+                if character == "#":
+                    graph.append(Node(cost, occupied=True, obstacle=True))
+                elif character == ".":
+                    graph.append(Node(cost, occupied=False, obstacle=False))
+                    if (i, j) in empty_points[:num_warehouse_locations]:
+                        warehouse_locations.append((i, j))
+                    elif (i, j) in empty_points[(-1*num_driveway_locations):]:
+                        driveway_locations.append((i, j))
+                    else:
+                        pass
+                elif character == "r":
+                    graph.append(Node(cost, occupied=False, obstacle=False))
+                    robot_start_locations = [(i, j)]
+        
+        # Initialize Warehouse and Driveway
+        self.warehouse = Warehouse(warehouse_locations)
+        self.driveway = Warehouse(driveway_locations)
+        
+        
+        # TODO: for n number of robots, pick their start locations randomly
+        
     
     def __initialize_graph(self, ROWS, COLS, obstacles):
         graph = []
@@ -35,7 +82,7 @@ class Graph:
                     obstacle = True
                 else:
                     obstacle = False
-                row.append(node.Node(cost, occupied=False, obstacle=obstacle))
+                row.append(Node(cost, occupied=False, obstacle=obstacle))
             graph.append(row)
         graph = np.asarray(graph)
         return graph

@@ -1,18 +1,23 @@
 from src import case_request_generator, router, simulate, task_allocation
 
 def main():
+    #Initilize state of robots
     Rs_init = [(0, (80, 100), True, -1)]
     
+    # Initilize state of the warehouse
     warehouse = case_request_generator.Warehouse(2660)
     warehouse.readData()
-    
+
+    # Initilize state of the driveway    
     driveway = case_request_generator.Warehouse(75)
     
+    # Init values for task frequency and ratio, total number of timesteps, etc. 
     frequency = 1
     inbound_outbound_ratio = 1.0
-    
     T = 100
     
+    
+    # Execute online algorithm
     execute((Rs_init, warehouse, driveway), frequency, inbound_outbound_ratio, T)
     
     
