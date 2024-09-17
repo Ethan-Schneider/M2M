@@ -1,15 +1,10 @@
-from src import case_request_generator, router, simulate, task_allocation
+from src import map, router, simulate, task_allocation
 
 def main():
     #Initilize state of robots
     Rs_init = [(0, (80, 100), True, -1)]
     
-    # Initilize state of the warehouse
-    warehouse = case_request_generator.Warehouse(2660)
-    warehouse.readData()
-
-    # Initilize state of the driveway    
-    driveway = case_request_generator.Warehouse(75)
+    graph = map.Graph(8, "small_symbotic")
     
     # Init values for task frequency and ratio, total number of timesteps, etc. 
     frequency = 1
@@ -18,11 +13,11 @@ def main():
     
     
     # Execute online algorithm
-    execute((Rs_init, warehouse, driveway), frequency, inbound_outbound_ratio, T)
+    execute((Rs_init, graph), frequency, inbound_outbound_ratio, T)
     
     
 def execute(I: tuple, frequency, inbound_to_outbound_ratio: float, T: int, case_request_strategy: str = "uniform"):
-    Rs, W, DW = I
+    Rs, G = I
     J = set()
     Ra = []
     
@@ -38,7 +33,7 @@ def execute(I: tuple, frequency, inbound_to_outbound_ratio: float, T: int, case_
             else:
                 N = 0
             # Generate new tasks
-            J_new, last_task_id = case_request_generator.CRG(J, W, DW, N, inbound_to_outbound_ratio, last_task_id, case_request_strategy)
+            J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, case_request_strategy)
             J = J | J_new
     print(J)
     print(len(J))

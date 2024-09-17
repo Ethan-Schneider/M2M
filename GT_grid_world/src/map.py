@@ -1,39 +1,56 @@
 import numpy as np
 
 from .node import Node
-from .case_request_generator import Warehouse
+from .case_request_generator import Inventory
 
 class Graph:
-    def __init__(self, ROWS: int, COLS: int, DOF:int, obstacles: list, deterministic = True, file_name: str = None) -> None:
-        self.width = COLS
-        self.height = ROWS
-        self.obstacles = obstacles
-        
+    def __init__(self, num_robots : int, file_name: str = None, DOF:int = 4, deterministic = True, *args) -> None:
         if (DOF != 4) and (DOF != 8):
             raise Exception("DOF must be 4 or 8")
         else:
             self.__DOF = DOF
         self.__deterministic = deterministic
+        self.__num_robots =  num_robots
         
         if not file_name:
+            self.height = args[0]
+            self.width = args[1]
+            self.obstacles = args[2]
             self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
         else:
             self.__graph = self.__load_graph(file_name)
+            # TODO: Load in warehouse item data or generate data based on a desired technique (e.g. uniformly distributed items, clustered items)
         
-    def __load_graph(self, filename):
+    def __load_graph(self, filename : str):
+        """This method takes in a map file, parses the metadata and map data, 
+        then saves a map representation, warehouse and driveway item representation, 
+        height, width, and initializes robot start locations.
+
+        Args:
+            filename (str): Filename of the map
+
+        Raises:
+            Exception: If the number of robots the user wants to generate exceeds
+            the maximum number of robots defined in the map file, raise an exception.
+        """
         graph = []
         cost = 4
         
         # Read-in map file
         f = open("src/maps/" + filename, "r")
         
+        # Read the map file's metadata
         map_data = f.readline().split(" ")
         for i in range(len(map_data)):
             map_data[i] = int(map_data[i].replace("\n", "").replace(",", ""))
         
+        self.height = map_data[0]
+        self.width = map_data[1]
         num_warehouse_locations = map_data[2]
         num_driveway_locations = map_data[3]
+        max_num_robots = map_data[4]
         
+        # Read the number of empty spaces in the map
         empty_points = []
         f.readline()
         for i, line in enumerate(f):
@@ -41,19 +58,24 @@ class Graph:
                 if character == ".":
                     empty_points.append((i, j))
                     
+        # Init lists for warehouse and driveway locations, possible robot start locations, and obstacles            
         warehouse_locations = []
         driveway_locations = []
         robot_start_locations = []
+        self.obstacles = []
                 
+        # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
         f = open("src/maps/" + filename, "r")
         f.readline()
         f.readline()
         for i, line in enumerate(f):
+            row = []
             for j, character in enumerate(line):
                 if character == "#":
-                    graph.append(Node(cost, occupied=True, obstacle=True))
+                    self.obstacles.append((i, j))
+                    row.append(Node(cost, occupied=True, obstacle=True))
                 elif character == ".":
-                    graph.append(Node(cost, occupied=False, obstacle=False))
+                    row.append(Node(cost, occupied=False, obstacle=False))
                     if (i, j) in empty_points[:num_warehouse_locations]:
                         warehouse_locations.append((i, j))
                     elif (i, j) in empty_points[(-1*num_driveway_locations):]:
@@ -61,16 +83,24 @@ class Graph:
                     else:
                         pass
                 elif character == "r":
-                    graph.append(Node(cost, occupied=False, obstacle=False))
-                    robot_start_locations = [(i, j)]
+                    row.append(Node(cost, occupied=False, obstacle=False))
+                    robot_start_locations.append((i, j))
+            graph.append(row)
         
-        # Initialize Warehouse and Driveway
-        self.warehouse = Warehouse(warehouse_locations)
-        self.driveway = Warehouse(driveway_locations)
+        # Initialize Warehouse and Driveway as Warehouse objects 
+        self.warehouse = Inventory(warehouse_locations)
+        self.driveway = Inventory(driveway_locations)
         
         
-        # TODO: for n number of robots, pick their start locations randomly
+        if self.__num_robots > max_num_robots:
+            raise Exception("Number of robots exceeds maximum number of robots for map")
         
+        # Randomly place N robots into the environment's M start locations
+        for i in range(self.__num_robots):
+            location = robot_start_locations[np.random.choice(len(robot_start_locations))]
+            graph[location[0]][location[1]].set_occupied(True)
+            robot_start_locations.remove(location)
+
     
     def __initialize_graph(self, ROWS, COLS, obstacles):
         graph = []

@@ -8,6 +8,9 @@ class Node:
             self.__occupied = True
         else:
             self.__occupied = occupied
+    
+    def set_occupied(self, occupied : bool) -> None:
+        self.__occupied = occupied
             
     def get_occupied(self) -> bool:
         return self.__occupied
