@@ -10,17 +10,42 @@ class Inventory:
         self.__inventory = {}
         
         if isinstance(args[0], int):
+            self.max_pos = args[0]
             self.__init_inventory(args[0])
         elif isinstance(args[0], list):
+            self.max_pos = len(args[0])
             self.__init_inventory_from_map(args[0])
+            
+        if isinstance(args[1], str):
+            if args[1] == "uniform":
+                self.__uniformly_init_inventory(args[2])
+            else:
+                raise Exception("Unknown initialization strategy for Inventory object, please use from the list: \n - uniform")
         
-    def __init_inventory(self, max_pos) -> None:
+    def __init_inventory(self) -> None:
         for i in range(self.max_pos):
             self.__inventory[i] = ItemCategory(1).name
             
     def __init_inventory_from_map(self, locations : list) -> None:
+        """Initializes the inventory dictionary with the coordinates and Empty item
+
+        Args:
+            locations (list): List of locations on the map where items can be stored
+        """
         for location in locations:
             self.__inventory[location] = ItemCategory(1).name
+            
+    def __uniformly_init_inventory(self, percentage : float) -> None:
+        """Initializes the warehouse by uniformly sampling locations and placing items (also chosen uniformly) in those locations
+
+        Args:
+            percentage (float): Percentage of the warehouse that should be filled with items
+        """
+        num_locations = np.ceil(len(self.__inventory)*(percentage/100))
+        locations = np.random.choice(len(self.__inventory), int(num_locations), False)
+        
+        for location in locations:
+            self.__inventory[list(self.__inventory.keys())[location]] = ItemCategory(np.random.choice(np.arange(2, len(ItemCategory)+1))).name
     
     def printInventory(self):
         print(self.__inventory)

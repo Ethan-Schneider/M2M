@@ -1,7 +1,7 @@
 import numpy as np
 
 from .node import Node
-from .case_request_generator import Inventory
+from .inventory import Inventory
 
 class Graph:
     def __init__(self, num_robots : int, file_name: str = None, DOF:int = 4, deterministic = True, *args) -> None:
@@ -18,16 +18,17 @@ class Graph:
             self.obstacles = args[2]
             self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
         else:
-            self.__graph = self.__load_graph(file_name)
+            self.__graph = self.__load_graph(file_name, args[0], args[1])
             # TODO: Load in warehouse item data or generate data based on a desired technique (e.g. uniformly distributed items, clustered items)
         
-    def __load_graph(self, filename : str):
+    def __load_graph(self, filename : str, warehouse_strategy : str, initial_warehouse_capacity : float):
         """This method takes in a map file, parses the metadata and map data, 
         then saves a map representation, warehouse and driveway item representation, 
         height, width, and initializes robot start locations.
 
         Args:
             filename (str): Filename of the map
+            warehouse_strategy (str): Strategy for how to generate the initial warehouse inventory
 
         Raises:
             Exception: If the number of robots the user wants to generate exceeds
@@ -37,7 +38,7 @@ class Graph:
         cost = 4
         
         # Read-in map file
-        f = open("src/maps/" + filename, "r")
+        f = open(filename, "r")
         
         # Read the map file's metadata
         map_data = f.readline().split(" ")
@@ -65,7 +66,7 @@ class Graph:
         self.obstacles = []
                 
         # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
-        f = open("src/maps/" + filename, "r")
+        f = open(filename, "r")
         f.readline()
         f.readline()
         for i, line in enumerate(f):
@@ -88,8 +89,8 @@ class Graph:
             graph.append(row)
         
         # Initialize Warehouse and Driveway as Warehouse objects 
-        self.warehouse = Inventory(warehouse_locations)
-        self.driveway = Inventory(driveway_locations)
+        self.warehouse = Inventory(warehouse_locations, warehouse_strategy, initial_warehouse_capacity)
+        self.driveway = Inventory(driveway_locations, warehouse_strategy, initial_warehouse_capacity)
         
         
         if self.__num_robots > max_num_robots:

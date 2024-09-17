@@ -1,22 +1,28 @@
-from src import map, router, simulate, task_allocation
+import os
+
+from src import graph, router, simulate, task_allocation, case_request_generator
 
 def main():
     #Initilize state of robots
     Rs_init = [(0, (80, 100), True, -1)]
     
-    graph = map.Graph(8, "small_symbotic")
+    G = graph.Graph(8, "GT_grid_world/src/maps/symbotic_small", 4, True, "uniform", 20.)
+    
+    # G.warehouse.printInventory()
+    print(len(G.warehouse.findFull())/G.warehouse.max_pos)
     
     # Init values for task frequency and ratio, total number of timesteps, etc. 
     frequency = 1
     inbound_outbound_ratio = 1.0
     T = 100
+    task_generation_strategy = "informed_uniform"
     
     
     # Execute online algorithm
-    execute((Rs_init, graph), frequency, inbound_outbound_ratio, T)
+    execute((Rs_init, G), frequency, inbound_outbound_ratio, T)
     
     
-def execute(I: tuple, frequency, inbound_to_outbound_ratio: float, T: int, case_request_strategy: str = "uniform"):
+def execute(I: tuple, frequency, inbound_to_outbound_ratio: float, T: int, case_request_strategy: str = "uninformed_uniform"):
     Rs, G = I
     J = set()
     Ra = []
