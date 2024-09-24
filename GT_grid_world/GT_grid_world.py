@@ -4,14 +4,18 @@ import numpy as np
 from src import graph, router, simulate, task_allocation, case_request_generator, item
 
 def main():
-    #Initilize state of robots
-    Rs_init = [(0, (80, 100), True, -1)]
-    
     G = graph.Graph(8, "GT_grid_world/src/maps/symbotic_small", 4, True, "uniform", 25.)
+    
+    #Initilize state of robots (robot_id, state, free_agent)
+    Rs_init = []
+    robot_id = 0
+    for location in G.get_all_occupied():
+        Rs_init.append((robot_id, location, True))
+    
     # Init values for task frequency and ratio, total number of timesteps, etc. 
-    frequency = 2
+    frequency = 0.5
     inbound_outbound_ratio = 1.0
-    T = 35
+    T = 1
     task_generation_strategy = "informed_uniform"
     
     task_assignment_strategy = "closest_robot"
@@ -25,9 +29,9 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
             task_assignment_strategy : str = "closest_robot"):
     # Unpack Robot State (Rs) and Graph (G)
     Rs, G = I
-    # Initilize empty set of tasks
+    # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
-    # Initilize robot allocation to empty
+    # Initilize robot allocation to empty: allocation is defined as (task_id, robot_id)
     Ra = []
     
     last_task_id = 0
@@ -47,10 +51,7 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
             J |= J_new
             
         # Assign unassigned tasks to robots
-        
-        
-    print(J)
-    print(len(J))
+        task_allocation.TaskAllocation(Rs, Ra, J, task_assignment_strategy)
 
 if __name__=="__main__":
     main()

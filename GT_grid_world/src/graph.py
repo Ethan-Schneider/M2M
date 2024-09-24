@@ -71,9 +71,9 @@ class Graph:
         for i, line in enumerate(f):
             row = []
             for j, character in enumerate(line):
-                if character == "#":
+                if character == "@":
                     self.obstacles.append((i, j))
-                    row.append(Node(cost, occupied=True, obstacle=True))
+                    row.append(Node(cost, occupied=False, obstacle=True))
                 elif character == ".":
                     row.append(Node(cost, occupied=False, obstacle=False))
                     if (i, j) in empty_points[:num_warehouse_locations]:
@@ -102,6 +102,8 @@ class Graph:
             location = robot_start_locations[np.random.choice(len(robot_start_locations))]
             graph[location[0]][location[1]].set_occupied(True)
             robot_start_locations.remove(location)
+        
+        return np.asarray(graph)
 
     
     def __initialize_graph(self, ROWS, COLS, obstacles):

@@ -14,6 +14,10 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
     Returns:
         set: _description_
     """
+    
+    #TODO: Add logic for skipping task generation is no more tasks can be generated on the map (e.g. every location has some task assigned to it, 
+    # all warehouse locations are full of items so no more inbound tasks can be generated, etc.)
+    
     inbound_probability = inbound_to_outbound/(inbound_to_outbound + 1)
     outbound_probability = 1 - inbound_probability
     tasks_to_generate = np.random.choice([0, 1], size=int(N), p=[outbound_probability, inbound_probability])
