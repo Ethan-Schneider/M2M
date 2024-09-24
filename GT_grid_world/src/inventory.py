@@ -64,14 +64,14 @@ class Inventory:
         empty = []
         for i, item in enumerate(self.__inventory):
             if self.__inventory[item] == ItemCategory(1).name:
-                empty.append(i)
+                empty.append(list(self.__inventory.keys())[i])
         return empty
     
     def findFull(self) -> list:
         locations = []
         for i, item in enumerate(self.__inventory):
             if self.__inventory[item] != ItemCategory(1).name:
-                locations.append(i)
+                locations.append(list(self.__inventory.keys())[i])
         return locations
     
     def find(self, target) -> list:
@@ -80,7 +80,7 @@ class Inventory:
             if self.__inventory[item] == 0:
                 continue
             if self.__inventory[item] == target:
-                locations.append(i)
+                locations.append(list(self.__inventory.keys())[i])
         return locations
     
     def add(self, pos, item: str) -> None:

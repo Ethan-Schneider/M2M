@@ -19,7 +19,6 @@ class Graph:
             self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
         else:
             self.__graph = self.__load_graph(file_name, args[0], args[1])
-            # TODO: Load in warehouse item data or generate data based on a desired technique (e.g. uniformly distributed items, clustered items)
         
     def __load_graph(self, filename : str, warehouse_strategy : str, initial_warehouse_capacity : float):
         """This method takes in a map file, parses the metadata and map data, 
@@ -89,6 +88,8 @@ class Graph:
             graph.append(row)
         
         # Initialize Warehouse and Driveway as Warehouse objects 
+        # Note: it will populate the warehouse with the given strategy
+        # TODO: Currently populating driveway in the same state as the warehouse, should consider changing  
         self.warehouse = Inventory(warehouse_locations, warehouse_strategy, initial_warehouse_capacity)
         self.driveway = Inventory(driveway_locations, warehouse_strategy, initial_warehouse_capacity)
         
@@ -134,7 +135,7 @@ class Graph:
             raise Exception("Node %s is out of range of graph with shape %s" % (node, self.__graph.shape))
         
         north = (node[0]-1, node[1])
-        if north[0] < 0  or self.__get_if_occupied(north) :
+        if north[0] < 0  or self.__get_if_occupied(north):
             north = None
             
         east = (node[0], node[1]+1)

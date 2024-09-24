@@ -167,5 +167,7 @@ cython_debug/
 *.xml
 
 task_allocation/
+*task_allocation/
+
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
