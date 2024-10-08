@@ -1,14 +1,15 @@
 import numpy as np
 
-def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str):
+def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set):
     # make a set of all tasks that are not currently allocated
     
     # if statement for which strategy will be used
     
     # ------ closest robot to closest task
     # compute the distance from a task to every robot's current location
-    
+    print("Beginning")
     if task_assignment_strategy == "closest_robot":
+        # TODO: Fix closest_robot stategy: Bug involves index of the cost_tensor not matching the task_id number
         # Algorithm assigns the closest task to the closest agent at every time-step
         # Assigns a single-task robot pairing, NOT a sequence of tasks for each robot
         
@@ -52,7 +53,7 @@ def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str
             
         # If all robots or all tasks are allocated, return the allocation
         if np.all(cost_tensor == np.inf):
-            return Ra
+            return Ra, to_pickup, free_agents
 
         # Iterate for every 
         min_value_indexes = []
@@ -69,5 +70,51 @@ def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str
             if np.all(cost_tensor == np.inf):
                 break
             
+        for task in Ra:
+            robot_id = task[-1]
+            if robot_id in free_agents:
+                free_agents.remove(robot_id)
+                to_pickup.add(robot_id)
+            else:
+                continue
+
+        return Ra, to_pickup, free_agents
+    
+    elif task_assignment_strategy == "random":
+        assigned_task_ids = set([x[0] for x in Ra])
+        task_ids = set([x[0] for x in J])
         
-        return Ra
+        unassigned_task_ids = task_ids - assigned_task_ids
+        
+        assigned_robot_ids = set()
+        for assignment in Ra:
+            assigned_robot_ids |= set([assignment[-1]])
+        unassigned_robot_ids = set(np.arange(0, len(Rs))) - assigned_robot_ids
+        
+        if len(unassigned_robot_ids) < 0:
+            return Ra
+        elif len(unassigned_task_ids) < 0:
+            return Ra
+        else:
+            pass
+        
+        for unassigned_robot_id in unassigned_robot_ids:
+            task = np.random.choice(list(unassigned_task_ids))
+            
+            Ra.append((task, unassigned_robot_id))
+            unassigned_task_ids.remove(task)
+            if len(unassigned_task_ids) == 0:
+                break
+        
+        
+        for task in Ra:
+            robot_id = task[-1]
+            if robot_id in free_agents:
+                free_agents.remove(robot_id)
+                to_pickup.add(robot_id)
+            else:
+                continue
+
+        return Ra, to_pickup, free_agents
+        
+        

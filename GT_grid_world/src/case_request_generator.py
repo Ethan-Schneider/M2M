@@ -62,7 +62,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 
-                J_new |= set([(last_task_id + 1, pickup_location, dropoff_location)])
+                J_new |= set([(last_task_id, pickup_location, dropoff_location)])
                 last_task_id += 1
                 
                 current_task_locations |= set((pickup_location, dropoff_location))
@@ -78,7 +78,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 
-                J_new |= set([(last_task_id + 1, pickup_location, dropoff_location)])
+                J_new |= set([(last_task_id, pickup_location, dropoff_location)])
                 last_task_id += 1
                 
                 current_task_locations |= set((pickup_location, dropoff_location))

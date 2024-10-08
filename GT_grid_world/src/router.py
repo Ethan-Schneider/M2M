@@ -3,19 +3,66 @@ from .path_finding_algorithms.GT_algorithms.cbs import cbs
 
 from src.path_finding_algorithms.external_algorithms.EECBS import eecbs
 
-def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str) -> list:
-    if path_planning_strategy == "cbs":
-        # solution = cbs()
-        print(Rs)
-        print(Ra)
-        print(J)
+def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set) -> list:
+    if path_planning_strategy == "ecbs":
         states = [robot[1] for robot in Rs]
-        
-        goal_locations = states.copy()
-        for task in J:
-            goal_locations[task[0]] = task[1]
+
+        goal_locations = []
+        for robot in Rs:
+            robot_id = robot[0]
             
-        print("States; ", states)
-        print("goal_locations: ", goal_locations)
+            # If robot is going to pickup, set goal location to the task's start location
+            if robot_id in to_pickup:
+                # Get assigned task_id
+                task_id = -1
+                for assignment in Ra:
+                    if assignment[1] == robot_id:
+                        task_id = assignment[0]
+                print("Robot task_id: ", task_id)
+                # Get assigned task's start location
+                start_loc = (-1, -1)
+                for task in J:
+                    if task[0] == task_id:
+                        start_loc = task[1]
+                print("Robot start location: ", start_loc)
+                goal_locations.append((robot_id, start_loc))
+                
+            # If robot is going to delivery, set goal location to the task's goal location
+            elif robot_id in to_delivery:
+                # Get assigned task_id
+                task_id = -1
+                for assignment in Ra:
+                    if assignment[1] == robot_id:
+                        task_id = assignment[0]
+                        
+                # Get assigned task's goal location
+                goal_loc = (-1, -1)
+                for task in J:
+                    if task[0] == task_id:
+                        goal_loc = task[2]
+                goal_locations.append((robot_id, goal_loc))
+                
+            # If robot is a free_agent, set goal location to current state
+            else:
+                goal_locations.append((robot_id, robot[1]))
+                
         
-        print(eecbs.test_cpp_func("GT_grid_world/src/maps/symbotic_small", len(Rs), 60, 1.2, states, goal_locations))
+        print("to_pickup: ", to_pickup)
+        print("to_delivery: ", to_delivery)
+        print("free_agents: ", free_agents)
+        print("Tasks: ", J)
+        print("Ra: ", Ra)
+        print("Rs: ", Rs)
+                
+        goal_locations.sort()
+        goal_locations = [x[1] for x in goal_locations]
+        print("Goal Locations: ", goal_locations)
+        sequences = eecbs.test_cpp_func("GT_grid_world/src/maps/symbotic_small", len(Rs), 60, 1.2, states, goal_locations)
+        
+        # Remove first item in sequences, as they are the robot's current location
+        for sequence in sequences:
+            sequence.pop(0)
+        
+        print("Sequences: ", sequences)
+        
+        return sequences
