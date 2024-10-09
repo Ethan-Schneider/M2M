@@ -171,3 +171,7 @@ task_allocation/
 
 .ipynb_checkpoints
 */.ipynb_checkpoints/*
+
+scratch.ipynb
+
+*.ipynb
