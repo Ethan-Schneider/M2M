@@ -3,6 +3,7 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
     # Update state of robots
     for robot in Rs:
         # If robot sequence is stationary, leave the robot in place (wait action)
+        # BUG: list index out of range crashes
         if len(robot_sequences[robot[0]]) == 0:
             continue
         # If robot does have a sequence of actions, pop next state and update
@@ -10,6 +11,8 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
             Rs[robot[0]] = (robot[0], robot_sequences[robot[0]].pop(0))
 
     # Update free_agents, to_pickup, and to_delivery
+    # TODO: Add G as input to function.
+    # TODO: Update warehouse and driveway inventory when a robot has reached goal location (i.e. for both for loops below) 
 
     robot_ids = []
     # Update to_pickup -> to_delivery

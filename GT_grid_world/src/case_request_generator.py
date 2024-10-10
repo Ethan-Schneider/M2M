@@ -2,21 +2,32 @@ import numpy as np
 from .graph import Graph
 from .item import ItemCategory
     
-def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, strategy: str = "uniform") -> set:
+def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, max_task_number : int, strategy: str = "uniform") -> tuple[set, int]:
     """_summary_
 
     Args:
-        J (set): Current set of tasks
-        G (Graph)
+        J (set): _description_
+        G (Graph): _description_
         N (int): _description_
-        strategy (str, optional): _description_. Defaults to uniform.
+        inbound_to_outbound (float): _description_
+        last_task_id (int): _description_
+        max_task_number (int): _description_
+        strategy (str, optional): _description_. Defaults to "uniform".
+
+    Raises:
+        Exception: _description_
+        Exception: _description_
 
     Returns:
-        set: _description_
+        tuple[set, int]: _description_
     """
     
     #TODO: Add logic for skipping task generation is no more tasks can be generated on the map (e.g. every location has some task assigned to it, 
     # all warehouse locations are full of items so no more inbound tasks can be generated, etc.)
+    
+    # BUG: This causes error with tasks having the same start or goal location bc it is allowing so many tasks to be generated that it is less likely that the router will have to deal with a same location bug
+    # if len(J) > max_task_number:
+    #     return J, last_task_id
     
     inbound_probability = inbound_to_outbound/(inbound_to_outbound + 1)
     outbound_probability = 1 - inbound_probability
@@ -28,7 +39,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
         for task in tasks_to_generate:
             #Generate inbound task
             if task == 1:
-                J_new = J_new | set([(last_task_id + 1, np.random.choice(np.arange(G.driveway.max_pos)), np.random.choice(np.arange(G.warehouse.max_pos)))])
+                J_new.add((last_task_id + 1, np.random.choice(np.arange(G.driveway.max_pos)), np.random.choice(np.arange(G.warehouse.max_pos))))
                 last_task_id += 1
             #Generate outbound task
             elif task == 0:
@@ -46,10 +57,10 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
         # Generate list of locations involved in a current task
         current_task_locations = set()
         for task in J:
-            current_task_locations |= set(task)
-            current_task_locations |= set(task)
+            current_task_locations.add(task)
+            current_task_locations.add(task)
         
-        
+        # TODO: Add a VIRTUAL_ITEM to locations in which an item will be brought to in the warehouse 
         for i, item in enumerate(items):
             if tasks_to_generate[i] == 0:
                 # Generate locations for item pickup that are not part of a task yet
@@ -62,10 +73,10 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 
-                J_new |= set([(last_task_id, pickup_location, dropoff_location)])
+                J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
                 
-                current_task_locations |= set((pickup_location, dropoff_location))
+                current_task_locations.add((pickup_location, dropoff_location))
                 
             elif tasks_to_generate[i] == 1:
                 # Generate locations for item pickup that are not part of a task yet
@@ -78,10 +89,10 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 
-                J_new |= set([(last_task_id, pickup_location, dropoff_location)])
+                J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
                 
-                current_task_locations |= set((pickup_location, dropoff_location))
+                current_task_locations.add((pickup_location, dropoff_location))
             else:
                 raise Exception("Error: Item has been designated neither an inbound or outbound task.")
         

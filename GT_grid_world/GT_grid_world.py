@@ -2,6 +2,7 @@ from src import graph, simulate, task_allocation, case_request_generator, router
     
 def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
+            max_task_number : int = 20,
             task_assignment_strategy : str = "closest_robot",
             path_planning_strategy : str = "ecbs"):
     # Unpack Robot State (Rs) and Graph (G)
@@ -23,6 +24,7 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
     free_agents = set([robot[0] for robot in Rs])
     
     for t in range(T):
+        print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
         if t%frequency == 0:
             if frequency >= 1.: 
@@ -32,20 +34,23 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
             else:
                 N = 0
             # Generate new tasks
-            J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, case_request_strategy)
+            J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
             # Append the new tasks to the list of tasks
             J |= J_new
-            
+        total_locations = set()
+        print("Tasks: ")
         # Assign unassigned tasks to robots
+        print("Task Allocation")
         Ra, to_pickup, free_agents = task_allocation.TaskAllocation(Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
-
+        print("Routing")
         robot_sequences = router.pathPlan(G, Rs, Ra, J, path_planning_strategy, to_pickup, to_delivery, free_agents)
-        
+        print("Taking Step")
         Rs, Ra, J, to_pickup, to_delivery, free_agents, robot_path_sequences = simulate.simulate(Rs, robot_sequences, Ra, J, to_delivery, to_pickup, free_agents, robot_path_sequences)
         
     return robot_path_sequences
         
 def main():
+    # Init graph with number of robot, map file, DOF, deterministic, warehouse initialization strategy, warehouse initial capacity number
     G = graph.Graph(8, "GT_grid_world/src/maps/symbotic_small", 4, True, "uniform", 25.)
     
     #Initilize state of robots (robot_id, state)
@@ -60,6 +65,7 @@ def main():
     inbound_outbound_ratio = 1.0
     T = 40
     task_generation_strategy = "informed_uniform"
+    max_current_tasks = 30
     
     task_assignment_strategy = "random"
     
@@ -67,7 +73,7 @@ def main():
     
     # Execute online algorithm
     paths = execute((Rs_init, G), frequency, inbound_outbound_ratio, T, 
-            task_generation_strategy, task_assignment_strategy, path_planning_strategy)      
+            task_generation_strategy, max_current_tasks, task_assignment_strategy, path_planning_strategy)      
     
     visualize.main((G.width, G.height), G.obstacles, paths, speed=4)
 
