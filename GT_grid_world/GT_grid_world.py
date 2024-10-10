@@ -39,14 +39,10 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
             # Append the new tasks to the list of tasks
             J |= J_new
             
-        print("========================== Prior to TA ==========================")
         # Assign unassigned tasks to robots
         Ra, to_pickup, free_agents = task_allocation.TaskAllocation(Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
-        print("========================== Prior to MAPF ==========================")
 
         robot_sequences = router.pathPlan(G, Rs, Ra, J, path_planning_strategy, to_pickup, to_delivery, free_agents)
-        
-        print("========================== Prior to Simulating ==========================")
         
         Rs, Ra, J, to_pickup, to_delivery, free_agents, robot_path_sequences = simulate.simulate(Rs, robot_sequences, Ra, J, to_delivery, to_pickup, free_agents, robot_path_sequences)
         
@@ -76,9 +72,7 @@ def main():
     paths = execute((Rs_init, G), frequency, inbound_outbound_ratio, T, 
             task_generation_strategy, task_assignment_strategy, path_planning_strategy)      
     
-    visualize.main((G.width, G.height), G.obstacles, paths)
-    
-    print("Paths: ", paths)  
+    visualize.main((G.width, G.height), G.obstacles, paths, speed=4)
 
 
 if __name__=="__main__":

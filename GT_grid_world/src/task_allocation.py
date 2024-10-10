@@ -7,7 +7,7 @@ def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str
     
     # ------ closest robot to closest task
     # compute the distance from a task to every robot's current location
-    print("Beginning")
+    
     if task_assignment_strategy == "closest_robot":
         # TODO: Fix closest_robot stategy: Bug involves index of the cost_tensor not matching the task_id number
         # Algorithm assigns the closest task to the closest agent at every time-step
@@ -91,10 +91,10 @@ def TaskAllocation(Rs : list, Ra : list, J : set, task_assignment_strategy : str
             assigned_robot_ids |= set([assignment[-1]])
         unassigned_robot_ids = set(np.arange(0, len(Rs))) - assigned_robot_ids
         
-        if len(unassigned_robot_ids) < 0:
-            return Ra
-        elif len(unassigned_task_ids) < 0:
-            return Ra
+        if len(unassigned_robot_ids) <= 0:
+            return Ra, to_pickup, free_agents
+        elif len(unassigned_task_ids) <= 0:
+            return Ra, to_pickup, free_agents
         else:
             pass
         

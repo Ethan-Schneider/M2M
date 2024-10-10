@@ -18,13 +18,11 @@ def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_
                 for assignment in Ra:
                     if assignment[1] == robot_id:
                         task_id = assignment[0]
-                print("Robot task_id: ", task_id)
                 # Get assigned task's start location
                 start_loc = (-1, -1)
                 for task in J:
                     if task[0] == task_id:
                         start_loc = task[1]
-                print("Robot start location: ", start_loc)
                 goal_locations.append((robot_id, start_loc))
                 
             # If robot is going to delivery, set goal location to the task's goal location
@@ -46,23 +44,12 @@ def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_
             else:
                 goal_locations.append((robot_id, robot[1]))
                 
-        
-        print("to_pickup: ", to_pickup)
-        print("to_delivery: ", to_delivery)
-        print("free_agents: ", free_agents)
-        print("Tasks: ", J)
-        print("Ra: ", Ra)
-        print("Rs: ", Rs)
-                
         goal_locations.sort()
         goal_locations = [x[1] for x in goal_locations]
-        print("Goal Locations: ", goal_locations)
         sequences = eecbs.test_cpp_func("GT_grid_world/src/maps/symbotic_small", len(Rs), 60, 1.2, states, goal_locations)
         
         # Remove first item in sequences, as they are the robot's current location
         for sequence in sequences:
             sequence.pop(0)
-        
-        print("Sequences: ", sequences)
         
         return sequences

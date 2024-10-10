@@ -2,7 +2,6 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
 
     # Update state of robots
     for robot in Rs:
-        print("Robot: ", robot)
         # If robot sequence is stationary, leave the robot in place (wait action)
         if len(robot_sequences[robot[0]]) == 0:
             continue
@@ -72,7 +71,5 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
     # Update robot_path_sequences
     for i, robot in enumerate(Rs):
         robot_path_sequences[i].append(robot[1])
-        
-    print("Robot Path Sequences: ", robot_path_sequences)
             
     return Rs, Ra, J, to_pickup, to_delivery, free_agents, robot_path_sequences
