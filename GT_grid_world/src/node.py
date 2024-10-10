@@ -1,5 +1,3 @@
-import numpy as np
-
 class Node:
     def __init__(self, cost, occupied = False, obstacle = False) -> None:
         self.__cost = cost

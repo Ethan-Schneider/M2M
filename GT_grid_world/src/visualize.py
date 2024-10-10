@@ -1,15 +1,7 @@
-#!/usr/bin/env python3
-import yaml
-import matplotlib
-# matplotlib.use("Agg")
-from matplotlib.patches import Circle, Rectangle, Arrow
-from matplotlib.collections import PatchCollection
+from matplotlib.patches import Circle, Rectangle
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib import animation
-import matplotlib.animation as manimation
-import argparse
-import math
 
 Colors = ['orange', 'blue', 'green']
 
@@ -141,29 +133,5 @@ def main(map_dimensions : tuple, obstacles : list, schedule : list, video : str 
   
   if video:
     animation.save(video, speed)
-  else:
-    animation.show()
-      
-
-
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("map", help="input file containing map")
-  parser.add_argument("schedule", help="schedule for agents")
-  parser.add_argument('--video', dest='video', default=None, help="output video file (or leave empty to show on screen)")
-  parser.add_argument("--speed", type=int, default=1, help="speedup-factor")
-  args = parser.parse_args()
-
-
-  with open(args.map) as map_file:
-    map = yaml.load(map_file, Loader=yaml.FullLoader)
-
-  with open(args.schedule) as states_file:
-    schedule = yaml.load(states_file, Loader=yaml.FullLoader)
-
-  animation = Animation(map, schedule)
-
-  if args.video:
-    animation.save(args.video, args.speed)
   else:
     animation.show()

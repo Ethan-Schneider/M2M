@@ -1,7 +1,4 @@
-import os
-import numpy as np
-
-from src import graph, simulate, task_allocation, case_request_generator, item, router, visualize
+from src import graph, simulate, task_allocation, case_request_generator, router, visualize
     
 def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
