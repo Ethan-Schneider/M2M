@@ -39,6 +39,15 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
             J |= J_new
         total_locations = set()
         print("Tasks: ")
+        for task in J:
+            print(task)
+            if task[1] in total_locations:
+                print("REPEATED LOCATION: ", task[1])
+            if task[2] in total_locations:
+                print("REPEATED LOCATION: ", task[2])
+            total_locations.add(task[1])
+            total_locations.add(task[2])
+        print(len(total_locations))
         # Assign unassigned tasks to robots
         print("Task Allocation")
         Ra, to_pickup, free_agents = task_allocation.TaskAllocation(Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
