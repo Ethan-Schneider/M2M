@@ -22,7 +22,7 @@ def execute(I: tuple, frequency : float, inbound_to_outbound_ratio: float,
     to_pickup = set([])
     to_delivery = set([])
     free_agents = set([robot[0] for robot in Rs])
-    
+    # Commit
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
