@@ -84,7 +84,7 @@ def main():
     paths = execute((Rs_init, G), frequency, inbound_outbound_ratio, T, 
             task_generation_strategy, max_current_tasks, task_assignment_strategy, path_planning_strategy)      
     
-    visualize.main((G.width, G.height), G.obstacles, paths, speed=4)
+    visualize.main((G.width, G.height), G.obstacles, paths, 'output8.avi', speed=4)
 
 
 if __name__=="__main__":

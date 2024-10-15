@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 from .node import Node
 from .inventory import Inventory
