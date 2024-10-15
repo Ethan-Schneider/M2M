@@ -4,3 +4,6 @@
 [submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/EECBS"]
 	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/EECBS
 	url = https://github.com/Ethan-Schneider/EECBS.git
+[submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/PBS"]
+	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/PBS
+	url = https://github.com/Ethan-Schneider/PBS.git
