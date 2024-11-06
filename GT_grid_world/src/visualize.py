@@ -18,7 +18,7 @@ class Animation:
     self.schedule = schedule
     self.combined_schedule = schedule
     
-    self.fig = plt.figure(frameon=False, figsize=(map_size[0], map_size[1]))
+    self.fig = plt.figure(frameon=False, figsize=(16, 9), dpi=1920/16)
     self.ax = self.fig.add_subplot(111, aspect='equal')
     self.fig.subplots_adjust(left=0,right=1,bottom=0,top=1, wspace=None, hspace=None)
     # self.ax.set_frame_on(False)
@@ -53,7 +53,7 @@ class Animation:
       self.agents[name].original_face_color = Colors[0]
       self.patches.append(self.agents[name])
       self.T = max(self.T, schedule[name][-1]['t'])
-      self.agent_names[name] = self.ax.text(schedule[agent][0]['x'], schedule[agent][0]['y'], name.replace('agent', ''))
+      self.agent_names[name] = self.ax.text(schedule[agent][0]['x'], schedule[agent][0]['y'], name.replace('agent', ''), color='red')
       self.agent_names[name].set_horizontalalignment('center')
       self.agent_names[name].set_verticalalignment('center')
       self.artists.append(self.agent_names[name])

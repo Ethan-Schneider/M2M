@@ -57,19 +57,26 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
         # Generate list of locations involved in a current task
         current_task_locations = set()
         for task in J:
-            current_task_locations.add(task)
-            current_task_locations.add(task)
+            current_task_locations.add(task[1])
+            current_task_locations.add(task[2])
+            
+        # print("Current Task Locations: =================", current_task_locations)
         
-        # TODO: Add a VIRTUAL_ITEM to locations in which an item will be brought to in the warehouse 
         for i, item in enumerate(items):
             if tasks_to_generate[i] == 0:
                 # Generate locations for item pickup that are not part of a task yet
                 locations_for_item = list(set(G.warehouse.find(item)) - current_task_locations)
+                if not locations_for_item:
+                    continue
+                
                 # Uniformly choose a pickup location
                 pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
                 
                 # Generate locations for item dropoff that are not part of a task
                 locations_for_dropoff = list(set(G.driveway.findEmpty()) - current_task_locations)
+                if not locations_for_dropoff:
+                    continue
+                
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 
@@ -81,11 +88,16 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
             elif tasks_to_generate[i] == 1:
                 # Generate locations for item pickup that are not part of a task yet
                 locations_for_item = list(set(G.driveway.findEmpty()) - current_task_locations)
+                if not locations_for_item:
+                    continue
                 # Uniformly choose a pickup location
                 pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
                 
                 # Generate locations for item dropoff that are not part of a task
                 locations_for_dropoff = list(set(G.warehouse.findEmpty()) - current_task_locations)
+                if not locations_for_dropoff:
+                    continue
+                    
                 # Uniformly choose a dropoff location
                 dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
                 

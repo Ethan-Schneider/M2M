@@ -1,17 +1,41 @@
-def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery : set, to_pickup : set, free_agents : set, robot_path_sequences : list):
+from .statistics import Stats
+from .graph import Graph
+from .utils import euclidian_distance, get_assigned_task_id
 
+def simulate(S : Stats, G : Graph, Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery : set, to_pickup : set, free_agents : set):
+
+    robot_new_states = []
     # Update state of robots
     for robot in Rs:
         # If robot sequence is stationary, leave the robot in place (wait action)
-        # BUG: list index out of range crashes
+        # BUG: crashes when router fails to find a solution 
         if len(robot_sequences[robot[0]]) == 0:
+            robot_new_states.append(robot[-1])
             continue
         # If robot does have a sequence of actions, pop next state and update
         else:
-            Rs[robot[0]] = (robot[0], robot_sequences[robot[0]].pop(0))
+            old_state = robot[-1]
+            new_state = robot_sequences[robot[0]].pop(0)
+            Rs[robot[0]] = (robot[0], new_state)
+            robot_new_states.append(new_state)
+            
+            # Update Graph occupied states
+            G.set_occupied(old_state, False)
+            G.set_occupied(new_state, True)
+            
+            if robot[0] in to_pickup:
+                S.update_actual_pickup_distance(get_assigned_task_id(Ra, robot[0]), euclidian_distance(old_state, new_state))
+                S.update_actual_pickup_duration(get_assigned_task_id(Ra, robot[0]), euclidian_distance(old_state, new_state))
+            elif robot[0] in to_delivery:
+                S.update_actual_distance(get_assigned_task_id(Ra, robot[0]), euclidian_distance(old_state, new_state))
+                S.update_actual_duration(get_assigned_task_id(Ra, robot[0]), euclidian_distance(old_state, new_state))
+            else:
+                pass
 
+    # Update Statistics for the total paths taken
+    S.add_paths(robot_new_states)
+    
     # Update free_agents, to_pickup, and to_delivery
-    # TODO: Add G as input to function.
     # TODO: Update warehouse and driveway inventory when a robot has reached goal location (i.e. for both for loops below) 
 
     robot_ids = []
@@ -34,6 +58,9 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
         # Check if robot.state == start_location, if so remove robot from to_pickup and add to_delivery
         if robot_state == start_loc:
             robot_ids.append(robot)
+            
+            # Update Statistics
+            S.add_completed_to_pickup_task_id(task_id)
             
     for id in robot_ids:
         to_pickup.remove(id)
@@ -66,13 +93,11 @@ def simulate(Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery 
             robot_ids.append(robot)
             J.remove(current_task)
             Ra.remove(current_allocation)
+            # Update Statistics For Completed Tasks
+            S.add_completed_task_id(current_task[0])
             
     for id in robot_ids:
         to_delivery.remove(id)
         free_agents.add(id)
             
-    # Update robot_path_sequences
-    for i, robot in enumerate(Rs):
-        robot_path_sequences[i].append(robot[1])
-            
-    return Rs, Ra, J, to_pickup, to_delivery, free_agents, robot_path_sequences
+    return Rs, Ra, J, to_pickup, to_delivery, free_agents

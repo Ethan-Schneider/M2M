@@ -59,7 +59,7 @@ class Inventory:
         output = {x: self.__inventory[x] for x in range(len(self.__inventory))}
         with open("GT_grid_world/data/file.json", "w+", encoding='utf-8') as f:
             json.dump(output, f, ensure_ascii=False, indent=4)
-        
+    
     def findEmpty(self) -> list:
         empty = []
         for i, item in enumerate(self.__inventory):

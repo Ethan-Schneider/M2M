@@ -1,7 +1,7 @@
 from src.path_finding_algorithms.external_algorithms.EECBS import eecbs
 from src.path_finding_algorithms.external_algorithms.PBS import pbs
 
-def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set) -> list:
+def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set) -> list:
     if path_planning_strategy == "ecbs":
         states = [robot[1] for robot in Rs]
 
@@ -44,7 +44,7 @@ def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_
                 
         goal_locations.sort()
         goal_locations = [x[1] for x in goal_locations]
-        sequences = eecbs.test_cpp_func("GT_grid_world/src/maps/symbotic_small", len(Rs), 60, 1.2, states, goal_locations)
+        sequences = eecbs.test_cpp_func(map, len(Rs), 60, 1.2, states, goal_locations)
         
         # Remove first item in sequences, as they are the robot's current location
         for sequence in sequences:
@@ -93,7 +93,9 @@ def pathPlan(G, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_
                 
         goal_locations.sort()
         goal_locations = [x[1] for x in goal_locations]
-        sequences = pbs.test_cpp_func("GT_grid_world/src/maps/symbotic_small", len(Rs), 60, 1.2, states, goal_locations)
+        sequences = pbs.test_cpp_func(map, len(Rs), 60, 1.2, states, goal_locations)
+        
+        
         
         # Remove first item in sequences, as they are the robot's current location
         for sequence in sequences:

@@ -1,5 +1,4 @@
 import numpy as np
-import os
 
 from .node import Node
 from .inventory import Inventory
@@ -11,15 +10,8 @@ class Graph:
         else:
             self.__DOF = DOF
         self.__deterministic = deterministic
-        self.__num_robots =  num_robots
-        
-        if not file_name:
-            self.height = args[0]
-            self.width = args[1]
-            self.obstacles = args[2]
-            self.__graph = self.__initialize_graph(ROWS, COLS, obstacles)
-        else:
-            self.__graph = self.__load_graph(file_name, args[0], args[1])
+        self.__num_robots = num_robots
+        self.__graph = self.__load_graph(file_name, args[0], args[1])
         
     def __load_graph(self, filename : str, warehouse_strategy : str, initial_warehouse_capacity : float):
         """This method takes in a map file, parses the metadata and map data, 
@@ -105,24 +97,8 @@ class Graph:
             robot_start_locations.remove(location)
         
         return np.asarray(graph)
-
     
-    def __initialize_graph(self, ROWS, COLS, obstacles):
-        graph = []
-        cost = 4
-        for i, row in enumerate(range(ROWS)):
-            row = []
-            for j, col in enumerate(range(COLS)):
-                if (i, j) in obstacles:
-                    obstacle = True
-                else:
-                    obstacle = False
-                row.append(Node(cost, occupied=False, obstacle=obstacle))
-            graph.append(row)
-        graph = np.asarray(graph)
-        return graph
-    
-    def get_neighbors(self, node: tuple) -> list:
+    def get_neighbors(self, node: tuple, ignore_robots : False) -> list:
         """Returns list of non-occupied neighbor nodes in order (N, E, S, W).
 
         Args:
@@ -138,27 +114,44 @@ class Graph:
             raise Exception("Node %s is out of range of graph with shape %s" % (node, self.__graph.shape))
         
         north = (node[0]-1, node[1])
-        if north[0] < 0  or self.__get_if_occupied(north):
-            north = None
-            
         east = (node[0], node[1]+1)
-        if east[1] == self.__graph.shape[1] or self.__get_if_occupied(east):
-            east = None
-            
         south = (node[0]+1, node[1])
-        if south[0] == self.__graph.shape[0] or self.__get_if_occupied(south):
-            south = None   
-        
         west = (node[0], node[1]-1)
-        if west[1] < 0 or self.__get_if_occupied(west):
-            west = None
         
+        if ignore_robots: 
+            if north[0] < 0  or self.__get_if_obstacle(north):
+                north = None
+                
+            if east[1] == self.__graph.shape[1] or self.__get_if_obstacle(east):
+                east = None
+                
+            if south[0] == self.__graph.shape[0] or self.__get_if_obstacle(south):
+                south = None   
+            
+            if west[1] < 0 or self.__get_if_obstacle(west):
+                west = None            
+        else:
+            if north[0] < 0  or self.__get_if_occupied(north):
+                north = None
+                
+            if east[1] == self.__graph.shape[1] or self.__get_if_occupied(east):
+                east = None
+                
+            if south[0] == self.__graph.shape[0] or self.__get_if_occupied(south):
+                south = None   
+            
+            if west[1] < 0 or self.__get_if_occupied(west):
+                west = None
+            
         neighbors = [north, east, south, west]
+        # Remove neighbors which go into obstacles or beyond the border of the map
         neighbors = [x for x in neighbors if x is not None]
-        
         return neighbors
     
     def __get_if_occupied(self, node: tuple) -> bool:
+        return self.__graph[node[0], node[1]].get_occupied()
+    
+    def __get_if_obstacle(self, node: tuple) -> bool:
         return self.__graph[node[0], node[1]].get_occupied()
     
     def get_all_occupied(self) -> list:
@@ -177,8 +170,12 @@ class Graph:
                     unoccupied.append((row, col))
         return unoccupied
     
+    def set_occupied(self, node : tuple, occupied : bool) -> None:
+        self.__graph[node[0], node[1]].set_occupied(occupied)
+    
     def get_cost(self, loc1, loc2): 
         return self.__graph[loc2[0], loc2[1]].get_cost()
+        
     
     def draw_tile(self, id, style):
         r = " . "
