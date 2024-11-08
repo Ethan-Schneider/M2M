@@ -253,8 +253,55 @@ def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duratio
     plt.savefig("data/figures/to_pickup_duration_graph.png", bbox_inches='tight', dpi=300)
     plt.clf()
     
+def actual_estimated_total_duration(actual_duration : list, estimate_duration : list) -> None:
+    actual_duration = np.asarray(actual_duration).reshape(-1, 1)
+    estimate_duration = np.asarray(estimate_duration)
+    
+    N = len(actual_duration)
+    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+
+    X_with_intercept = np.empty(shape=(N, p))
+    X_with_intercept[:, 0] = 1
+    X_with_intercept[:, 1:p] = actual_duration
+
+    ols = sm.OLS(estimate_duration, X_with_intercept)
+    ols_result = ols.fit()
+    results_summary = ols_result.summary()
+
+    results_as_html = results_summary.tables[1].as_html()
+    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+
+    linear_regression = df['coef'].to_list()
+    lower_std = df['[0.025'].to_list()
+    upper_std = df['0.975]'].to_list()
+
+    plt.scatter(actual_duration, estimate_duration)
+    plt.xlabel("Actual Duration (s)")
+    plt.ylabel("Estimated Duration (s)")
+    plt.title("Actual Duration (s) vs. Estimated Duration (s) Total with 2 X Standard Deviation")
+    plt.xlim((0, 360))
+    plt.ylim((0, 360))
+
+
+    x = np.linspace(0, 350, 100)
+    y = linear_regression[1]*x + linear_regression[0]
+    plt.plot(x, y, 'k')
+
+
+    y = lower_std[1]*x + lower_std[0]
+    plt.plot(x, y, '--r')
+
+    y = upper_std[1]*x + upper_std[0]
+    plt.plot(x, y, '--r')
+
+    ols_result.summary()
+    
+    plt.savefig("data/figures/total_task_duration_graph.png", bbox_inches='tight', dpi=300)
+    plt.clf()
+    
 #endregion
 
+#region Runtime Graphs
 def runtime_over_time(CRG_runtime : list, TA_runtime : list, PF_runtime : list, SIM_runtime : list) -> None:
     plt.plot(np.arange(len(CRG_runtime)), CRG_runtime, '-', label="Task Generation")
     plt.plot(np.arange(len(TA_runtime)), TA_runtime, '-', label="Task Allocation")
@@ -276,13 +323,19 @@ def runtime_pie_chart(CRG_runtime : list, TA_runtime : list, PF_runtime : list, 
     other_runtime = total_runtime - np.sum(CRG_runtime) - np.sum(TA_runtime) - np.sum(PF_runtime)
     
     data = np.asarray([np.sum(CRG_runtime), np.sum(TA_runtime), np.sum(PF_runtime), other_runtime])
-    labels = ["Task Generation", "Task Assignment", "Path Planning", "Other"]
+    labels = ["Task Generation: " + str(np.round((np.sum(CRG_runtime)/total_runtime)*100, 1)) + '%', \
+        "Task Assignment: " + str(np.round((np.sum(TA_runtime)/total_runtime)*100, 1)) + '%', 
+        "Path Planning: " + str(np.round((np.sum(PF_runtime)/total_runtime)*100, 1)) + '%', 
+        "Other: " + str(np.round((np.sum(other_runtime)/total_runtime)*100, 1)) + '%']
     
     plt.pie(data, labels=labels, startangle=90)
     plt.savefig("data/figures/total_runtime_pie_chart", bbox_inches='tight', dpi=300)
     plt.clf()
     
+#endregion
     
+#region Idle Graph
+
 def idle_robots_over_timesteps(paths : list) -> None:
     num_idle_robots = [len(paths)]
     
@@ -305,5 +358,6 @@ def idle_robots_over_timesteps(paths : list) -> None:
     plt.savefig("data/figures/number_of_idle_robots_over_time", bbox_inches='tight', dpi=300)
     plt.clf()
     
-    
+#endregion
+
 # TODO: Generate graphs (same as the distance ones) for the duration of a task

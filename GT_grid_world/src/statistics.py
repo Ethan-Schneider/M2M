@@ -319,10 +319,25 @@ class Stats:
             
         # actual_estimated_total_distance(total_actual_distance, total_estimate_distance)
         
+        # Duration Graphs
         actual_estimated_duration(list(self.__actual_duration.values()), list(self.__estimated_duration.values()))
         actual_estimated_to_pickup_duration(list(self.__actual_pickup_duration.values()), list(self.__estimated_pickup_duration.values()))
         
+        total_actual_duration = []
+        total_estimate_duration = []
+        actual_task_duration = list(self.__actual_duration.values())
+        actual_to_pickup_duration = list(self.__actual_pickup_duration.values())
+        estimate_task_duration = list(self.__estimated_duration.values())
+        estimate_to_pickup_duration = list(self.__estimated_pickup_duration.values())
+        for i in range(len(list(self.__actual_duration))):
+            total_actual_duration.append(actual_task_duration[i]+actual_to_pickup_duration[i])
+            total_estimate_duration.append(estimate_task_duration[i]+estimate_to_pickup_duration[i])
+        actual_estimated_total_duration(total_actual_duration, total_estimate_duration)
+        
+        # Runtime Graphs
         runtime_over_time(self.__CRG_time, self.__TA_time, self.__PF_time, self.__SIM_time)
         runtime_pie_chart(self.__CRG_time, self.__TA_time, self.__PF_time, self.__total_runtime)
+        
+        # Idle Time Graph
         idle_robots_over_timesteps(self.__paths)
         

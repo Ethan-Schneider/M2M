@@ -98,7 +98,7 @@ class Graph:
         
         return np.asarray(graph)
     
-    def get_neighbors(self, node: tuple, ignore_robots : False) -> list:
+    def get_neighbors(self, node: tuple, ignore_robots : bool = False) -> list:
         """Returns list of non-occupied neighbor nodes in order (N, E, S, W).
 
         Args:
@@ -200,6 +200,18 @@ class Graph:
                 print("%s" % self.draw_tile((x, y), style), end="")
             print()
         print("~~~" * self.width)
+        
+    def draw_graph(self):
+        for row in range(self.__graph.shape[0]):
+            for col in range(self.__graph.shape[1]):
+                if self.__graph.shape[row][col].get_obstacle():
+                    print("@")
+                elif self.__graph.shape[row][col].get_occupied():
+                    print("r")
+                else:
+                    print(".")
+            print("\n")
+                    
 
 def main():
     g = Graph(20, 20, 4, [(1, 19), (1, 18), (1, 17), 

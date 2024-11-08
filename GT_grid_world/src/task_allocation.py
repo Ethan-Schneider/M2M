@@ -1,8 +1,9 @@
 import numpy as np
 from .statistics import Stats
+from .graph import Graph
 from .utils import get_assigned_task_id, get_robot_state, get_task_start_location, get_task_goal_location, a_star
 
-def TaskAllocation(S : Stats, G, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set):
+def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set):
     # make a set of all tasks that are not currently allocated
     
     # if statement for which strategy will be used
@@ -151,6 +152,8 @@ def TaskAllocation(S : Stats, G, Rs : list, Ra : list, J : set, task_assignment_
         for unassigned_robot_id in unassigned_robot_ids:
             robot_cost = []
             for unassigned_task_id in unassigned_task_ids:
+                # In-case a_star breaks and does not return a solution, try again
+                # TODO: Debug a_start implementation for why this occurs so infrequently
                 path = a_star(G, get_robot_state(Rs, unassigned_robot_id), get_task_start_location(J, unassigned_task_id))
                 
                 if not path:
@@ -166,10 +169,15 @@ def TaskAllocation(S : Stats, G, Rs : list, Ra : list, J : set, task_assignment_
             Ra.append((list(unassigned_task_ids)[min_index_col], list(unassigned_robot_ids)[min_index_row]))
             S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
             S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
-            estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
-            if not estimated_task_path:
-                print(get_task_start_location(J, list(unassigned_task_ids)[min_index_col])) 
-                print(get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+            while True:
+                estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+                if estimated_task_path:
+                    break
+                elif not estimated_task_path:
+                    G.draw_graph()
+                    print(get_task_start_location(J, list(unassigned_task_ids)[min_index_col])) 
+                    print(get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+
             S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
             S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
             

@@ -82,21 +82,21 @@ def main():
     initial_inventory_amount = 25.
 
     task_generation_strategy = "informed_uniform"
-    max_current_tasks = 30
+    max_current_tasks = 40
     
     task_assignment_strategy = "a_star"
     
     path_planning_strategy = "pbs"
     
-    map = "GT_grid_world/src/maps/symbotic_large"
+    map = "GT_grid_world/src/maps/symbotic_large_w_top"
     
-    num_robots = 10
+    num_robots = 40
     DOF = 4
     
     # Init graph with number of robot, map file, DOF, deterministic, warehouse initialization strategy, warehouse initial capacity number
     G = graph.Graph(num_robots, map, DOF, True, "uniform", initial_inventory_amount)
     
-    T = 100
+    T = 3600
     S = statistics.Stats(num_robots, T)
     
     #Initilize state of robots (robot_id, state)

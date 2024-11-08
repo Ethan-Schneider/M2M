@@ -97,5 +97,4 @@ class AStar():
 
                 g_score[neighbor] = tentative_g_score
                 f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, current)
-        print(len(closed_set))
         return False
