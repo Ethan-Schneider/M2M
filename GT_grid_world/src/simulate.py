@@ -31,7 +31,9 @@ def simulate(S : Stats, G : Graph, Rs : list, robot_sequences : list, Ra : list,
                 S.update_actual_duration(get_assigned_task_id(Ra, robot[0]), euclidian_distance(old_state, new_state))
             else:
                 pass
-
+    
+    S.append_number_of_collisions(len(Ra) - len(set(Ra)))
+    
     # Update Statistics for the total paths taken
     S.add_paths(robot_new_states)
     

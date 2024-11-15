@@ -2,7 +2,7 @@ from src.path_finding_algorithms.external_algorithms.EECBS import eecbs
 from src.path_finding_algorithms.external_algorithms.PBS import pbs
 from src.path_finding_algorithms.external_algorithms.MAPF_PC import mgpbs
 
-def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set) -> list:
+def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set, previous_sequence : list) -> list:
     if path_planning_strategy == "ecbs":
         states = [robot[1] for robot in Rs]
 
@@ -96,6 +96,8 @@ def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy
         goal_locations = [x[1] for x in goal_locations]
         sequences = pbs.test_cpp_func(map, len(Rs), 60, 1.2, states, goal_locations)
         
+        if not sequences:
+            return previous_sequence
         
         # Remove first item in sequences, as they are the robot's current location
         for sequence in sequences:
@@ -146,8 +148,10 @@ def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy
         goal_locations.sort()
         goal_locations = [x[0][1] for x in goal_locations]
         sequences = mgpbs.test_cpp_func(map, len(Rs), 60, 1.2, states, goal_locations)
-        
-        
+        print("+++++++++++++++++++Robot Sequence is: ", sequences)
+        if len(sequences) < 2:
+            print("++++++++++++++++++++++++++++++++Skipping Routing++++++++++++++++++++++++++++++++")
+            return previous_sequence
         # Remove first item in sequences, as they are the robot's current location
         for sequence in sequences:
             sequence.pop(0)

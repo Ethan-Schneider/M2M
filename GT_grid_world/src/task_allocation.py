@@ -3,7 +3,7 @@ from .statistics import Stats
 from .graph import Graph
 from .utils import get_assigned_task_id, get_robot_state, get_task_start_location, get_task_goal_location, a_star
 
-def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set):
+def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set, hash_map : dict = {}):
     # make a set of all tasks that are not currently allocated
     
     # if statement for which strategy will be used
@@ -141,9 +141,9 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
         
         
         if len(unassigned_robot_ids) <= 0:
-            return Ra, to_pickup, free_agents
+            return Ra, to_pickup, free_agents, True
         elif len(unassigned_task_ids) <= 0:
-            return Ra, to_pickup, free_agents
+            return Ra, to_pickup, free_agents, True
         else:
             pass
         
@@ -163,30 +163,57 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
             cost_matrix.append(robot_cost)
         
         # Assign tasks from cost matrix
+        is_solution = True
         cost_matrix = np.asarray(cost_matrix, dtype=float)    
-        for unassigned_robot_id in unassigned_robot_ids:
-            min_index_row, min_index_col = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
-            Ra.append((list(unassigned_task_ids)[min_index_col], list(unassigned_robot_ids)[min_index_row]))
-            S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
-            S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
-            while True:
-                estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
-                if estimated_task_path:
+        try: 
+            for unassigned_robot_id in unassigned_robot_ids:
+                # try: 
+                min_index_row, min_index_col = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
+                Ra.append((list(unassigned_task_ids)[min_index_col], list(unassigned_robot_ids)[min_index_row]))
+                S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
+                S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
+                while True:
+                    estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+                    if estimated_task_path:
+                        break
+                    elif not estimated_task_path:
+                        # G.draw_graph()
+                        print(get_task_start_location(J, list(unassigned_task_ids)[min_index_col])) 
+                        print(get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+                        is_solution = False
+                        break
+                if is_solution:
+                    S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
+                    S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
+                else:
+                    S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], np.Infinity)
+                    S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], np.Infinity)
+                is_solution = True
+                
+                cost_matrix[:, min_index_col] = np.inf
+                cost_matrix[min_index_row, :] = np.inf
+                
+                unassigned_task_ids.remove(list(unassigned_task_ids)[min_index_col])
+                if len(unassigned_task_ids) == 0:
                     break
-                elif not estimated_task_path:
-                    G.draw_graph()
-                    print(get_task_start_location(J, list(unassigned_task_ids)[min_index_col])) 
-                    print(get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
-
-            S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
-            S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
-            
-            cost_matrix[:, min_index_col] = np.inf
-            cost_matrix[min_index_row, :] = np.inf
-            
-            unassigned_task_ids.remove(list(unassigned_task_ids)[min_index_col])
-            if len(unassigned_task_ids) == 0:
-                break
+        except:
+            return Ra, to_pickup, free_agents, False
+            # except:
+            #     print("++++++++++++++++++++++++++++++++Skipping Allocation++++++++++++++++++++++++++++++++")
+            #     for task in Ra:
+            #         robot_id = task[-1]
+            #         if robot_id in free_agents:
+            #             free_agents.remove(robot_id)
+            #             to_pickup.add(robot_id)
+                        
+            #             S.add_actual_distance(get_assigned_task_id(Ra, robot_id))
+            #             S.add_actual_pickup_distance(get_assigned_task_id(Ra, robot_id))
+                        
+            #             S.add_actual_duration(get_assigned_task_id(Ra, robot_id))
+            #             S.add_actual_pickup_duration(get_assigned_task_id(Ra, robot_id))
+            #         else:
+            #             continue
+            #     return Ra, to_pickup, free_agents
 
         # Update statistics, free agents, and to_pickup
         for task in Ra:
@@ -204,4 +231,114 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
                 continue
             
             
-        return Ra, to_pickup, free_agents
+        return Ra, to_pickup, free_agents, True
+    
+    elif hash_map != {}: 
+        
+        # path = a_star(G, (45, 12), (114, 81))
+        # print(len(path))
+        
+        # Get unassigned tasks and unassigned robots
+        assigned_task_ids = set([x[0] for x in Ra])
+        task_ids = set([x[0] for x in J])
+        
+        unassigned_task_ids = task_ids - assigned_task_ids
+        
+        assigned_robot_ids = set()
+        for assignment in Ra:
+            assigned_robot_ids |= set([assignment[-1]])
+        unassigned_robot_ids = set(np.arange(0, len(Rs))) - assigned_robot_ids
+        
+        
+        if len(unassigned_robot_ids) <= 0:
+            return Ra, to_pickup, free_agents, True
+        elif len(unassigned_task_ids) <= 0:
+            return Ra, to_pickup, free_agents, True
+        else:
+            pass
+        
+        # Create cost matrix
+        cost_matrix = []
+        for unassigned_robot_id in unassigned_robot_ids:
+            robot_cost = []
+            for unassigned_task_id in unassigned_task_ids:
+                # In-case a_star breaks and does not return a solution, try again
+                # TODO: Debug a_start implementation for why this occurs so infrequently
+                path = hash_map[get_robot_state(Rs, unassigned_robot_id)][get_task_start_location(J, unassigned_task_id)]
+                
+                if not path:
+                    robot_cost.append(np.inf)
+                else:
+                    robot_cost.append(len(path))
+            cost_matrix.append(robot_cost)
+        
+        # Assign tasks from cost matrix
+        is_solution = True
+        cost_matrix = np.asarray(cost_matrix, dtype=float)    
+        try: 
+            for unassigned_robot_id in unassigned_robot_ids:
+                # try: 
+                min_index_row, min_index_col = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
+                Ra.append((list(unassigned_task_ids)[min_index_col], list(unassigned_robot_ids)[min_index_row]))
+                S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
+                S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
+                while True:
+                    estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+                    if estimated_task_path:
+                        break
+                    elif not estimated_task_path:
+                        # G.draw_graph()
+                        print(get_task_start_location(J, list(unassigned_task_ids)[min_index_col])) 
+                        print(get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
+                        is_solution = False
+                        break
+                if is_solution:
+                    S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
+                    S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], len(estimated_task_path) - 1)
+                else:
+                    S.add_estimated_distance(list(unassigned_task_ids)[min_index_col], np.Infinity)
+                    S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], np.Infinity)
+                is_solution = True
+                
+                cost_matrix[:, min_index_col] = np.inf
+                cost_matrix[min_index_row, :] = np.inf
+                
+                unassigned_task_ids.remove(list(unassigned_task_ids)[min_index_col])
+                if len(unassigned_task_ids) == 0:
+                    break
+        except:
+            return Ra, to_pickup, free_agents, False
+            # except:
+            #     print("++++++++++++++++++++++++++++++++Skipping Allocation++++++++++++++++++++++++++++++++")
+            #     for task in Ra:
+            #         robot_id = task[-1]
+            #         if robot_id in free_agents:
+            #             free_agents.remove(robot_id)
+            #             to_pickup.add(robot_id)
+                        
+            #             S.add_actual_distance(get_assigned_task_id(Ra, robot_id))
+            #             S.add_actual_pickup_distance(get_assigned_task_id(Ra, robot_id))
+                        
+            #             S.add_actual_duration(get_assigned_task_id(Ra, robot_id))
+            #             S.add_actual_pickup_duration(get_assigned_task_id(Ra, robot_id))
+            #         else:
+            #             continue
+            #     return Ra, to_pickup, free_agents
+
+        # Update statistics, free agents, and to_pickup
+        for task in Ra:
+            robot_id = task[-1]
+            if robot_id in free_agents:
+                free_agents.remove(robot_id)
+                to_pickup.add(robot_id)
+                
+                S.add_actual_distance(get_assigned_task_id(Ra, robot_id))
+                S.add_actual_pickup_distance(get_assigned_task_id(Ra, robot_id))
+                
+                S.add_actual_duration(get_assigned_task_id(Ra, robot_id))
+                S.add_actual_pickup_duration(get_assigned_task_id(Ra, robot_id))
+            else:
+                continue
+            
+            
+        return Ra, to_pickup, free_agents, True

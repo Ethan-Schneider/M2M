@@ -170,6 +170,14 @@ class Graph:
                     unoccupied.append((row, col))
         return unoccupied
     
+    def get_all_non_obstacles(self) -> list:
+        empty_space = []
+        for row in range(self.__graph.shape[0]):
+            for col in range(self.__graph.shape[1]):
+                if not self.__graph[row, col].get_obstacle():
+                    empty_space.append((row, col))
+        return empty_space
+    
     def set_occupied(self, node : tuple, occupied : bool) -> None:
         self.__graph[node[0], node[1]].set_occupied(occupied)
     
@@ -204,9 +212,9 @@ class Graph:
     def draw_graph(self):
         for row in range(self.__graph.shape[0]):
             for col in range(self.__graph.shape[1]):
-                if self.__graph.shape[row][col].get_obstacle():
+                if self.__graph.shape[row, col].get_obstacle():
                     print("@")
-                elif self.__graph.shape[row][col].get_occupied():
+                elif self.__graph.shape[row, col].get_occupied():
                     print("r")
                 else:
                     print(".")

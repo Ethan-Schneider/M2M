@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 import pandas as pd
+import os
 
 #region Distance Graphs
 def actual_estimated_distance(actual_distance : list, estimate_distance : list) -> None:
@@ -149,7 +150,7 @@ def actual_estimated_total_distance(actual_distance : list, estimate_distance : 
     
 #region Duration Graphs
 
-def actual_estimated_duration(actual_duration : list, estimate_duration : list) -> None:
+def actual_estimated_duration(actual_duration : list, estimate_duration : list, subfolder : str = "") -> None:
     
     print("Actual Duration")
     print(len(actual_duration))
@@ -164,145 +165,153 @@ def actual_estimated_duration(actual_duration : list, estimate_duration : list) 
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    N = len(actual_duration)
-    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    # N = len(actual_duration)
+    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    X_with_intercept = np.empty(shape=(N, p))
-    X_with_intercept[:, 0] = 1
-    X_with_intercept[:, 1:p] = actual_duration
+    # X_with_intercept = np.empty(shape=(N, p))
+    # X_with_intercept[:, 0] = 1
+    # X_with_intercept[:, 1:p] = actual_duration
 
 
-    ols = sm.OLS(estimate_duration, X_with_intercept)
-    ols_result = ols.fit()
-    results_summary = ols_result.summary()
+    # ols = sm.OLS(estimate_duration, X_with_intercept)
+    # ols_result = ols.fit()
+    # results_summary = ols_result.summary()
 
-    results_as_html = results_summary.tables[1].as_html()
-    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    # results_as_html = results_summary.tables[1].as_html()
+    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    linear_regression = df['coef'].to_list()
-    lower_std = df['[0.025'].to_list()
-    upper_std = df['0.975]'].to_list()
+    # linear_regression = df['coef'].to_list()
+    # lower_std = df['[0.025'].to_list()
+    # upper_std = df['0.975]'].to_list()
 
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.title("Actual Duration(s) vs. Estimated Duration(s) with 2 X Standard Deviation")
     plt.xlim((0, 360))
     plt.ylim((0, 360))
 
 
-    x = np.linspace(0, 350, 100)
-    y = linear_regression[1]*x + linear_regression[0]
-    plt.plot(x, y, 'k')
+    # x = estimate_duration
+    # y = actual_duration
+    # plt.plot(x, y, 'k')
 
 
-    y = lower_std[1]*x + lower_std[0]
-    plt.plot(x, y, '--r')
+    # y = lower_std[1]*x + lower_std[0]
+    # plt.plot(x, y, '--r')
 
-    y = upper_std[1]*x + upper_std[0]
-    plt.plot(x, y, '--r')
+    # y = upper_std[1]*x + upper_std[0]
+    # plt.plot(x, y, '--r')
 
-    ols_result.summary()
+    # ols_result.summary()
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
     
-    plt.savefig("data/figures/task_duration_graph.png", bbox_inches='tight', dpi=300)
+    plt.savefig(os.path.join(folder_path, "task_duration_graph.png"), bbox_inches='tight', dpi=300)
     plt.clf()
     
-def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duration : list) -> None:
+def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duration : list, subfolder : str = "") -> None:
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    N = len(actual_duration)
-    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    # N = len(actual_duration)
+    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    X_with_intercept = np.empty(shape=(N, p))
-    X_with_intercept[:, 0] = 1
-    X_with_intercept[:, 1:p] = actual_duration
+    # X_with_intercept = np.empty(shape=(N, p))
+    # X_with_intercept[:, 0] = 1
+    # X_with_intercept[:, 1:p] = actual_duration
 
-    ols = sm.OLS(estimate_duration, X_with_intercept)
-    ols_result = ols.fit()
-    results_summary = ols_result.summary()
+    # ols = sm.OLS(estimate_duration, X_with_intercept)
+    # ols_result = ols.fit()
+    # results_summary = ols_result.summary()
 
-    results_as_html = results_summary.tables[1].as_html()
-    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    # results_as_html = results_summary.tables[1].as_html()
+    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    linear_regression = df['coef'].to_list()
-    lower_std = df['[0.025'].to_list()
-    upper_std = df['0.975]'].to_list()
+    # linear_regression = df['coef'].to_list()
+    # lower_std = df['[0.025'].to_list()
+    # upper_std = df['0.975]'].to_list()
 
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.title("Actual Duration (s) vs. Estimated Duration (s) To-Pickup with 2 X Standard Deviation")
     plt.xlim((0, 360))
     plt.ylim((0, 360))
 
 
-    x = np.linspace(0, 350, 100)
-    y = linear_regression[1]*x + linear_regression[0]
-    plt.plot(x, y, 'k')
+    # x = estimate_duration
+    # y = actual_duration
+    # plt.plot(x, y, 'k')
 
 
-    y = lower_std[1]*x + lower_std[0]
-    plt.plot(x, y, '--r')
+    # y = lower_std[1]*x + lower_std[0]
+    # plt.plot(x, y, '--r')
 
-    y = upper_std[1]*x + upper_std[0]
-    plt.plot(x, y, '--r')
+    # y = upper_std[1]*x + upper_std[0]
+    # plt.plot(x, y, '--r')
 
-    ols_result.summary()
+    # ols_result.summary()
     
-    plt.savefig("data/figures/to_pickup_duration_graph.png", bbox_inches='tight', dpi=300)
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        
+    plt.savefig(os.path.join(folder_path, "to_pickup_duration_graph.png"), bbox_inches='tight', dpi=300)
     plt.clf()
     
-def actual_estimated_total_duration(actual_duration : list, estimate_duration : list) -> None:
+def actual_estimated_total_duration(actual_duration : list, estimate_duration : list, subfolder : str = "") -> None:
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    N = len(actual_duration)
-    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    # N = len(actual_duration)
+    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    X_with_intercept = np.empty(shape=(N, p))
-    X_with_intercept[:, 0] = 1
-    X_with_intercept[:, 1:p] = actual_duration
+    # X_with_intercept = np.empty(shape=(N, p))
+    # X_with_intercept[:, 0] = 1
+    # X_with_intercept[:, 1:p] = actual_duration
 
-    ols = sm.OLS(estimate_duration, X_with_intercept)
-    ols_result = ols.fit()
-    results_summary = ols_result.summary()
+    # ols = sm.OLS(estimate_duration, X_with_intercept)
+    # ols_result = ols.fit()
+    # results_summary = ols_result.summary()
 
-    results_as_html = results_summary.tables[1].as_html()
-    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    # results_as_html = results_summary.tables[1].as_html()
+    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    linear_regression = df['coef'].to_list()
-    lower_std = df['[0.025'].to_list()
-    upper_std = df['0.975]'].to_list()
+    # linear_regression = df['coef'].to_list()
+    # lower_std = df['[0.025'].to_list()
+    # upper_std = df['0.975]'].to_list()
 
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.title("Actual Duration (s) vs. Estimated Duration (s) Total with 2 X Standard Deviation")
     plt.xlim((0, 360))
     plt.ylim((0, 360))
 
 
-    x = np.linspace(0, 350, 100)
-    y = linear_regression[1]*x + linear_regression[0]
-    plt.plot(x, y, 'k')
+    # x = estimate_duration
+    # y = actual_duration
+    # plt.plot(x, y, 'k')
 
 
-    y = lower_std[1]*x + lower_std[0]
-    plt.plot(x, y, '--r')
+    # y = lower_std[1]*x + lower_std[0]
+    # plt.plot(x, y, '--r')
 
-    y = upper_std[1]*x + upper_std[0]
-    plt.plot(x, y, '--r')
+    # y = upper_std[1]*x + upper_std[0]
+    # plt.plot(x, y, '--r')
 
-    ols_result.summary()
+    # ols_result.summary()
     
-    plt.savefig("data/figures/total_task_duration_graph.png", bbox_inches='tight', dpi=300)
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+        
+    plt.savefig(os.path.join(folder_path, "total_task_duration_graph.png"), bbox_inches='tight', dpi=300)
     plt.clf()
     
 #endregion
 
 #region Runtime Graphs
-def runtime_over_time(CRG_runtime : list, TA_runtime : list, PF_runtime : list, SIM_runtime : list) -> None:
+def runtime_over_time(CRG_runtime : list, TA_runtime : list, PF_runtime : list, SIM_runtime : list, subfolder : str = "") -> None:
     plt.plot(np.arange(len(CRG_runtime)), CRG_runtime, '-', label="Task Generation")
     plt.plot(np.arange(len(TA_runtime)), TA_runtime, '-', label="Task Allocation")
     plt.plot(np.arange(len(PF_runtime)), PF_runtime, '-', label="Path Planning")
@@ -315,11 +324,15 @@ def runtime_over_time(CRG_runtime : list, TA_runtime : list, PF_runtime : list, 
     plt.ylabel("Computation Time (s)")
     plt.title("Computation Time over Simulation Steps")
     
-    plt.savefig("data/figures/computation_time_during_simulation_graph", bbox_inches='tight', dpi=300)
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "computation_time_during_simulation_graph"), bbox_inches='tight', dpi=300)
     plt.clf()
     
 
-def runtime_pie_chart(CRG_runtime : list, TA_runtime : list, PF_runtime : list, total_runtime : float) -> None:
+def runtime_pie_chart(CRG_runtime : list, TA_runtime : list, PF_runtime : list, total_runtime : float, subfolder : str = "") -> None:
     other_runtime = total_runtime - np.sum(CRG_runtime) - np.sum(TA_runtime) - np.sum(PF_runtime)
     
     data = np.asarray([np.sum(CRG_runtime), np.sum(TA_runtime), np.sum(PF_runtime), other_runtime])
@@ -329,14 +342,19 @@ def runtime_pie_chart(CRG_runtime : list, TA_runtime : list, PF_runtime : list, 
         "Other: " + str(np.round((np.sum(other_runtime)/total_runtime)*100, 1)) + '%']
     
     plt.pie(data, labels=labels, startangle=90)
-    plt.savefig("data/figures/total_runtime_pie_chart", bbox_inches='tight', dpi=300)
+    
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "total_runtime_pie_chart"), bbox_inches='tight', dpi=300)
     plt.clf()
     
 #endregion
     
 #region Idle Graph
 
-def idle_robots_over_timesteps(paths : list) -> None:
+def stationary_robots_over_timesteps(paths : list, subfolder : str = "") -> None:
     num_idle_robots = [len(paths)]
     
     # Create numpy array of tuples
@@ -352,10 +370,14 @@ def idle_robots_over_timesteps(paths : list) -> None:
     plt.plot(np.arange(len(num_idle_robots)), num_idle_robots, '-')
     
     plt.xlabel("Time Step")
-    plt.ylabel("Number of Idle Robots")
-    plt.title("Number of Idle Robots Over Time")
+    plt.ylabel("Number of Stationary Robots")
+    plt.title("Number of Stationary Robots Over Time")
     
-    plt.savefig("data/figures/number_of_idle_robots_over_time", bbox_inches='tight', dpi=300)
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "number_of_stationary_robots_over_time"), bbox_inches='tight', dpi=300)
     plt.clf()
     
 #endregion

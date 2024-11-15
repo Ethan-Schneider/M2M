@@ -33,6 +33,24 @@ def a_star(G : Graph, start : tuple, goal : tuple) -> list:
     astar = AStar(G, start, goal)
     return astar.search()
 
+def construct_distance_hashmap(G : Graph):
+    spaces = G.get_all_non_obstacles()
+    
+    hash_map = {}
+    for i, start in enumerate(spaces):
+        if i%10 == 0:
+            output = "iteration " + str(i) + " out of " + str(len(spaces))
+            print(output)
+        hash_map[start] = {}
+        for goal in spaces:
+            if goal in hash_map:
+                if start in hash_map[goal]:
+                    hash_map[start][goal] = hash_map[goal][start]
+                    continue
+            hash_map[start][goal] = a_star(G, start, goal)
+            
+    return hash_map
+
 
 class AStar():
     def __init__(self, G : Graph, start : tuple, goal : tuple) -> None:

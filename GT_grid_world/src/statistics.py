@@ -1,8 +1,22 @@
 import numpy as np
+import json
+
+from .utils import *
 from .graphing import *
 
 class Stats: 
-    def __init__(self, num_robots : int, simulation_time : int) -> None:
+    def __init__(self, num_robots : int, simulation_time : int, output_file : str) -> None:
+        self.__output_file = output_file
+        self.__num_of_robots = num_robots
+        self.__T = simulation_time
+        
+        # Number of collisions at each timestep
+        self.__collisions = []
+        
+        self.__throughputs = []
+        
+        self.__task_assignments = []
+        
         # Estimated Distance for Task (task_start -> task_goal) in the form (task_id, estimated_distance)
         self.__estimated_distance = {}
         
@@ -43,6 +57,7 @@ class Stats:
         for _ in range(num_robots):
             self.__truncated_paths.append([])
             self.__paths.append([])
+            self.__task_assignments.append([])
             
             
         self.__T = simulation_time
@@ -61,6 +76,8 @@ class Stats:
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
         
+    def append_number_of_collisions(self, number_of_collisions) -> None:
+        self.__collisions.append(number_of_collisions)
         
     def add_estimated_duration(self, task_id : int, estimated_duration : float) -> None:
         self.__estimated_duration[task_id] = estimated_duration
@@ -142,6 +159,11 @@ class Stats:
             if self.__truncated_paths[i][-1] != step:
                 self.__truncated_paths[i].append(step)
                 
+    def append_task_allocation(self, allocation, J, Rs) -> None:
+        for i, assignment in enumerate(allocation):
+            assignment = (get_task_start_location(J, int(assignment[0])), get_task_goal_location(J, int(assignment[0])), get_robot_state(Rs, int(assignment[1])))
+            self.__task_assignments[i].append(assignment)
+                
     def return_full_paths(self) -> list:
         return self.__paths
     
@@ -218,7 +240,44 @@ class Stats:
             if task_id not in self.__completed_task_ids:
                 del self.__estimated_pickup_duration[task_id]
             
+    def return_throughput(self):
+        return (len(self.__completed_task_ids)/self.__T)*60
             
+    def return_sum_of_costs(self):
+        return np.sum(list(self.__actual_distance.values()))/60
+
+    def compute_stationary_robots(self) -> list:
+        num_idle_robots = [len(self.__paths)]
+        
+        # Create numpy array of tuples
+        paths = np.asarray(self.__paths, dtype="f,f")
+        
+        # Save first state
+        prev_state = paths.T[0]
+        # Iterate over the state of the system at each timestep, checking how many robots are in the same position as the previous state
+        for state in paths.T[1:]:
+            num_idle_robots.append(np.count_nonzero(prev_state == state))
+            prev_state = state
+        return num_idle_robots
+    
+    def compute_velocity_timesteps(self) -> list:
+        velocity_timesteps = []
+        
+        paths = np.asarray(self.__paths, dtype="f,f")
+        # Save first state
+        prev_state = paths.T[0]
+        # Iterate over the state of the system at each timestep, checking how many robots are in the same position as the previous state
+        for state in paths.T[1:]:
+            velocity = []
+            for robot_id in range(len(state)):
+                if prev_state[robot_id] == state[robot_id]:
+                    velocity.append(0)
+                else:
+                    velocity.append(1)
+            velocity_timesteps.append(velocity)
+            prev_state = state  
+        return velocity_timesteps
+        
     # ====================== Statistical Analysis
     
     def task_length(self) -> list:
@@ -303,7 +362,7 @@ class Stats:
         print("===Sum of Costs===")
         print("Sum of Costs: " + str(np.sum(list(self.__actual_distance.values()))) + "s or " + str(np.sum(list(self.__actual_distance.values()))/60) + "min.")
         
-    def output_graphs(self) -> None:
+    def output_graphs(self, folder : str = "") -> None:
         # actual_estimated_distance(list(self.__actual_distance.values()), list(self.__estimated_distance.values()))
         # actual_estimated_to_pickup_distance(list(self.__actual_pickup_distance.values()), list(self.__estimated_pickup_distance.values()))
         
@@ -320,8 +379,10 @@ class Stats:
         # actual_estimated_total_distance(total_actual_distance, total_estimate_distance)
         
         # Duration Graphs
-        actual_estimated_duration(list(self.__actual_duration.values()), list(self.__estimated_duration.values()))
-        actual_estimated_to_pickup_duration(list(self.__actual_pickup_duration.values()), list(self.__estimated_pickup_duration.values()))
+        print(len(list(self.__actual_duration.values())))
+        print(len(list(self.__estimated_duration.values())))
+        actual_estimated_duration(list(self.__actual_duration.values()), list(self.__estimated_duration.values()), subfolder=folder)
+        actual_estimated_to_pickup_duration(list(self.__actual_pickup_duration.values()), list(self.__estimated_pickup_duration.values()), subfolder=folder)
         
         total_actual_duration = []
         total_estimate_duration = []
@@ -332,12 +393,46 @@ class Stats:
         for i in range(len(list(self.__actual_duration))):
             total_actual_duration.append(actual_task_duration[i]+actual_to_pickup_duration[i])
             total_estimate_duration.append(estimate_task_duration[i]+estimate_to_pickup_duration[i])
-        actual_estimated_total_duration(total_actual_duration, total_estimate_duration)
+        actual_estimated_total_duration(total_actual_duration, total_estimate_duration, subfolder=folder)
         
         # Runtime Graphs
         runtime_over_time(self.__CRG_time, self.__TA_time, self.__PF_time, self.__SIM_time)
         runtime_pie_chart(self.__CRG_time, self.__TA_time, self.__PF_time, self.__total_runtime)
         
         # Idle Time Graph
-        idle_robots_over_timesteps(self.__paths)
+        stationary_robots_over_timesteps(self.__paths, subfolder=folder)
         
+        
+    def save_data(self):
+        velocity_timesteps = self.compute_velocity_timesteps()
+        # print(self.__task_assignments)
+        
+        # timestep_data = {}
+        # for i in range(len(self.__paths)):
+        #     timestep_data[f'timestep_{i}'] = {"paths" : self.__paths[i], "allocation" : self.__task_assignments[i], "velocity_timesteps" : velocity_timesteps[i]}
+        
+        
+        
+        data = {
+            "timesteps_completed" : self.__T,
+            "number_of_robots" : self.__num_of_robots,
+            "completed_tasks": self.__completed_task_ids,
+            "actual_duration_of_task_from_pick_to_place" : list(self.__actual_duration.values()),
+            "estimated_duration_of_task_from_pick_to_place" : list(self.__estimated_duration.values()),
+            "actual_duration_of_task_from_start_to_pick" : list(self.__actual_pickup_duration.values()),
+            "estimated_duration_of_task_from_start_to_pick" : list(self.__estimated_pickup_duration.values()),
+            "collisions" : int(np.sum(self.__collisions)),
+            "stationary_robots" : self.compute_stationary_robots(),
+            "throughput (tasks/min)": self.return_throughput(),
+            "SoC(min)" : self.return_sum_of_costs(),
+            "Total Runtime" : self.__total_runtime,
+            "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
+            "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
+            "paths" : self.__paths,
+            "allocation" : self.__task_assignments,
+            "velocity_timesteps" : velocity_timesteps
+        }
+        
+        
+        with open(self.__output_file, "w") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
