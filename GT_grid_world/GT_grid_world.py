@@ -5,7 +5,7 @@ from src import graph, simulate, task_allocation, case_request_generator, router
 def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
-            task_assignment_strategy : str = "closest_robot",
+            task_assignment_strategy : str = "cost_matrix",
             path_planning_strategy : str = "ecbs", time_limit : int = 99999, hash_map : dict = {}):
     # Unpack Robot State (Rs) and Graph (G)
     Rs, G = I
@@ -42,23 +42,11 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
             S.add_total_CRG_time(tok-tik)
             # Append the new tasks to the list of tasks
             J |= J_new
-        # total_locations = set()
-        # print("Tasks: ")
-        # for task in J:
-        #     print(task)
-        #     if task[1] in total_locations:
-        #         print("REPEATED LOCATION: ", task[1])
-        #     if task[2] in total_locations:
-        #         print("REPEATED LOCATION: ", task[2])
-        #     total_locations.add(task[1])
-        #     total_locations.add(task[2])
-        # print(len(total_locations))
-        # Assign unassigned tasks to robots
+            
         tik = time.time()
         print("=============================" + "Task Allocation"+ "=============================")
-        Ra, to_pickup, free_agents, feedback = task_allocation.TaskAllocation(S, G, Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
-        if not feedback:
-            pass
+        Ra, to_pickup, free_agents = task_allocation.TaskAllocation(S, G, Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
+
         tok = time.time()
         S.add_total_TA_time(tok-tik)
         S.append_task_allocation(Ra, J, Rs)
@@ -193,7 +181,7 @@ def entry():
     num_robots = [120]
     DOF = 4
     task_generation_strategy = "informed_uniform"
-    task_assignment_strategy = "a_star"
+    task_assignment_strategy = "cost_matrix"
     path_planning_strategy = "pbs"
     
     for i in range(len(num_robots)):

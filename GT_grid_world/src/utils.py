@@ -3,7 +3,7 @@ from typing import Union
 
 from .graph import Graph
 
-def get_assigned_task_id(Ra : list, robot_id : int):
+def get_assigned_task_id(Ra : list, robot_id : int) -> int:
     for assignment in Ra:
         if assignment[-1] == robot_id:
             return assignment[0]
@@ -23,10 +23,16 @@ def get_task_goal_location(J : set, task_id : int) -> tuple:
         if task[0] == task_id:
             return task[2]
         
-def euclidian_distance(p1 : tuple, p2 : tuple):
+def get_unassigned_task_ids(J : set, Ra : list) -> set:
+    assigned_task_ids = set([x[0] for x in Ra])
+    task_ids = set([x[0] for x in J])
+
+    return task_ids - assigned_task_ids
+        
+def euclidian_distance(p1 : tuple, p2 : tuple) -> float:
     return ((p2[1]-p1[1])**2 + (p2[0]-p1[0])**2)**0.5
 
-def manhattan_distance(p1 : tuple, p2 : tuple): 
+def manhattan_distance(p1 : tuple, p2 : tuple) -> float: 
     return np.abs(p2[1] - p1[1]) + np.abs(p2[0] - p1[0])
 
 def a_star(G : Graph, start : tuple, goal : tuple) -> list:
