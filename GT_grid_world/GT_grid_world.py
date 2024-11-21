@@ -2,7 +2,7 @@ import time
 
 from src import graph, simulate, task_allocation, case_request_generator, router
 from src.analysis import visualize, statistics
-    
+
 def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
@@ -25,6 +25,7 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
         robot_sequences.append([])
     
     global_tik = time.time()
+    
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -177,9 +178,9 @@ def entry():
     
     time_limit = 28800
     
-    T = [3600]*120
+    T = [20]*120
     # num_robots = list(range(7, 100))
-    num_robots = [120]
+    num_robots = [40]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "cost_matrix"

@@ -4,9 +4,9 @@ from .analysis.statistics import Stats
 from .graph import Graph
 from .utils import *
 
-from task_allocation.closest_robot import closest_robot
-from task_allocation.random import random
-from task_allocation.cost_matrix import cost_matrix_TA
+from .task_allocation_algorithms.closest_robot import closest_robot
+from .task_allocation_algorithms.random import random
+from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 
 def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set, hash_map : dict = {}) -> Tuple[list, set, set]:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
@@ -33,5 +33,5 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
         return random(S, Rs, Ra, J, to_pickup, free_agents)
     
     elif task_assignment_strategy == "cost_matrix": 
-        return cost_matrix_TA(S, G, Rs, Ra, J, to_pickup, free_agents, hash_map)
+        return cost_matrix_TA(S, G, Rs, Ra, J, to_pickup, free_agents)
     
