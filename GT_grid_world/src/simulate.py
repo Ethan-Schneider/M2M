@@ -1,4 +1,4 @@
-from .statistics import Stats
+from .analysis.statistics import Stats
 from .graph import Graph
 from .utils import euclidian_distance, get_assigned_task_id
 

@@ -1,8 +1,7 @@
 import json
 import numpy as np
 
-from .item import ItemCategory
-
+from .item import ItemCategory, Item
 
 class Inventory:
     def __init__(self, *args) -> None:

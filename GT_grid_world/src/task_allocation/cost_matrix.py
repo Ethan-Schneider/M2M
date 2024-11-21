@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple
 
-from ..statistics import Stats
+from ..analysis.statistics import Stats
 from ..graph import Graph
 from ..utils import *
 
@@ -50,13 +50,18 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
     # Iterate over cost matrix and assign agents to tasks
     is_solution = True
     cost_matrix = np.asarray(cost_matrix, dtype=float)   
-    # TODO: Reevalute this section, looks like it is recomputing the a_star which was already computed above
     try: 
+        # TODO: Change to iterate over min of cost_matrix (row, col)
         for unassigned_robot_id in free_agents:
+            # Get agent task allocation
             min_index_row, min_index_col = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
+            # Add allocation and statistics
             Ra.append((list(unassigned_task_ids)[min_index_col], list(free_agents)[min_index_row]))
             S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
             S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
+            
+            # TODO: Find out why a_star is returning no solution occasionally 
+            # Compute estimated distance from pickup to place 
             while True:
                 estimated_task_path = a_star(G, get_task_start_location(J, list(unassigned_task_ids)[min_index_col]), get_task_goal_location(J, list(unassigned_task_ids)[min_index_col]))
                 if estimated_task_path:
@@ -74,9 +79,11 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
                 S.add_estimated_duration(list(unassigned_task_ids)[min_index_col], np.Infinity)
             is_solution = True
             
+            # Update matrix values
             cost_matrix[:, min_index_col] = np.inf
             cost_matrix[min_index_row, :] = np.inf
             
+            # Remove assigned task from unassigned_task_list
             unassigned_task_ids.remove(list(unassigned_task_ids)[min_index_col])
             if len(unassigned_task_ids) == 0:
                 break

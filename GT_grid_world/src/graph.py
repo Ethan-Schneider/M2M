@@ -1,7 +1,7 @@
 import numpy as np
 
 from .node import Node
-from .inventory import Inventory
+from .inventory_manager.inventory import Inventory
 
 class Graph:
     def __init__(self, num_robots : int, file_name: str = None, DOF:int = 4, deterministic = True, *args) -> None:

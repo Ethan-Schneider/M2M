@@ -1,6 +1,6 @@
 import numpy as np
 from .graph import Graph
-from .item import ItemCategory
+from .inventory_manager.item import ItemCategory
     
 def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, max_task_number : int, strategy: str = "uniform") -> tuple[set, int]:
     """_summary_

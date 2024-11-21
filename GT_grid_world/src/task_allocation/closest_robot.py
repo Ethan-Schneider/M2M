@@ -1,6 +1,6 @@
 import numpy as np
 
-from ..statistics import Stats
+from ..analysis.statistics import Stats
 from ..graph import Graph
 
 def closest_robot(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_assignment_strategy : str, to_pickup : set, free_agents : set, hash_map : dict = {}):

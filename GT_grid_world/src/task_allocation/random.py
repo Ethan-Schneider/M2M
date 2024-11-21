@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Tuple
 
-from ..statistics import Stats
+from ..analysis.statistics import Stats
 from ..utils import *
 
 def random(S : Stats, Rs : list, Ra : list, J : set, to_pickup : set, free_agents : set) -> Tuple[list, set, set]:

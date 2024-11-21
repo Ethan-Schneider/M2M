@@ -1,6 +1,7 @@
 import time
 
-from src import graph, simulate, task_allocation, case_request_generator, router, visualize, statistics, utils
+from src import graph, simulate, task_allocation, case_request_generator, router
+from src.analysis import visualize, statistics
     
 def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -94,7 +95,7 @@ def main():
     
     path_planning_strategy = "pbs"
     
-    map = "GT_grid_world/src/maps/symbotic_large_w_top"
+    map = "data/maps/symbotic_large_w_top"
     
     num_robots = 40
     DOF = 4
@@ -172,7 +173,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
 def entry():
     initial_inventory_amount = 25.
     
-    map = "GT_grid_world/src/maps/symbotic_large"
+    map = "data/maps/symbotic_large"
     
     time_limit = 28800
     

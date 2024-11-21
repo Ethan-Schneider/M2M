@@ -1,7 +1,7 @@
 import numpy as np
 import json
 
-from .utils import *
+from ..utils import *
 from .graphing import *
 
 class Stats: 
