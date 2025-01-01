@@ -16,11 +16,11 @@ class Node:
     def get_cost(self):
         return self.__cost
             
-    def __repr__(self):
-        return str(self.__occupied)        
+    # def __repr__(self):
+    #     return str(self.__occupied)        
     
-    def __str__(self):
-        return str(self.__occupied)
+    # def __str__(self):
+    #     return str(self.__occupied)
             
             
     

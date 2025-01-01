@@ -24,10 +24,32 @@ def get_task_goal_location(J : set, task_id : int) -> tuple:
             return task[2]
         
 def get_unassigned_task_ids(J : set, Ra : list) -> set:
+    """Return the set of all task_ids which have not been assigned
+
+    Args:
+        J (set): Set of tasks in the form {(task_id, start_loc, goal_loc)}
+        Ra (list): Robot-Task Allocation in the form of [(task_id, robot_id), ...]
+
+    Returns:
+        set: Set of all unassigned task ids
+    """
     assigned_task_ids = set([x[0] for x in Ra])
     task_ids = set([x[0] for x in J])
 
-    return task_ids - assigned_task_ids
+    unassigned_task_ids = task_ids - assigned_task_ids
+
+    return unassigned_task_ids
+
+def get_assigned_task_ids(Ra : list) -> set:
+    """Return the set of all assigned task_ids
+
+    Args:
+        Ra (list): Robot-Task Allocation in the form of [(task_id, robot_id), ...]
+
+    Returns:
+        set: Set of all assigned task ids
+    """
+    return set([x[0] for x in Ra])
         
 def euclidian_distance(p1 : tuple, p2 : tuple) -> float:
     return ((p2[1]-p1[1])**2 + (p2[0]-p1[0])**2)**0.5

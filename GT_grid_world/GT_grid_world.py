@@ -21,7 +21,7 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
     to_delivery = set([])
     free_agents = set([robot[0] for robot in Rs])
     robot_sequences = []
-    for i in range(len(Rs)):
+    for _ in range(len(Rs)):
         robot_sequences.append([])
     
     global_tik = time.time()
@@ -49,13 +49,16 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
         print("=============================" + "Task Allocation"+ "=============================")
         Ra, to_pickup, free_agents = task_allocation.TaskAllocation(S, G, Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
 
+        print("Ra length: ", len(Ra))
+        
         tok = time.time()
         S.add_total_TA_time(tok-tik)
         S.append_task_allocation(Ra, J, Rs)
         
-        
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
+        # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
+        # What should happen: 
         for sequence in robot_sequences:
             if sequence == []:
                 robot_sequences = router.pathPlan(G, map, Rs, Ra, J, path_planning_strategy, to_pickup, to_delivery, free_agents, robot_sequences)
@@ -90,7 +93,7 @@ def main():
     initial_inventory_amount = 25.
 
     task_generation_strategy = "informed_uniform"
-    max_current_tasks = 40
+    max_current_tasks = 50
     
     task_assignment_strategy = "a_star"
     
@@ -134,7 +137,7 @@ def main():
     S.output_graphs()
     
     # print("============================Visualizing Output============================")
-    # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), str(data/videos/path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
+    # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
 def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, path_planning_strategy : str, map : str, time_limit : int = 99999):
     frequency = 1
@@ -169,18 +172,21 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots)
     S.output_graphs(folder_name)
 
+    # print("============================Visualizing Output============================")
+    # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
+
     return 
 
 def entry():
     initial_inventory_amount = 25.
     
-    map = "data/maps/symbotic_large"
+    map = "data/maps/symbotic_small"
     
-    time_limit = 28800
+    time_limit = 57600
     
-    T = [20]*120
+    T = [3000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [40]
+    num_robots = [10]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "cost_matrix"

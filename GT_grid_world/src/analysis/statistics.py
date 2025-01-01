@@ -10,6 +10,10 @@ class Stats:
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         
+        # Aisle and Driveway Occupancy
+        self.__aisle_occupancy = []
+        self.__driveway_occupancy = []
+        
         # Number of collisions at each timestep
         self.__collisions = []
         
@@ -94,7 +98,6 @@ class Stats:
     def remove_actual_duration(self, task_id : int) -> None:
         del self.__actual_duration[task_id]
         
-        
     def add_actual_pickup_duration(self, task_id : int) -> None:
         self.__actual_pickup_duration[task_id] = 0    
     
@@ -160,12 +163,31 @@ class Stats:
                 self.__truncated_paths[i].append(step)
                 
     def append_task_allocation(self, allocation, J, Rs) -> None:
+        print(len(allocation))
+        print(len(self.__task_assignments))
         for i, assignment in enumerate(allocation):
             assignment = (get_task_start_location(J, int(assignment[0])), get_task_goal_location(J, int(assignment[0])), get_robot_state(Rs, int(assignment[1])))
             self.__task_assignments[i].append(assignment)
                 
     def return_full_paths(self) -> list:
         return self.__paths
+    
+    # ====================== Aisle and Driveway Occupancy Functions
+    def add_aisle_occupancy(self, aisle_occupancy : list) -> None:
+        """Add occupancy of the aisles to the statistics object per timestep.
+
+        Args:
+            aisle_occupancy (list): Occupancy of the aisles per timestep.
+        """
+        self.__aisle_occupancy.append(aisle_occupancy)
+    
+    def add_driveway_occupancy(self, driveway_occupancy : list) -> None:
+        """Add occupancy of the driveways to the statistics object per timestep.
+
+        Args:
+            driveway_occupancy (list): Occupancy of the driveways per timestep.
+        """
+        self.__driveway_occupancy.append(driveway_occupancy)
     
     # ====================== Completed Task Id Functions
     
@@ -429,6 +451,8 @@ class Stats:
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
             "paths" : self.__paths,
+            "aisle_occupancy" : self.__aisle_occupancy,
+            "driveway_occupancy" : self.__driveway_occupancy,
             "allocation" : self.__task_assignments,
             "velocity_timesteps" : velocity_timesteps
         }

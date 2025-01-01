@@ -1,6 +1,6 @@
 from .analysis.statistics import Stats
 from .graph import Graph
-from .utils import euclidian_distance, get_assigned_task_id
+from .utils import *
 
 def simulate(S : Stats, G : Graph, Rs : list, robot_sequences : list, Ra : list, J : set, to_delivery : set, to_pickup : set, free_agents : set):
 
@@ -36,6 +36,12 @@ def simulate(S : Stats, G : Graph, Rs : list, robot_sequences : list, Ra : list,
     
     # Update Statistics for the total paths taken
     S.add_paths(robot_new_states)
+    
+    # Update Statistics for Asile and Driveway Occupancy
+    S.add_aisle_occupancy(G.get_aisle_occupancy())
+    S.add_driveway_occupancy(G.get_driveway_occupancy())
+    # S.add_aisle_occupancy(G.get_aisle_occupied())
+    # S.add_driveway_occupancy(G.get_driveway_occupied())
     
     # Update free_agents, to_pickup, and to_delivery
     # TODO: Update warehouse and driveway inventory when a robot has reached goal location (i.e. for both for loops below) 
