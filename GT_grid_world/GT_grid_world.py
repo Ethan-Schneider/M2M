@@ -139,7 +139,7 @@ def main():
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
-def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, path_planning_strategy : str, map : str, time_limit : int = 99999):
+def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, path_planning_strategy : str, map : str, time_limit : int = 99999, visualize : bool = False):
     frequency = 1
     inbound_outbound_ratio = 1.0 
     
@@ -164,7 +164,6 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     tok = time.time()
     S.set_total_runtime(tok-tik)  
     
-    S.trim_data()
     # S.print_statistics()
     # S.task_length()
     S.save_data()
@@ -172,8 +171,9 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots)
     S.output_graphs(folder_name)
 
-    # print("============================Visualizing Output============================")
-    # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
+    if visualize:
+        print("============================Visualizing Output============================")
+        visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
     return 
 
@@ -184,13 +184,15 @@ def entry():
     
     time_limit = 57600
     
-    T = [3000]*120
+    T = [300]*120
     # num_robots = list(range(7, 100))
-    num_robots = [10]
+    num_robots = [24]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "cost_matrix"
     path_planning_strategy = "pbs"
+    
+    visualize = False
     
     for i in range(len(num_robots)):
         output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + ".json"      
