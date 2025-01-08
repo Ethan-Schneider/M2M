@@ -184,13 +184,13 @@ def entry():
     
     time_limit = 57600
     
-    T = [300]*120
+    T = [350]*120
     # num_robots = list(range(7, 100))
-    num_robots = [24]
+    num_robots = [25]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "cost_matrix"
-    path_planning_strategy = "pbs"
+    path_planning_strategy = "ecbs"
     
     visualize = False
     
