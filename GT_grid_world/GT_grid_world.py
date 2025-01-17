@@ -37,6 +37,7 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
                 N = frequency**-1
             else:
                 N = 0
+            print(N)
             # Generate new tasks
             tik = time.time()
             J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
@@ -46,8 +47,9 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
             J |= J_new
             
         tik = time.time()
+        print(len(J))
         print("=============================" + "Task Allocation"+ "=============================")
-        Ra, to_pickup, free_agents = task_allocation.TaskAllocation(S, G, Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents)
+        Ra, to_pickup, free_agents = task_allocation.TaskAllocation(S, G, Rs, Ra, J, task_assignment_strategy, to_pickup, free_agents, map, robot_sequences)
 
         print("Ra length: ", len(Ra))
         
@@ -88,7 +90,7 @@ def execute(S : statistics.Stats, map : str, I: tuple, frequency : float, inboun
         
 def main():
     # Init values for task frequency and ratio, total number of timesteps, etc. 
-    frequency = 1
+    frequency = 0.1
     inbound_outbound_ratio = 1.0
     initial_inventory_amount = 25.
 
@@ -140,7 +142,7 @@ def main():
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
 def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, path_planning_strategy : str, map : str, time_limit : int = 99999, visualize : bool = False):
-    frequency = 1
+    frequency = 0.1
     inbound_outbound_ratio = 1.0 
     
     max_current_tasks = num_robots
@@ -182,14 +184,14 @@ def entry():
     
     map = "data/maps/symbotic_small"
     
-    time_limit = 57600
+    time_limit = 14500
     
-    T = [350]*120
+    T = [5000]*120
     # num_robots = list(range(7, 100))
     num_robots = [25]
     DOF = 4
     task_generation_strategy = "informed_uniform"
-    task_assignment_strategy = "cost_matrix"
+    task_assignment_strategy = "lns"
     path_planning_strategy = "ecbs"
     
     visualize = False
