@@ -40,16 +40,16 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
         
         assigned_tasks = {task_id for task_id, _ in Ra}
 
-        assigned_task_details = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id in assigned_tasks]
-        unassigned_task_details = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id not in assigned_tasks]
+        assigned_tasks = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id in assigned_tasks]
+        unassigned_tasks = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id not in assigned_tasks]
 
-        print("Assigned tasks:", assigned_task_details)
-        print("Unassigned tasks:", unassigned_task_details)
+        print("Assigned tasks:", assigned_tasks)
+        print("Unassigned tasks:", unassigned_tasks)
         
         print("Agents:", Rs)
-        for task_id, _, _ in unassigned_task_details:
+        for task_id, _, _ in unassigned_tasks:
             if free_agents:
-                assigned_agent = random.choice(list(free_agents))
+                assigned_agent = sorted(free_agents)[0]  # Always pick the first agent in sorted order
                 Ra.append((task_id, assigned_agent))
                 free_agents.remove(assigned_agent)
                 to_pickup.add(assigned_agent)
@@ -59,8 +59,9 @@ def TaskAllocation(S : Stats, G : Graph, Rs : list, Ra : list, J : set, task_ass
                     sequences[assigned_agent].append(task_id)
         print("Assigned tasks:", Ra)
         print("Sequences:", sequences)
-        
-        lns.LNS(map_name, assigned_task_details, unassigned_task_details, Rs, Ra)
+        unassigned_tasks = [(3, (9, 10), (20, 10)), (2, (2, 34), (19, 22)), (0, (4, 12), (20, 16)), (7, (18, 10), (13, 28)), (8, (20, 26), (12, 10)), (9, (20, 38), (5, 18)), (4, (20, 24), (12, 4)), (6, (20, 24), (5, 32)), (5, (7, 12), (18, 18)), (1, (19, 28), (3, 38))]
+        sequences = [[] for _ in free_agents]
+        lns.LNS(map_name, assigned_tasks, unassigned_tasks, Rs, sequences)
     elif task_assignment_strategy == "cost_matrix": 
         return cost_matrix_TA(S, G, Rs, Ra, J, to_pickup, free_agents)
     
