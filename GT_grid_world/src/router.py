@@ -2,7 +2,9 @@ from src.path_finding_algorithms.external_algorithms.EECBS import eecbs
 from src.path_finding_algorithms.external_algorithms.PBS import pbs
 from src.path_finding_algorithms.external_algorithms.MAPF_PC import mgpbs
 
-def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set, free_agents : set, previous_sequence : list) -> list:
+from .agent import *
+
+def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : str, to_pickup : set, to_delivery : set) -> list:
     if path_planning_strategy == "mgpbs":
         states = [robot[1] for robot in Rs]
 
@@ -57,14 +59,12 @@ def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy
         return sequences
     
     else: 
-        states = [robot[1] for robot in Rs]
+        states = [agent.state for agent in Rs.agents]
 
         goal_locations = []
-        for robot in Rs:
-            robot_id = robot[0]
-            
+        for agent in Rs.agents:
             # If robot is going to pickup, set goal location to the task's start location
-            if robot_id in to_pickup:
+            if agent.id in to_pickup:
                 # Get assigned task_id
                 task_id = -1
                 for assignment in Ra:
@@ -104,9 +104,9 @@ def pathPlan(G, map : str, Rs : list, Ra : list, J : set, path_planning_strategy
         while not sequences:
             # Execute the path planning algorithm
             if path_planning_strategy == "pbs":
-                sequences = pbs.test_cpp_func(map, len(Rs), 1, w, states, goal_locations)
+                sequences = pbs.test_cpp_func(map, Rs.num_agents, 1, w, states, goal_locations)
             elif path_planning_strategy == "ecbs":
-                sequences = eecbs.test_cpp_func(map, len(Rs), 1, w, states, goal_locations)
+                sequences = eecbs.test_cpp_func(map, Rs.num_agents, 1, w, states, goal_locations)
             if sequences == []:
                 print("+++++++++++++++++++Execution Failed with w = ", w)
                 print(sequences)

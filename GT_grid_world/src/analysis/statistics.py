@@ -3,6 +3,7 @@ import json
 
 from ..utils import *
 from .graphing import *
+from ..agent import *
 
 class Stats: 
     def __init__(self, num_robots : int, simulation_time : int, output_file : str) -> None:
@@ -162,12 +163,11 @@ class Stats:
             if self.__truncated_paths[i][-1] != step:
                 self.__truncated_paths[i].append(step)
                 
-    def append_task_allocation(self, allocation, J, Rs) -> None:
-        print(len(allocation))
-        print(len(self.__task_assignments))
-        for i, assignment in enumerate(allocation):
-            assignment = (get_task_start_location(J, int(assignment[0])), get_task_goal_location(J, int(assignment[0])), get_robot_state(Rs, int(assignment[1])))
-            self.__task_assignments[i].append(assignment)
+    def append_task_allocation(self, Rs : AgentLoader, J) -> None:
+        for agent in Rs.agents:
+            for task in agent.task_sequence:
+                assignment = (get_task_start_location(J, task), get_task_goal_location(J, task), agent.state)
+                self.__task_assignments[agent.id].append(assignment)
                 
     def return_full_paths(self) -> list:
         return self.__paths
