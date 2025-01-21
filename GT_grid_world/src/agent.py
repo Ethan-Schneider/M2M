@@ -4,10 +4,20 @@ class Agent:
         self.task_sequence = task_sequence if task_sequence is not None else []
         self.path_sequence = []
         self.state = state
-        self.free_agent = True
-        self.active_on_task = False
+        # 0 == Free Agent
+        # 1 == To_Pickup
+        # 2 == To_Delivery
+        self.status = 0
 
-    def set_active_on_task(self, status : bool):
+    def set_active_on_task(self, status : int):
+        """Sets Status of the Agent
+        0 == Free Agent
+        1 == To_Pickup
+        2 == To_Delivery
+
+        Args:
+            status (int): Current status of agent
+        """
         self.active_on_task = status
     
     def set_agent_id(self, agent_id):
@@ -19,20 +29,8 @@ class Agent:
     def set_task_sequence(self, task_sequences : list):
         self.task_sequences = task_sequences
     
-    def get_assigned_tasks(self) -> list:
-        return [task_sequence[0] for task_sequence in self.task_sequence]
-    
-    def set_state(self, state : tuple):
-        self.state = state
-    
-    def get_state(self):
-        return self.state
-    
-    def set_free_agent(self, free_agent : bool):
-        self.free_agent = free_agent
-        
-    def is_free_agent(self):
-        return self.free_agent
+    def get_assigned_task_ids(self) -> list:
+        return [task_id for task_id in self.task_sequence]
     
     def set_path_sequences(self, path_sequences : list):
         self.path_sequence = path_sequences
@@ -46,23 +44,25 @@ class Agent:
     
 class AgentLoader:
     def __init__(self, agents : list):
-        self.num_agents = len(agents)
         self.agents = agents
         
-    def get_agent(self, agent_id : int):
-        for agent in self.agents:
-            if agent.get_agent_id() == agent_id:
-                return agent
-        return None
+    def get_agent_states(self) -> list:
+        return [agent.state for agent in self.agents]
 
     def get_free_agents(self):
-        return [agent for agent in self.agents if agent.is_free_agent()]
+        return [agent for agent in self.agents if agent.status == 0]
     
-    def get_busy_agents(self):
-        return [agent for agent in self.agents if not agent.is_free_agent()] 
+    def get_to_pickup_agents(self):
+        return [agent for agent in self.agents if agent.status == 1] 
+    
+    def get_to_delivery_agents(self):
+        return [agent for agent in self.agents if agent.status == 2]
     
     def get_all_assigned_tasks(self):
-        return [agent.get_assigned_tasks() for agent in self.agents]   
+        return [agent.get_assigned_task_ids() for agent in self.agents]   
+    
+    def detect_collisions(self) -> int:
+        return len(self.agents) - len(set(self.get_agent_states()))
 
     def __str__(self):
-        return f"AgentLoader with {len(self.agents)} agents out of {self.num_agents} allowed"
+        return f"AgentLoader with {len(self.agents)} agents out of {len(self.agents)} allowed"

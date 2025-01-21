@@ -19,10 +19,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         
     last_task_id = 0
     
-    to_pickup = set([])
-    to_delivery = set([])
-    free_agents = Rs.get_free_agents()
-    
     global_tik = time.time()
     
     for t in range(T):
@@ -45,13 +41,18 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             # Append the new tasks to the list of tasks
             J |= J_new
             
+        print("Generated Tasks: ", J)
+            
         tik = time.time()
         print("=============================" + "Task Allocation"+ "=============================")
-        Rs, to_pickup = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, to_pickup, map)
+        Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
         S.append_task_allocation(Rs, J)
+        
+        for agent in Rs.agents:
+            print(agent.task_sequence)
         
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
@@ -59,29 +60,23 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # What should happen: 
         for agent in Rs.agents:
             if agent.path_sequence == []:
-                robot_sequences = router.pathPlan(G, map, Rs, J, path_planning_strategy, to_pickup, to_delivery)
+                Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
                 break
-            else:
-                pass
+            
         tok = time.time()
         S.add_total_PF_time(tok-tik)
-        if not robot_sequences:
-            print("Robot Sequences: ", robot_sequences)
-            print("No valid path plan, exiting ... ")
-            return 
-        
         
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, Ra, J, to_pickup, to_delivery, free_agents = simulate.simulate(S, G, Rs, robot_sequences, Ra, J, to_delivery, to_pickup, free_agents)
+        Rs, J = simulate.simulate(S, G, Rs, J)
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
-        print(G.get_all_occupied())
         
         global_tok = time.time()
         
         if (global_tok - global_tik) >= time_limit:
             return
+        
     return
         
 def main():
@@ -117,7 +112,7 @@ def main():
     
     al = agent.AgentLoader(robots)
     
-    init_locations = [robot.get_state() for robot in robots]
+    init_locations = [robot.state for robot in robots]
     S.add_paths(init_locations)
     
     
@@ -138,7 +133,7 @@ def main():
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
 def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, visualize : bool = False):
-    frequency = 0.1
+    frequency = 1
     inbound_outbound_ratio = 1.0 
     
     max_current_tasks = num_robots
@@ -148,17 +143,16 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     for robot_id, location in enumerate(G.get_all_occupied()):
         robots.append(agent.Agent(robot_id, location))
     
-    al = agent.AgentLoader(robots)
+    Rs = agent.AgentLoader(robots)
     
-    init_locations = [robot.get_state() for robot in robots]
+    init_locations = [agent.state for agent in Rs.agents]
     S.add_paths(init_locations)
     
     # hash_map = utils.construct_distance_hashmap(G)
     
     tik = time.time()
     # Execute online algorithm
-    execute(S, map, al, G, frequency, inbound_outbound_ratio, T, 
-            task_generation_strategy, max_current_tasks, task_assignment_strategy, path_planning_strategy, time_limit)    
+    execute(S, map, Rs, G, frequency, inbound_outbound_ratio, T, case_request_strategy=task_generation_strategy, max_task_number=max_current_tasks, task_assignment_strategy=task_assignment_strategy, path_planning_strategy=path_planning_strategy, time_limit=time_limit)    
     tok = time.time()
     S.set_total_runtime(tok-tik)  
     
@@ -182,7 +176,7 @@ def entry():
     
     time_limit = 14500
     
-    T = [5000]*120
+    T = [1000]*120
     # num_robots = list(range(7, 100))
     num_robots = [25]
     DOF = 4

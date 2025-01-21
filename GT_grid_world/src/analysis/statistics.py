@@ -81,7 +81,7 @@ class Stats:
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
         
-    def append_number_of_collisions(self, number_of_collisions) -> None:
+    def append_number_of_collisions(self, number_of_collisions : int) -> None:
         self.__collisions.append(number_of_collisions)
         
     def add_estimated_duration(self, task_id : int, estimated_duration : float) -> None:

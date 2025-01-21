@@ -11,7 +11,7 @@ from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 from .task_allocation_algorithms.external_algorithms.lns import lns
 import random
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, to_pickup : set, map : str, hash_map : dict = {}) -> Tuple[list, set, set]:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, hash_map : dict = {}) -> Tuple[list, set, set]:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -40,39 +40,39 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     
         assigned_tasks = Rs.get_all_assigned_tasks()
         
-        print(assigned_tasks)
+        print("Assigned Tasks: ", assigned_tasks)
     
-    
-        assigned_tasks = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id in assigned_tasks]
+        # COMPUTING THIS WRONG
         unassigned_tasks = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id not in assigned_tasks]
-        
-        print(assigned_tasks)
-        print(unassigned_tasks)
+    
+        print("Unassigned Tasks", unassigned_tasks)
         
         Rs_final_states = []
         for robot in Rs.agents:
-            if not robot.task_sequence:
+            if robot.task_sequence == []:
                 Rs_final_states.append((robot.id, robot.state))
             else:
-                Rs_final_states.append((robot.id, robot.task_sequence[-1][2]))
+                Rs_final_states.append((robot.id, get_task_goal_location(J, robot.task_sequence[-1])))
                 
-        assigned_tasks = [(11, (9, 12), (20, 12))]
-        unassigned_tasks = [(3, (9, 10), (20, 10)), (2, (2, 34), (19, 22)), (0, (4, 12), (20, 16)), (7, (18, 10), (13, 28)), (8, (20, 26), (12, 10)), (9, (20, 38), (5, 18)), (4, (20, 24), (12, 4)), (6, (20, 24), (5, 32)), (5, (7, 12), (18, 18)), (1, (19, 28), (3, 38))]
         sequences = [[] for _ in Rs.get_free_agents()]
-        returned_sequence = lns.LNS(map_name, assigned_tasks, unassigned_tasks, Rs_final_states, sequences)
+        returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
         
-        for i, sequence in enumerate(returned_sequence):
-            for task in sequence[-1]:
-                Rs.agents[i].task_sequence.append(task)
-            Rs.agents[i].free_agent = False
+        print(returned_sequence)
         
-        assigned_tasks_set = set()
-        for task_pair in returned_sequence:
-            for task in task_pair[-1]:
-                assigned_tasks_set.add(task)
-        to_pickup.update(assigned_tasks_set)
+        for robot_id, sequence in returned_sequence:
+            if not sequence:
+                continue
+            for task_id in sequence:
+                if task_id not in Rs.agents[robot_id].task_sequence:
+                    Rs.agents[robot_id].task_sequence.append(task_id)
+                    S.add_actual_distance(task_id)
+                    S.add_actual_pickup_distance(task_id)
+                    
+                    S.add_actual_duration(task_id)
+                    S.add_actual_pickup_duration(task_id)
+            Rs.agents[robot_id].status = 1
             
-        return Rs, to_pickup
+        return Rs
             
     elif task_assignment_strategy == "cost_matrix": 
         return cost_matrix_TA(S, G, Rs, Ra, J, to_pickup, free_agents)
