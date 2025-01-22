@@ -35,7 +35,17 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return random(S, Rs, Ra, J, to_pickup, free_agents)
     elif task_assignment_strategy == "lns":
         map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-    
+
+        # for agent in Rs.agents:
+        #     print("Pre Agent Task Sequence", agent.task_sequence)
+        # Remove task sequence for each agent and add them to unassigned tasks
+        for agent in Rs.agents:
+            while len(agent.task_sequence) > 1:
+                agent.task_sequence.pop(-1)
+        # print("=======================")
+        # for agent in Rs.agents:
+        #     print("Post Agent Task Sequence", agent.task_sequence)
+
         assigned_tasks = Rs.get_all_assigned_tasks()
         all_task_ids = [task[0] for task in J]
         

@@ -38,7 +38,13 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             
         tik = time.time()
         print("=============================" + "Task Allocation"+ "=============================")
-        Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
+        # Check if all tasks are allocated, if so, skip
+        total = 0
+        for agent in Rs.agents:
+            total += len(agent.task_sequence)
+        print("Total Tasks " + str(total) + " against max task number " + str(max_task_number))
+        if total < max_task_number:
+            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -55,23 +61,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             
         tok = time.time()
         S.add_total_PF_time(tok-tik)
-        print("Robot Path Sequence: ")
-        for agent in Rs.agents:
-            print(agent.path_sequence)
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
         Rs, J = simulate.simulate(S, G, Rs, J)
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
-        
-        print("Agents Who Have No Assigned Taks: ")
-        total = 0
-        for agent in Rs.agents:
-            n = len(agent.task_sequence)
-            print(n)
-            total += n
-        print("Total Tasks: ", total)
 
         global_tok = time.time()
         
@@ -137,7 +132,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = num_robots
+    max_current_tasks = 45
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -177,16 +172,16 @@ def entry():
     
     time_limit = 14500
     
-    T = [200]*120
+    T = [5000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [10]
+    num_robots = [15]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "lns"
     task_sequences = True
     path_planning_strategy = "ecbs"
     
-    visualize = True
+    visualize = False
     
     for i in range(len(num_robots)):
         output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + ".json"      

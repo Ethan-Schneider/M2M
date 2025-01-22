@@ -100,9 +100,9 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             #     print("Execution Succeeded with Sequences:", sequences)
                 
             # If a solution cannot be found with a higher suboptimality bound, break
-            if w >= 10.0:
+            if w >= 12.0:
                 break
-            w += 1.0
+            w += 5.0
         
         # If no sequences are returned, return the previous sequence
         # TODO: If no solution is found, recall the path planning algorithm with a higher suboptimality bound
