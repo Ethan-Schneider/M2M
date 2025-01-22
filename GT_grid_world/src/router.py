@@ -1,6 +1,6 @@
 from src.path_finding_algorithms.external_algorithms.EECBS import eecbs
 from src.path_finding_algorithms.external_algorithms.PBS import pbs
-from src.path_finding_algorithms.external_algorithms.MAPF_PC import mgpbs
+# from src.path_finding_algorithms.external_algorithms.MAPF_PC import mgpbs
 
 from .agent import *
 from .utils import *
@@ -76,10 +76,15 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             # If robot is a free_agent, set goal location to current state
             else:
                 goal_locations.append(agent.state)
-    
-    
-        print("Agent Start Locations: ", Rs.get_agent_states())
-        print("Agent Goal Locations: ", goal_locations)
+        # print("States: ", states)
+        # print("Goal Locations: ", goal_locations)
+        # for agent in Rs.agents:
+        #     print("Agent Status: ", agent.status)
+        #     print("Agent Id: ", agent.id)
+        #     if agent.task_sequence:
+        #         print("Agent's Task Start Location: ", get_task_start_location(J, agent.task_sequence[0]))
+        #         print("Agent's Task Goal Location: ", get_task_goal_location(J, agent.task_sequence[0]))
+
         sequences = []
         w = 1.2
         while not sequences:
@@ -87,13 +92,12 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             if path_planning_strategy == "pbs":
                 sequences = pbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
             elif path_planning_strategy == "ecbs":
-                print("Executing EECS")
                 sequences = eecbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
             if sequences == []:
                 print("+++++++++++++++++++Execution Failed with w = ", w)
                 print(sequences)
-            else:
-                print(sequences)
+            # else:
+            #     print("Execution Succeeded with Sequences:", sequences)
                 
             # If a solution cannot be found with a higher suboptimality bound, break
             if w >= 10.0:

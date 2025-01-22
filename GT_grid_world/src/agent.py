@@ -58,8 +58,15 @@ class AgentLoader:
     def get_to_delivery_agents(self):
         return [agent for agent in self.agents if agent.status == 2]
     
-    def get_all_assigned_tasks(self):
+    def get_all_assigned_tasks_per_robot(self):
         return [agent.get_assigned_task_ids() for agent in self.agents]   
+    
+    def get_all_assigned_tasks(self): 
+        tasks = []
+        for agent in self.agents:
+            for task in agent.task_sequence:
+                tasks.append(task)
+        return tasks
     
     def detect_collisions(self) -> int:
         return len(self.agents) - len(set(self.get_agent_states()))

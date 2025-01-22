@@ -35,17 +35,15 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return random(S, Rs, Ra, J, to_pickup, free_agents)
     elif task_assignment_strategy == "lns":
         map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-        # map_name = ".src/task_allocation_algorithms/external_algorithms/lns/maps/" + map.split('/')[-1] + ".map"
-        print(map_name)
     
         assigned_tasks = Rs.get_all_assigned_tasks()
+        all_task_ids = [task[0] for task in J]
         
-        print("Assigned Tasks: ", assigned_tasks)
-    
-        # COMPUTING THIS WRONG
-        unassigned_tasks = [(task_id, start_loc, goal_loc) for task_id, start_loc, goal_loc in J if task_id not in assigned_tasks]
-    
-        print("Unassigned Tasks", unassigned_tasks)
+        unassigned_task_ids = list(set(all_task_ids) - set(assigned_tasks))
+        unassigned_tasks = []
+
+        for task_id in unassigned_task_ids:
+            unassigned_tasks.append((task_id, get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
         
         Rs_final_states = []
         for robot in Rs.agents:
@@ -56,21 +54,36 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
                 
         sequences = [[] for _ in Rs.get_free_agents()]
         returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
-        
-        print(returned_sequence)
-        
+
         for robot_id, sequence in returned_sequence:
             if not sequence:
                 continue
             for task_id in sequence:
-                if task_id not in Rs.agents[robot_id].task_sequence:
-                    Rs.agents[robot_id].task_sequence.append(task_id)
+                if task_id not in Rs.agents[robot_id-1].task_sequence:
+                    Rs.agents[robot_id-1].task_sequence.append(task_id)
                     S.add_actual_distance(task_id)
                     S.add_actual_pickup_distance(task_id)
                     
                     S.add_actual_duration(task_id)
                     S.add_actual_pickup_duration(task_id)
-            Rs.agents[robot_id].status = 1
+
+                    estimated_to_pickup_path = a_star(G, Rs.agents[robot_id-1].state, get_task_start_location(J, task_id))
+                    estimated_task_path = a_star(G, get_task_start_location(J, task_id), get_task_goal_location(J, task_id))
+
+                    if not estimated_to_pickup_path:
+                        S.add_estimated_pickup_distance(task_id, np.inf)
+                        S.add_estimated_pickup_duration(task_id, np.inf)
+                    else:
+                        S.add_estimated_pickup_duration(task_id, len(estimated_to_pickup_path)-1)
+                        S.add_estimated_pickup_distance(task_id, len(estimated_to_pickup_path)-1)
+
+                    if not estimated_task_path:
+                        S.add_estimated_distance(task_id, np.inf)
+                        S.add_estimated_duration(task_id, np.inf)
+                    else:
+                        S.add_estimated_distance(task_id, len(estimated_task_path) - 1)
+                        S.add_estimated_duration(task_id, len(estimated_task_path) - 1)
+            Rs.agents[robot_id-1].status = 1
             
         return Rs
             

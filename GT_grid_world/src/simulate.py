@@ -46,12 +46,18 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : set):
         if agent.status == 1:
             if agent.state == get_task_start_location(J, agent.task_sequence[0]):
                 S.add_completed_to_pickup_task_id(agent.task_sequence[0])
-                agent.status == 2
+                agent.status = 2
         elif agent.status == 2:
             if agent.state == get_task_goal_location(J, agent.task_sequence[0]):
                 S.add_completed_task_id(agent.task_sequence[0])
-                agent.status = 0
-                J.remove(agent.task_sequence[0])
+                for task in J:
+                    if task[0] == agent.task_sequence[0]:
+                        J.remove(task)
+                        break
                 agent.task_sequence.pop(0)
+                if agent.task_sequence:
+                    agent.status = 1
+                else:
+                    agent.status = 0
             
     return Rs, J

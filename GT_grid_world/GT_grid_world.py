@@ -13,10 +13,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     # Initilize robot allocation to empty: allocation is defined as (task_id, robot_id)
     # If task_sequences, then Ra is defined as ([task_ids], robot_id)
 
-    for robot in Rs.agents:
-        print(robot)
-        
-        
     last_task_id = 0
     
     global_tik = time.time()
@@ -32,7 +28,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 N = frequency**-1
             else:
                 N = 0
-            print(N)
             # Generate new tasks
             tik = time.time()
             J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
@@ -41,8 +36,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             # Append the new tasks to the list of tasks
             J |= J_new
             
-        print("Generated Tasks: ", J)
-            
         tik = time.time()
         print("=============================" + "Task Allocation"+ "=============================")
         Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
@@ -50,9 +43,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tok = time.time()
         S.add_total_TA_time(tok-tik)
         S.append_task_allocation(Rs, J)
-        
-        for agent in Rs.agents:
-            print(agent.task_sequence)
         
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
@@ -65,13 +55,24 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             
         tok = time.time()
         S.add_total_PF_time(tok-tik)
-        
+        print("Robot Path Sequence: ")
+        for agent in Rs.agents:
+            print(agent.path_sequence)
+
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
         Rs, J = simulate.simulate(S, G, Rs, J)
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
+        print("Agents Who Have No Assigned Taks: ")
+        total = 0
+        for agent in Rs.agents:
+            n = len(agent.task_sequence)
+            print(n)
+            total += n
+        print("Total Tasks: ", total)
+
         global_tok = time.time()
         
         if (global_tok - global_tik) >= time_limit:
@@ -132,7 +133,7 @@ def main():
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
-def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, visualize : bool = False):
+def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
     frequency = 1
     inbound_outbound_ratio = 1.0 
     
@@ -163,7 +164,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots)
     S.output_graphs(folder_name)
 
-    if visualize:
+    if to_visualize:
         print("============================Visualizing Output============================")
         visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
@@ -176,23 +177,23 @@ def entry():
     
     time_limit = 14500
     
-    T = [1000]*120
+    T = [200]*120
     # num_robots = list(range(7, 100))
-    num_robots = [25]
+    num_robots = [10]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "lns"
     task_sequences = True
     path_planning_strategy = "ecbs"
     
-    visualize = False
+    visualize = True
     
     for i in range(len(num_robots)):
         output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + ".json"      
         S = statistics.Stats(num_robots[i], T[i], output_file)
         G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
         
-        arg_main(S, G, num_robots[i], T[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit)
+        arg_main(S, G, num_robots[i], T[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()
