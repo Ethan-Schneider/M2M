@@ -1,18 +1,17 @@
-from typing import Tuple
-
 from .analysis.statistics import Stats
 from .graph import Graph
-from .agent import Agent, AgentLoader
+from .agent import *
 from .utils import *
 
 from .task_allocation_algorithms.closest_robot import closest_robot
 from .task_allocation_algorithms.random import random
 from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 from .task_allocation_algorithms.lns import lns
+from .task_allocation_algorithms.lns_fully_informed import lns_fi
 
 import random
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, hash_map : dict = {}) -> Tuple[list, set, set]:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, hash_map : dict = {}) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -34,7 +33,9 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     elif task_assignment_strategy == "random":
         return random(S, Rs, Ra, J, to_pickup, free_agents)
     elif task_assignment_strategy == "lns":
-        return lns(S, G, map, Rs)
+        return lns(S, G, map, Rs, J)
+    elif task_assignment_strategy == "lns_fully_informed":
+        return lns_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "cost_matrix": 
         return cost_matrix_TA(S, G, Rs, J)
     else:

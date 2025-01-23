@@ -5,9 +5,9 @@ from ..utils import *
 from ..analysis.statistics import Stats
 from ..graph import Graph
 
-from ..task_allocation_algorithms.external_algorithms.lns import lns
+from ..task_allocation_algorithms.external_algorithms.lns_fully_informed import lns
 
-def lns(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
+def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
 
@@ -29,6 +29,10 @@ def lns(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
 
     for task_id in unassigned_task_ids:
         unassigned_tasks.append((task_id, get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
+        
+    assigned_tasks_lns = []
+    for task_id in assigned_tasks:
+        assigned_tasks_lns.append((task_id, get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
     
     Rs_final_states = []
     for robot in Rs.agents:
@@ -39,7 +43,7 @@ def lns(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
             
     sequences = [[] for _ in Rs.get_free_agents()]
     print(Rs_final_states)
-    returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
+    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences)
 
     for robot_id, sequence in returned_sequence:
         if not sequence:
