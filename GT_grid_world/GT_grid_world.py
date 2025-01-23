@@ -170,14 +170,15 @@ def entry():
     
     map = "data/maps/symbotic_small"
     
-    time_limit = 14500
+    time_limit = 57600
     
-    T = [5000]*120
+    T = [1000]*120
     # num_robots = list(range(7, 100))
     num_robots = [15]
     DOF = 4
     task_generation_strategy = "informed_uniform"
-    task_assignment_strategy = "lns"
+    # task_assignment_strategy = "lns"
+    task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
     

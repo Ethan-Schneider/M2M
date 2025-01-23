@@ -46,6 +46,11 @@ class AgentLoader:
     def __init__(self, agents : list):
         self.agents = agents
         
+    def get_agent(self, agent_id) -> Agent:
+        for agent in self.agents:
+            if agent.id == agent_id:
+                return agent
+        
     def get_agent_states(self) -> list:
         return [agent.state for agent in self.agents]
 

@@ -14,3 +14,6 @@
 [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns"]
 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
 	url = https://github.gatech.edu/eschneider32/LNS.git
+[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns_fully_informed"]
+	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns_fully_informed
+	url = https://github.gatech.edu/eschneider32/LNS.git

@@ -4,8 +4,9 @@ from typing import Tuple
 from ..analysis.statistics import Stats
 from ..graph import Graph
 from ..utils import *
+from ..agent import *
 
-def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_pickup : set, free_agents : set) -> Tuple[list, set, set]:
+def cost_matrix_TA(S : Stats, G : Graph, Rs : AgentLoader, J : set) -> Tuple[list, set, set]:
     """A baseline task allocation algorithm, which constructs a cost matrix of the distance between each free agent and each unassigned task, then
     iteratively assign the minimum cost from the matrix until all tasks or robot have been assigned.
 
@@ -13,34 +14,34 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
         S (Stats): Statistics object
         G (Graph): Map data object
         Rs (list): Robot State in the form of [(robot_id, state), ...]
-        Ra (list): Robot-Task Allocation in the form of [(task_id, robot_id), ...]
         J (set): Set of tasks in the form {(task_id, start_loc, goal_loc)}
-        to_pickup (set): Set of all robot_ids which are on the to_pickup segment of their task
-        free_agents (set): Set of all robot_ids which are free agents
 
     Returns:
         Ra(list), to_pickup(set), free_agents(set): Returns updated task assignment, set of free_agents, and set of to_pickup agents
     """
     
     # If no free agents or unassinged tasks, then return current allocation, to_pickup, and free_agents
-    unassigned_task_ids = get_unassigned_task_ids(J, Ra)    
+    assigned_tasks = Rs.get_all_assigned_tasks()
+    all_task_ids = [task[0] for task in J]
+    
+    unassigned_task_ids = list(set(all_task_ids) - set(assigned_tasks))
     list_ver = list(unassigned_task_ids)
     
     # If there are no free agents, skip task allocation
-    if len(free_agents) <= 0:
-        return Ra, to_pickup, free_agents
+    if len(Rs.get_free_agents()) <= 0:
+        return Rs
     # If there are no unassigned tasks, skip task allocation
     elif len(unassigned_task_ids) == 0:
-        return Ra, to_pickup, free_agents
+        return Rs
 
     
     # =============== Construct cost matrix ===============
     cost_matrix = []
-    for unassigned_robot_id in free_agents:
+    for agent in Rs.get_free_agents():
         robot_cost = []
         for unassigned_task_id in unassigned_task_ids:
             # Compute path for agent-task pair
-            path = a_star(G, get_robot_state(Rs, unassigned_robot_id), get_task_start_location(J, unassigned_task_id))
+            path = a_star(G, agent.state, get_task_start_location(J, unassigned_task_id))
             
             # If cannot find path, set path length to infinite
             if not path:
@@ -57,13 +58,13 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
     driveway_locations = []
     aisle_locations = []
     # Iterate over every currently allocated task
-    for allocation in Ra:
+    for task_id in assigned_tasks:
         # Get the start and goal locations for the task
-        start_loc = get_task_start_location(J, allocation[0])
-        goal_loc = get_task_goal_location(J, allocation[0])
+        start_loc = get_task_start_location(J, task_id)
+        goal_loc = get_task_goal_location(J, task_id)
         
         # Check which position is in the driveway and aisle, and append them accordingly
-        if start_loc[0] >= 16:
+        if start_loc[0] >= 4:
             driveway_locations.append(start_loc[1])
             aisle_locations.append(goal_loc[1])
         else:
@@ -80,7 +81,7 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
         goal_loc = get_task_goal_location(J, unassigned_task_id)
         
         # Check whether the start or goal is for the aisle or driveway
-        if start_loc[0] >= 16:
+        if start_loc[0] >= 4:
             aisle_loc = goal_loc[1]
             driveway_loc = start_loc[1]
         else:
@@ -99,7 +100,7 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
         
     # Exit if cost matrix is inf
     if np.all(np.isinf(cost_matrix)):
-        return Ra, to_pickup, free_agents
+        return Rs
     
     print("Cost Matrix Shape: ", cost_matrix.shape)
     
@@ -107,23 +108,21 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
     is_solution = True
     try: 
         # TODO: Change to iterate over min of cost_matrix (row, col)
-        for unassigned_robot_id in free_agents:
+        for robot_id in Rs.get_free_agents():
             # Get agent task allocation
             min_index_row, min_index_col = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
             # Add allocation and statistics
-            Ra.append((list(unassigned_task_ids)[min_index_col], list(free_agents)[min_index_row]))
+            Rs.get_agent(min_index_row).task_sequence[list(unassigned_task_ids)[min_index_col]]
             S.add_estimated_pickup_distance(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
             S.add_estimated_pickup_duration(list(unassigned_task_ids)[min_index_col], np.min(cost_matrix) - 1)
             
-            robot_id = list(free_agents)[min_index_row]
-            free_agents.remove(robot_id)
-            to_pickup.add(robot_id)
+            Rs.get_agent(robot_id).status = 1
             
-            S.add_actual_distance(get_assigned_task_id(Ra, robot_id))
-            S.add_actual_pickup_distance(get_assigned_task_id(Ra, robot_id))
+            S.add_actual_distance(Rs.get_agent(robot_id).task_sequence[0])
+            S.add_actual_pickup_distance(Rs.get_agent(robot_id).task_sequence[0])
             
-            S.add_actual_duration(get_assigned_task_id(Ra, robot_id))
-            S.add_actual_pickup_duration(get_assigned_task_id(Ra, robot_id))
+            S.add_actual_duration(Rs.get_agent(robot_id).task_sequence[0])
+            S.add_actual_pickup_duration(Rs.get_agent(robot_id).task_sequence[0])
             
             # TODO: Find out why a_star is returning no solution occasionally 
             # Compute estimated distance from pickup to place 
@@ -153,6 +152,6 @@ def cost_matrix_TA(S : Stats, G : Graph, Rs : list, Ra : list, J : set, to_picku
             if len(unassigned_task_ids) == 0:
                 break
     except:
-        return Ra, to_pickup, free_agents
+        return Rs
     
-    return Ra, to_pickup, free_agents
+    return Rs
