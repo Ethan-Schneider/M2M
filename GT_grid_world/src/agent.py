@@ -73,6 +73,11 @@ class AgentLoader:
                 tasks.append(task)
         return tasks
     
+    def get_assigned_agent(self, task_id) -> int:
+        for agent in self.agents:
+            if task_id in agent.task_sequence:
+                return agent.id
+    
     def detect_collisions(self) -> int:
         return len(self.agents) - len(set(self.get_agent_states()))
 
