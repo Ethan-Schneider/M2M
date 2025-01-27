@@ -37,6 +37,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             J |= J_new
             
         tik = time.time()
+        print("Number of tasks: " + str(len(J)))
         print("=============================" + "Task Allocation"+ "=============================")
         # Check if all tasks are allocated, if so, skip
         total = 0
@@ -129,7 +130,7 @@ def main():
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
 def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
-    frequency = 1
+    frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
     max_current_tasks = 45
