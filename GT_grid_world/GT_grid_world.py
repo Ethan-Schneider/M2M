@@ -62,6 +62,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             
         tok = time.time()
         S.add_total_PF_time(tok-tik)
+        
+        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
@@ -133,7 +135,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 45
+    max_current_tasks = 10
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -175,9 +177,9 @@ def entry():
     
     np.random.seed(0)
     
-    T = [1000]*120
+    T = [5000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [15]
+    num_robots = [5]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"

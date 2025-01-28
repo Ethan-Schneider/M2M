@@ -34,8 +34,9 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     # print("Unassigned Tasks:", unassigned_tasks)
     
     assigned_tasks_lns = []
-    for task_id in assigned_tasks:
-        assigned_tasks_lns.append((Rs.get_assigned_agent(task_id), get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
+    for agent in Rs.agents:
+        if agent.task_sequence != []:
+            assigned_tasks_lns.append((agent.id, get_task_start_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
     
     # print("Assigned Tasks: ", assigned_tasks_lns)
     
@@ -46,6 +47,7 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
         Rs_final_states.append((robot.id, robot.state))
             
     sequences = [[] for _ in Rs.get_free_agents()]
+    
     returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences)
 
     for robot_id, sequence in returned_sequence:
@@ -53,6 +55,7 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
             continue
         if Rs.agents[robot_id-1].task_sequence == []:
             Rs.agents[robot_id-1].status = 1
+            
         for task_id in sequence:
             if task_id not in Rs.agents[robot_id-1].task_sequence:
                 Rs.agents[robot_id-1].task_sequence.append(task_id)
@@ -78,5 +81,4 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
                 else:
                     S.add_estimated_distance(task_id, len(estimated_task_path) - 1)
                     S.add_estimated_duration(task_id, len(estimated_task_path) - 1)
-        
     return Rs
