@@ -30,15 +30,15 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     for task_id in unassigned_task_ids:
         unassigned_tasks.append((task_id, get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
         
-    print("Unassigned Tasks:", unassigned_tasks)
+    # print("Unassigned Tasks:", unassigned_tasks)
     
     assigned_tasks_lns = []
     for task_id in assigned_tasks:
         assigned_tasks_lns.append((Rs.get_assigned_agent(task_id), get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
     
-    print("Assigned Tasks: ", assigned_tasks_lns)
+    # print("Assigned Tasks: ", assigned_tasks_lns)
     
-    print("Agent States: ", Rs.get_agent_states())
+    # print("Agent States: ", Rs.get_agent_states())
     Rs_final_states = []
     for robot in Rs.agents:
         Rs_final_states.append((robot.id, robot.state))

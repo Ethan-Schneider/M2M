@@ -6,7 +6,7 @@ from .utils import *
 from .task_allocation_algorithms.closest_robot import closest_robot
 from .task_allocation_algorithms.random import random
 from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
-from .task_allocation_algorithms.lns import lns
+from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.lns_fully_informed import lns_fi
 
 import random
@@ -33,7 +33,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     elif task_assignment_strategy == "random":
         return random(S, Rs, Ra, J, to_pickup, free_agents)
     elif task_assignment_strategy == "lns":
-        return lns(S, G, map, Rs, J)
+        return lns_call(S, G, map, Rs, J)
     elif task_assignment_strategy == "lns_fully_informed":
         return lns_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "cost_matrix": 

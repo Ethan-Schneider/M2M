@@ -7,7 +7,7 @@ from ..graph import Graph
 
 from ..task_allocation_algorithms.external_algorithms.lns import lns
 
-def lns(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
+def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
 

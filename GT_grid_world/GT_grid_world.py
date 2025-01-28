@@ -37,13 +37,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             J |= J_new
             
         tik = time.time()
-        print("Number of tasks: " + str(len(J)))
         print("=============================" + "Task Allocation"+ "=============================")
         # Check if all tasks are allocated, if so, skip
         total = 0
         for agent in Rs.agents:
             total += len(agent.task_sequence)
-        print("Total Tasks " + str(total) + " against max task number " + str(max_task_number))
+            
         if total < max_task_number:
             Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
 
@@ -175,10 +174,11 @@ def entry():
     
     T = [1000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [15]
+    num_robots = [20]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     task_assignment_strategy = "lns_fully_informed"
+    # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
