@@ -181,8 +181,8 @@ def entry():
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    # task_assignment_strategy = "lns_fully_informed"
-    task_assignment_strategy = "lns"
+    task_assignment_strategy = "lns_fully_informed"
+    # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
