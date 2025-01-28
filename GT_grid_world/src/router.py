@@ -87,6 +87,10 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
 
         sequences = []
         w = 1.2
+        
+        print(f"Start Locations: {states}")
+        print(f"Goal Locations: {goal_locations}")
+        
         while not sequences:
             # Execute the path planning algorithm
             if path_planning_strategy == "pbs":

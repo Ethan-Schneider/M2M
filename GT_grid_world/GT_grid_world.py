@@ -1,4 +1,5 @@
 import time
+import numpy as np
 
 from src import graph, simulate, task_allocation, case_request_generator, router, agent
 from src.analysis import visualize, statistics
@@ -172,13 +173,16 @@ def entry():
     
     time_limit = 57600
     
+    np.random.seed(0)
+    
     T = [1000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [20]
+    num_robots = [15]
     DOF = 4
     task_generation_strategy = "informed_uniform"
-    task_assignment_strategy = "lns_fully_informed"
-    # task_assignment_strategy = "lns"
+    # task_assignment_strategy = "random"
+    # task_assignment_strategy = "lns_fully_informed"
+    task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"

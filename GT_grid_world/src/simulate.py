@@ -1,10 +1,12 @@
+from typing import Tuple
+
 from .analysis.statistics import Stats
 from .graph import Graph
 from .agent import *
 from .utils import *
 
 
-def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : set):
+def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : set) -> Tuple[AgentLoader, set]:
     # Update state of robots
     for agent in Rs.agents:
         # If robot sequence is stationary, leave the robot in place (wait action)
@@ -55,9 +57,9 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : set):
                         J.remove(task)
                         break
                 agent.task_sequence.pop(0)
-                if agent.task_sequence:
-                    agent.status = 1
-                else:
+                if agent.task_sequence == []:
                     agent.status = 0
+                else:
+                    agent.status = 1
             
     return Rs, J
