@@ -22,7 +22,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
         print("=============================" + "Task Generation"+ "=============================")
-        if np.round(t%frequency) == 0:
+        if t%frequency == 0:
             if len(J) < max_task_number:
                 if frequency >= 1.: 
                     N = 1
@@ -39,14 +39,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 J |= J_new
             
         tik = time.time()
-
-        all_task_locations = set()
-        for task in J:
-            all_task_locations.add(task[1])
-            all_task_locations.add(task[2])
-            
-        if 2*len(J) != len(all_task_locations):
-            raise ValueError(f"Task locations are not unique. Task locations: {all_task_locations}")
 
         print("=============================" + "Task Allocation"+ "=============================")
         # Check if all tasks are allocated, if so, skip
@@ -69,9 +61,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     raise ValueError(f"Task {task_id} is allocated to multiple agents.")
                 task_ids.add(task_id)
         
-        for agent in Rs.agents:
-            print(f"Agent {agent.id} has task sequence: {agent.task_sequence}")
-        
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
         # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
@@ -84,7 +73,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tok = time.time()
         S.add_total_PF_time(tok-tik)
         
-        # print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
+        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
@@ -156,7 +145,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 10
+    max_current_tasks = 18
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -194,13 +183,13 @@ def entry():
     
     map = "data/maps/symbotic_small"
     
-    time_limit = 57600
+    time_limit = 5760000
     
     np.random.seed(0)
     
-    T = [1000]*120
+    T = [1001]*120
     # num_robots = list(range(7, 100))
-    num_robots = [5]
+    num_robots = [15]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"

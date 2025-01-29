@@ -92,7 +92,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                     pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
 
                     aisle_loc = pickup_location[1]
-                    if np.count_nonzero(aisle_locations == aisle_loc) >= 2:
+                    if np.count_nonzero(aisle_locations == aisle_loc) >= 1:
                         continue
                     else:
                         break
@@ -108,7 +108,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                     dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
 
                     driveway_loc = dropoff_location[1]
-                    if np.count_nonzero(driveway_locations == driveway_loc) >= 2:
+                    if np.count_nonzero(driveway_locations == driveway_loc) >= 1:
                         continue
                     else:
                         break
@@ -130,7 +130,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                     pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
 
                     driveway_loc = pickup_location[1]
-                    if np.count_nonzero(driveway_locations == driveway_loc) >= 2:
+                    if np.count_nonzero(driveway_locations == driveway_loc) >= 1:
                         continue
                     else:
                         break
@@ -145,7 +145,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                     dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
 
                     aisle_loc = dropoff_location[1]
-                    if np.count_nonzero(aisle_locations == aisle_loc) >= 2:
+                    if np.count_nonzero(aisle_locations == aisle_loc) >= 1:
                         continue
                     else:
                         break
