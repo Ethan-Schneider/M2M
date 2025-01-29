@@ -23,19 +23,20 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # Check if new tasks need to be generated
         print("=============================" + "Task Generation"+ "=============================")
         if t%frequency == 0:
-            if frequency >= 1.: 
-                N = 1
-            elif frequency < 1.: 
-                N = frequency**-1
-            else:
-                N = 0
-            # Generate new tasks
-            tik = time.time()
-            J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
-            tok = time.time()
-            S.add_total_CRG_time(tok-tik)
-            # Append the new tasks to the list of tasks
-            J |= J_new
+            if len(J) < max_task_number:
+                if frequency >= 1.: 
+                    N = 1
+                elif frequency < 1.: 
+                    N = frequency**-1
+                else:
+                    N = 0
+                # Generate new tasks
+                tik = time.time()
+                J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
+                tok = time.time()
+                S.add_total_CRG_time(tok-tik)
+                # Append the new tasks to the list of tasks
+                J |= J_new
             
         tik = time.time()
         print("=============================" + "Task Allocation"+ "=============================")
@@ -135,7 +136,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 10
+    max_current_tasks = 30
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -177,9 +178,9 @@ def entry():
     
     np.random.seed(0)
     
-    T = [5000]*120
+    T = [10000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [5]
+    num_robots = [15]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
