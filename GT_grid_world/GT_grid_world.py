@@ -39,6 +39,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 J |= J_new
             
         tik = time.time()
+
+
+
+
         print("=============================" + "Task Allocation"+ "=============================")
         # Check if all tasks are allocated, if so, skip
         total = 0
@@ -51,6 +55,14 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tok = time.time()
         S.add_total_TA_time(tok-tik)
         S.append_task_allocation(Rs, J)
+
+        # Check if any agent is allocated the same tasks
+        for agent in Rs.agents:
+            task_ids = set()
+            for task_id in agent.task_sequence:
+                if task_id in task_ids:
+                    raise ValueError(f"Task {task_id} is allocated to multiple agents.")
+                task_ids.add(task_id)
         
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
@@ -136,7 +148,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 30
+    max_current_tasks = 10
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -178,9 +190,9 @@ def entry():
     
     np.random.seed(0)
     
-    T = [10000]*120
+    T = [5000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [15]
+    num_robots = [5]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"

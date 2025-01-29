@@ -1,6 +1,7 @@
 import numpy as np
 from .graph import Graph
 from .inventory_manager.item import ItemCategory
+from .utils import *
     
 def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, max_task_number : int, strategy: str = "uniform", seed : int = 0) -> tuple[set, int]:
     """_summary_
@@ -61,6 +62,23 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
             current_task_locations.add(task[2])
             
         # print("Current Task Locations: =================", current_task_locations)
+
+        # Construct list of current task locations in the driveway and aisle
+        driveway_locations = []
+        aisle_locations = []
+        # Iterate over every currently existing task
+        for task in J:
+            # Get the start and goal locations for the task
+            start_loc = get_task_start_location(J, task[0])
+            goal_loc = get_task_goal_location(J, task[0])
+            
+            # Check which position is in the driveway and aisle, and append them accordingly
+            if start_loc[0] >= 4:
+                driveway_locations.append(start_loc[1])
+                aisle_locations.append(goal_loc[1])
+            else:
+                driveway_locations.append(goal_loc[1])
+                aisle_locations.append(start_loc[1])
         
         for i, item in enumerate(items):
             if tasks_to_generate[i] == 0:
@@ -69,16 +87,31 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 if not locations_for_item:
                     continue
                 
+                while True:
                 # Uniformly choose a pickup location
-                pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
+                    pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
+
+                    aisle_loc = pickup_location[1]
+                    if np.count_nonzero(aisle_locations == aisle_loc) >= 2:
+                        continue
+                    else:
+                        break
                 
                 # Generate locations for item dropoff that are not part of a task
                 locations_for_dropoff = list(set(G.driveway.findEmpty()) - current_task_locations)
                 if not locations_for_dropoff:
                     continue
                 
+                while True:
                 # Uniformly choose a dropoff location
-                dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
+
+                    dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
+
+                    driveway_loc = dropoff_location[1]
+                    if np.count_nonzero(driveway_locations == driveway_loc) >= 2:
+                        continue
+                    else:
+                        break
                 
                 J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
@@ -90,16 +123,31 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 locations_for_item = list(set(G.driveway.findEmpty()) - current_task_locations)
                 if not locations_for_item:
                     continue
-                # Uniformly choose a pickup location
-                pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
+
+                while True:
+                    # Uniformly choose a pickup location
+                    pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
+
+                    driveway_loc = pickup_location[1]
+                    if np.count_nonzero(driveway_locations == driveway_loc) >= 2:
+                        continue
+                    else:
+                        break
                 
                 # Generate locations for item dropoff that are not part of a task
                 locations_for_dropoff = list(set(G.warehouse.findEmpty()) - current_task_locations)
                 if not locations_for_dropoff:
                     continue
-                    
-                # Uniformly choose a dropoff location
-                dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
+                
+                while True:
+                    # Uniformly choose a dropoff location
+                    dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
+
+                    aisle_loc = dropoff_location[1]
+                    if np.count_nonzero(aisle_locations == aisle_loc) >= 2:
+                        continue
+                    else:
+                        break
                 
                 J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
