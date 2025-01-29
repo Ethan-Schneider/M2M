@@ -61,7 +61,7 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
             current_task_locations.add(task[1])
             current_task_locations.add(task[2])
             
-        # print("Current Task Locations: =================", current_task_locations)
+        # print(f"Current Task Locations: {current_task_locations}")
 
         # Construct list of current task locations in the driveway and aisle
         driveway_locations = []
@@ -116,7 +116,8 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
                 
-                current_task_locations.add((pickup_location, dropoff_location))
+                current_task_locations.add(pickup_location)
+                current_task_locations.add(dropoff_location)
                 
             elif tasks_to_generate[i] == 1:
                 # Generate locations for item pickup that are not part of a task yet
@@ -152,12 +153,14 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
                 J_new.add((last_task_id, pickup_location, dropoff_location))
                 last_task_id += 1
                 
-                current_task_locations.add((pickup_location, dropoff_location))
+                current_task_locations.add(pickup_location)
+                current_task_locations.add(dropoff_location)
             else:
                 raise Exception("Error: Item has been designated neither an inbound or outbound task.")
         
         
     else:
         raise Exception("Unknown strategy, " + strategy + ", given, please select one of the chosen task generation strategies: \n - uninformed_uniform \n - informed_uniform")
+    # print(f"current task locations: {current_task_locations}")
     return J_new, last_task_id
     
