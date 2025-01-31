@@ -86,11 +86,12 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
         #         print("Agent's Task Goal Location: ", get_task_goal_location(J, agent.task_sequence[0]))
 
         sequences = []
-        w = 1.2
+        w = 1.02
         
         print(f"Start Locations: {states}")
         print(f"Goal Locations: {goal_locations}")
         
+        latch = False
         while not sequences:
             # Execute the path planning algorithm
             if path_planning_strategy == "pbs":
@@ -104,9 +105,14 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             #     print("Execution Succeeded with Sequences:", sequences)
                 
             # If a solution cannot be found with a higher suboptimality bound, break
-            if w >= 12.0:
-                break
-            w += 5.0
+            if w >= 1.22:
+                if latch:
+                    break
+                for i, agent in enumerate(Rs.agents):
+                    if agent.path_sequence == []:
+                        goal_locations[i] = agent.home
+                latch = True
+            w += 0.1
         
         # If no sequences are returned, return the previous sequence
         # TODO: If no solution is found, recall the path planning algorithm with a higher suboptimality bound

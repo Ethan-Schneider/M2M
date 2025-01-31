@@ -229,6 +229,8 @@ class Graph:
     def get_cost(self, loc1, loc2): 
         return self.__occupancy_graph[loc2[0], loc2[1]].get_cost()
         
+    def get_graph_size(self):
+        return self.__occupancy_graph.shape
     
     def draw_tile(self, id, style):
         r = " . "

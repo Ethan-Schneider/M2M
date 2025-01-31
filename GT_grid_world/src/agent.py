@@ -4,6 +4,7 @@ class Agent:
         self.task_sequence = task_sequence if task_sequence is not None else []
         self.path_sequence = []
         self.state = state
+        self.home = state
         # 0 == Free Agent
         # 1 == To_Pickup
         # 2 == To_Delivery
