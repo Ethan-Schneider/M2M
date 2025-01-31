@@ -9,8 +9,8 @@ from ..task_allocation_algorithms.external_algorithms.lns_fully_informed import 
 
 def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     
-    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
+    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
+    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
 
     # for agent in Rs.agents:
     #     print("Pre Agent Task Sequence", agent.task_sequence)
@@ -42,31 +42,33 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     # print("Assigned Tasks: ", assigned_tasks_lns)
     
     # print("Agent States: ", Rs.get_agent_states())
-    print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
+    # print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
     for robot in Rs.agents:
         Rs_final_states.append((robot.id, robot.state))
             
     sequences = [[] for _ in Rs.get_free_agents()]
     
-    returned_sequence, returned_paths = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences)
+    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences)
     
-    print("Returned Paths: ", returned_paths)
+    # print("Returned Paths: ", returned_paths)
     
-    print(G.get_graph_size())
+    # print(G.get_graph_size())
     
-    for i, path in enumerate(returned_paths):
-        converted_path = []
-        for state in path:
-            x = state // 96
-            y = state % 96
-            converted_path.append((x,y))
-        Rs.agents[i].path_sequence = converted_path[1:]
+    # for i, path in enumerate(returned_paths):
+    #     converted_path = []
+    #     for state in path:
+    #         x = state // 40
+    #         y = state % 40
+    #         converted_path.append((x,y))
+    #     Rs.agents[i].path_sequence = converted_path[1:]
         
     
-    for agent in Rs.agents:
-        print(f"Agent {agent.id} has path {agent.path_sequence}")
-            
+    # for agent in Rs.agents:
+    #     print(f"Agent {agent.id} has path {agent.path_sequence}")
+    
+    for sequence in returned_sequence:
+        print(sequence)        
 
     for robot_id, sequence in returned_sequence:
         if not sequence:

@@ -39,18 +39,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 J |= J_new
             
         tik = time.time()
-
+        # for task in J:
+        #     print(task)
         print("=============================" + "Task Allocation"+ "=============================")
-        num = 0
-        for agent in Rs.agents:
-            if agent.path_sequence == []:
-                num += 1
-        if num == len(Rs.agents):
-            # Unallocate all agents from their tasks
-            for agent in Rs.agents:
-                agent.task_sequence = []
-                agent.status = 0
-        
         # Check if all tasks are allocated, if so, skip
         total = 0
         for agent in Rs.agents:
@@ -71,21 +62,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     raise ValueError(f"Task {task_id} is allocated to multiple agents.")
                 task_ids.add(task_id)
         
-        if task_assignment_strategy != "lns_fully_informed":
-                
-            print("=============================" +"Routing"+ "=============================")
-            tik = time.time()
-            # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
-            # What should happen: 
-            for agent in Rs.agents:
-                if agent.path_sequence == []:
-                    Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
-                    break
-                
-            tok = time.time()
-            S.add_total_PF_time(tok-tik)
+        print("=============================" +"Routing"+ "=============================")
+        tik = time.time()
+        # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
+        # What should happen: 
+        for agent in Rs.agents:
+            if agent.path_sequence == []:
+                Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
+                break
             
-            print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
+        tok = time.time()
+        S.add_total_PF_time(tok-tik)
+        
+        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
@@ -157,7 +146,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 40
+    max_current_tasks = 30
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -193,15 +182,15 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, t
 def entry():
     initial_inventory_amount = 25.
     
-    map = "data/maps/symbotic_large"
+    map = "data/maps/symbotic_small"
     
-    time_limit = 57600
+    time_limit = 86400
     
-    np.random.seed(2)
+    np.random.seed(0)
     
-    T = [1005]*120
+    T = [1030]*120
     # num_robots = list(range(7, 100))
-    num_robots = [40]
+    num_robots = [25]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
