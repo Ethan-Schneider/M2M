@@ -16,9 +16,9 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     #     print("Pre Agent Task Sequence", agent.task_sequence)
     print(f"Agent Task Sequences Prior to Purge: {[agent.task_sequence for agent in Rs.agents]}")
     # Remove task sequence for each agent and add them to unassigned tasks
-    for agent in Rs.agents:
-        while len(agent.task_sequence) > 1:
-            agent.task_sequence.pop(-1)
+    # for agent in Rs.agents:
+    #     while len(agent.task_sequence) > 1:
+    #         agent.task_sequence.pop(-1)
     # print("=======================")
     # for agent in Rs.agents:
     #     print("Post Agent Task Sequence", agent.task_sequence)

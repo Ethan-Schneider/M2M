@@ -87,6 +87,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         if (global_tok - global_tik) >= time_limit:
             return
         
+        count = 0
+        for agent in Rs.agents:
+            if agent.path_sequence == []:
+                count += 1
+        if count == len(Rs.agents):
+            break
     return
         
 def main():
@@ -142,11 +148,11 @@ def main():
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
-def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
+def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
     frequency = 1.0
     inbound_outbound_ratio = 1.0 
     
-    max_current_tasks = 30
+    max_current_tasks = max_number_tasks
     
     #Initilize state of robots (robot_id, state)
     robots = []
@@ -185,12 +191,14 @@ def entry():
     map = "data/maps/symbotic_small"
     
     time_limit = 86400
+    # 30 0 1030 25 key error at 178
+    np.random.seed(2675)
     
-    np.random.seed(0)
-    
-    T = [1030]*120
+    max_number_tasks = [25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
+
+    T = [1000]*120
     # num_robots = list(range(7, 100))
-    num_robots = [25]
+    num_robots = [25]*120
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
@@ -203,11 +211,11 @@ def entry():
     visualize = False
     
     for i in range(len(num_robots)):
-        output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + ".json"      
+        output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + ".json"      
         S = statistics.Stats(num_robots[i], T[i], output_file)
         G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
         
-        arg_main(S, G, num_robots[i], T[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+        arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()
