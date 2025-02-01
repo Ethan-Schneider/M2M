@@ -9,8 +9,8 @@ from ..task_allocation_algorithms.external_algorithms.lns import lns
 
 def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     
-    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
+    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
+    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
 
     # for agent in Rs.agents:
     #     print("Pre Agent Task Sequence", agent.task_sequence)

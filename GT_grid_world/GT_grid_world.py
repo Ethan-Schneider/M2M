@@ -192,11 +192,12 @@ def entry():
     
     time_limit = 86400
     # 30 0 1030 25 key error at 178
-    np.random.seed(2675)
+
+    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     
     max_number_tasks = [25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
 
-    T = [1000]*120
+    T = [3600]*120
     # num_robots = list(range(7, 100))
     num_robots = [25]*120
     DOF = 4
@@ -211,7 +212,8 @@ def entry():
     visualize = False
     
     for i in range(len(num_robots)):
-        output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + ".json"      
+        np.random.seed(seeds[i])
+        output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seeds[i]) + ".json"      
         S = statistics.Stats(num_robots[i], T[i], output_file)
         G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
         
