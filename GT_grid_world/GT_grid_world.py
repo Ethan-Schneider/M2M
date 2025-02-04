@@ -71,7 +71,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             # What should happen: 
             for agent in Rs.agents:
                 if agent.path_sequence == []:
-                    Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
+                    Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy, S)
                     break
                 
             tok = time.time()

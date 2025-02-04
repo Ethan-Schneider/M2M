@@ -78,6 +78,8 @@ class Stats:
         self.__PF_time = []
         self.__SIM_time = []
         
+        self.__num_path_plan_fails = 0
+        
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
         
@@ -95,6 +97,9 @@ class Stats:
     
     def update_actual_duration(self, task_id : int, actual_duration : float) -> None:
         self.__actual_duration[task_id] += actual_duration
+        
+    def update_num_path_plan_fail(self) -> None:
+        self.__num_path_plan_fails += 1
         
     def remove_actual_duration(self, task_id : int) -> None:
         del self.__actual_duration[task_id]
@@ -450,6 +455,7 @@ class Stats:
             "Total Runtime" : self.__total_runtime,
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
+            "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
             "paths" : self.__paths,
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,

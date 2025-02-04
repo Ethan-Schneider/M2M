@@ -4,8 +4,9 @@ from src.path_finding_algorithms.external_algorithms.PBS import pbs
 
 from .agent import *
 from .utils import *
+from .analysis.statistics import *
 
-def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : str) -> list:
+def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : str, S : Stats) -> list:
     if path_planning_strategy == "mgpbs":
         states = [robot[1] for robot in Rs]
 
@@ -101,6 +102,7 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             if sequences == []:
                 print("+++++++++++++++++++Execution Failed with w = ", w)
                 print(sequences)
+                S.update_num_path_plan_fail()
             # else:
             #     print("Execution Succeeded with Sequences:", sequences)
                 
