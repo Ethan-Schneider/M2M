@@ -17,6 +17,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     last_task_id = 0
     
     global_tik = time.time()
+    skip = False
     
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
@@ -41,58 +42,67 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tik = time.time()
         # for task in J:
         #     print(task)
-        print("=============================" + "Task Allocation"+ "=============================")
-        # Check if all tasks are allocated, if so, skip
-        total = 0
-        for agent in Rs.agents:
-            total += len(agent.task_sequence)
             
-        if total < max_task_number:
-            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
+        if not skip:
+            print("=============================" + "Task Allocation"+ "=============================")
+            # Check if all tasks are allocated, if so, skip
+            total = 0
+            for agent in Rs.agents:
+                total += len(agent.task_sequence)
+                
+            if total < max_task_number:
+                Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
 
-        tok = time.time()
-        S.add_total_TA_time(tok-tik)
-        S.append_task_allocation(Rs, J)
+            tok = time.time()
+            S.add_total_TA_time(tok-tik)
+            S.append_task_allocation(Rs, J)
 
-        # Check if any agent is allocated the same tasks
-        for agent in Rs.agents:
-            task_ids = set()
-            for task_id in agent.task_sequence:
-                if task_id in task_ids:
-                    raise ValueError(f"Task {task_id} is allocated to multiple agents.")
-                task_ids.add(task_id)
-        
-        print("=============================" +"Routing"+ "=============================")
-        tik = time.time()
-        # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
-        # What should happen: 
-        for agent in Rs.agents:
-            if agent.path_sequence == []:
-                Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
-                break
+            # Check if any agent is allocated the same tasks
+            for agent in Rs.agents:
+                task_ids = set()
+                for task_id in agent.task_sequence:
+                    if task_id in task_ids:
+                        raise ValueError(f"Task {task_id} is allocated to multiple agents.")
+                    task_ids.add(task_id)
             
-        tok = time.time()
-        S.add_total_PF_time(tok-tik)
-        
-        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
+            print("=============================" +"Routing"+ "=============================")
+            tik = time.time()
+            # TODO: Refactor this / clean the logic b/c during first 40 timesteps it replans the plan
+            # What should happen: 
+            for agent in Rs.agents:
+                if agent.path_sequence == []:
+                    Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy)
+                    break
+                
+            tok = time.time()
+            S.add_total_PF_time(tok-tik)
+            
+            print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
 
-        print("=============================" +"Taking Step"+ "=============================")
-        tik = time.time()
-        Rs, J = simulate.simulate(S, G, Rs, J)
-        tok = time.time()
-        S.add_total_SIM_time(tok-tik)
+            print("=============================" +"Taking Step"+ "=============================")
+            tik = time.time()
+            Rs, J = simulate.simulate(S, G, Rs, J)
+            tok = time.time()
+            S.add_total_SIM_time(tok-tik)
 
-        global_tok = time.time()
-        
-        if (global_tok - global_tik) >= time_limit:
-            return
-        
-        count = 0
-        for agent in Rs.agents:
-            if agent.path_sequence == []:
-                count += 1
-        if count == len(Rs.agents):
-            break
+            global_tok = time.time()
+            
+            if (global_tok - global_tik) >= time_limit:
+                return
+            
+            count = 0
+            for agent in Rs.agents:
+                if agent.path_sequence == []:
+                    count += 1
+            if count == len(Rs.agents):
+                skip = True
+            
+            # count = 0
+            # for agent in Rs.agents:
+            #     if agent.path_sequence == []:
+            #         count += 1
+            # if count == len(Rs.agents):
+            #     break
     return
         
 def main():
@@ -193,9 +203,9 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    seeds = [7]
     
-    max_number_tasks = [25, 30, 35, 40, 45, 50, 55, 60, 65, 70]
+    max_number_tasks = [45]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
@@ -203,21 +213,22 @@ def entry():
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    task_assignment_strategy = "lns_fully_informed"
-    # task_assignment_strategy = "lns"
+    # task_assignment_strategy = "lns_fully_informed"
+    task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
     
     visualize = False
     
-    for i in range(len(num_robots)):
-        np.random.seed(seeds[i])
-        output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seeds[i]) + ".json"      
-        S = statistics.Stats(num_robots[i], T[i], output_file)
-        G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
-        
-        arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+    for seed in seeds:
+        np.random.seed(seed)
+        for i in range(len(max_number_tasks)):
+            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
+            S = statistics.Stats(num_robots[i], T[i], output_file)
+            G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
+            
+            arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()
