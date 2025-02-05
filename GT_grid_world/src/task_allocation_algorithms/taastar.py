@@ -5,9 +5,9 @@ from ..utils import *
 from ..analysis.statistics import Stats
 from ..graph import Graph
 
-from ..task_allocation_algorithms.external_algorithms.lns_fully_informed import lns
+from ..task_allocation_algorithms.external_algorithms.taastar_bounded import lns
 
-def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
+def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
@@ -16,9 +16,9 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     #     print("Pre Agent Task Sequence", agent.task_sequence)
     print(f"Agent Task Sequences Prior to Purge: {[agent.task_sequence for agent in Rs.agents]}")
     # Remove task sequence for each agent and add them to unassigned tasks
-    for agent in Rs.agents:
-        while len(agent.task_sequence) > 1:
-            agent.task_sequence.pop(-1)
+    # for agent in Rs.agents:
+    #     while len(agent.task_sequence) > 1:
+    #         agent.task_sequence.pop(-1)
     # print("=======================")
     # for agent in Rs.agents:
     #     print("Post Agent Task Sequence", agent.task_sequence)
@@ -48,9 +48,19 @@ def lns_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
         Rs_final_states.append((robot.id, robot.state))
             
     sequences = [[] for _ in Rs.get_free_agents()]
+    active = []
+    for agent in Rs.agents:
+        if agent.task_sequence:
+            active.append(1)
+        else:
+            active.append(0)
     
-    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences)
+    print(active)
+
+    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active)
     
+    print(returned_sequence)
+
     # print("Returned Paths: ", returned_paths)
     
     # print(G.get_graph_size())

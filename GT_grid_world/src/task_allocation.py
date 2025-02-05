@@ -8,6 +8,7 @@ from .task_allocation_algorithms.random import random_ta
 from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.lns_fully_informed import lns_fi
+from .task_allocation_algorithms.taastar import taastar_fi
 
 import random
 
@@ -36,6 +37,8 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return lns_call(S, G, map, Rs, J)
     elif task_assignment_strategy == "lns_fully_informed":
         return lns_fi(S, G, map, Rs, J)
+    elif task_assignment_strategy == "taastar":
+        return taastar_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "cost_matrix": 
         return cost_matrix_TA(S, G, Rs, J)
     else:

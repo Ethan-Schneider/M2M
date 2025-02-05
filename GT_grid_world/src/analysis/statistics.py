@@ -443,6 +443,7 @@ class Stats:
         data = {
             "timesteps_completed" : self.__T,
             "number_of_robots" : self.__num_of_robots,
+            "total_completed_tasks" : np.sum(self.__completed_task_ids),
             "completed_tasks": self.__completed_task_ids,
             "actual_duration_of_task_from_pick_to_place" : list(self.__actual_duration.values()),
             "estimated_duration_of_task_from_pick_to_place" : list(self.__estimated_duration.values()),
@@ -454,8 +455,10 @@ class Stats:
             "SoC(min)" : self.return_sum_of_costs(),
             "Total Runtime" : self.__total_runtime,
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
+            "Path Planning Runtimes" : self.__PF_time,
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
             "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
+            "Task Allocation Runtime" : self.__TA_time,
             "paths" : self.__paths,
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,

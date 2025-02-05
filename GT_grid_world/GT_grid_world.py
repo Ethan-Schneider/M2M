@@ -203,18 +203,19 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [7]
+    seeds = [3]
     
-    max_number_tasks = [45]
+    max_number_tasks = [35]
 
-    T = [3600]*120
+    T = [3601]*120
     # num_robots = list(range(7, 100))
     num_robots = [25]*120
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
-    task_assignment_strategy = "lns"
+    task_assignment_strategy = "taastar"
+    # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
