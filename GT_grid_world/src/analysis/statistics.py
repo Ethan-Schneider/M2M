@@ -216,10 +216,10 @@ class Stats:
         self.__CRG_time.append(time)
         
     def add_total_TA_time(self, time : float) -> None:
-        self.__TA_time.append(time)
+        self.__TA_time.append(float(time))
         
     def add_total_PF_time(self, time : float) -> None:
-        self.__PF_time.append(time)
+        self.__PF_time.append(float(time))
         
     def add_total_SIM_time(self, time : float) -> None:
         self.__SIM_time.append(time)
