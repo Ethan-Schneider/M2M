@@ -54,12 +54,8 @@ def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
             active.append(1)
         else:
             active.append(0)
-    
-    print(active)
 
     returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active)
-    
-    print(returned_sequence)
 
     # print("Returned Paths: ", returned_paths)
     
