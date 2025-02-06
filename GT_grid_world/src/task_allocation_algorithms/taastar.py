@@ -5,7 +5,7 @@ from ..utils import *
 from ..analysis.statistics import Stats
 from ..graph import Graph
 
-from ..task_allocation_algorithms.external_algorithms.taastar_bounded import lns
+from ..task_allocation_algorithms.external_algorithms.taastar import lns
 
 def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     

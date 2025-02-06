@@ -443,7 +443,7 @@ class Stats:
         data = {
             "timesteps_completed" : self.__T,
             "number_of_robots" : self.__num_of_robots,
-            "total_completed_tasks" : np.sum(self.__completed_task_ids),
+            "total_completed_tasks" : int(np.sum(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
             "actual_duration_of_task_from_pick_to_place" : list(self.__actual_duration.values()),
             "estimated_duration_of_task_from_pick_to_place" : list(self.__estimated_duration.values()),
