@@ -215,7 +215,8 @@ def entry():
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
     # task_assignment_strategy = "taastar"
-    task_assignment_strategy = "tbs"
+    # task_assignment_strategy = "tbs"
+    task_assignment_strategy = "tbs_bounded"
     # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True

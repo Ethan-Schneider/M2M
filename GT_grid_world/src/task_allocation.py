@@ -10,6 +10,7 @@ from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.lns_fully_informed import lns_fi
 from .task_allocation_algorithms.taastar import taastar_fi
 from .task_allocation_algorithms.task_based_search import task_based_search_fi
+from .task_allocation_algorithms.task_based_search_bounded import task_based_search_bounded_fi
 
 import random
 
@@ -42,6 +43,8 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return taastar_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "tbs":
         return task_based_search_fi(S, G, map, Rs, J)
+    elif task_assignment_strategy == "tbs_bounded":
+        return task_based_search_bounded_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "cost_matrix": 
         return cost_matrix_TA(S, G, Rs, J)
     else:
