@@ -37,7 +37,10 @@ def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     assigned_tasks_lns = []
     for agent in Rs.agents:
         if agent.task_sequence != []:
-            assigned_tasks_lns.append((agent.id, get_task_start_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
+            if agent.status == 1:
+                assigned_tasks_lns.append((agent.id, get_task_start_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
+            elif agent.status == 2:
+                assigned_tasks_lns.append((agent.id, get_task_goal_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
     
     # print("Assigned Tasks: ", assigned_tasks_lns)
     
@@ -55,7 +58,11 @@ def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
         else:
             active.append(0)
 
-    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active)
+    agent_status = []
+    for agent in Rs.agents:
+        agent_status.append(agent.status)
+
+    returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active, agent_status)
 
     # print("Returned Paths: ", returned_paths)
     

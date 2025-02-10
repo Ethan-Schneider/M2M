@@ -42,7 +42,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tik = time.time()
         # for task in J:
         #     print(task)
-            
+        # for agent in Rs.agents:
+        #     if len(agent.task_sequence) < 1:
+        #         print(f"Agent {agent.id} with status {agent.status} working no tasks. ")
+        #     else:
+        #         print(f"Agent {agent.id} with status {agent.status} working task {agent.task_sequence[0]}")
+
         if not skip:
             print("=============================" + "Task Allocation"+ "=============================")
             # Check if all tasks are allocated, if so, skip
@@ -90,12 +95,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             if (global_tok - global_tik) >= time_limit:
                 return
             
-            count = 0
-            for agent in Rs.agents:
-                if agent.path_sequence == []:
-                    count += 1
-            if count == len(Rs.agents):
-                skip = True
+            # count = 0
+            # for agent in Rs.agents:
+            #     if agent.path_sequence == []:
+            #         count += 1
+            # if count == len(Rs.agents):
+            #     skip = True
             
             # count = 0
             # for agent in Rs.agents:
@@ -214,9 +219,9 @@ def entry():
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
-    # task_assignment_strategy = "taastar"
+    task_assignment_strategy = "taastar"
     # task_assignment_strategy = "tbs"
-    task_assignment_strategy = "tbs_bounded"
+    # task_assignment_strategy = "tbs_bounded"
     # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True

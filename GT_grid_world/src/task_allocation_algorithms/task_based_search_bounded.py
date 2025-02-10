@@ -37,7 +37,10 @@ def task_based_search_bounded_fi(S : Stats, G : Graph, map_name : str, Rs : Agen
     assigned_tasks_lns = []
     for agent in Rs.agents:
         if agent.task_sequence != []:
-            assigned_tasks_lns.append((agent.id, get_task_start_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
+            if agent.status == 1:
+                assigned_tasks_lns.append((agent.id, get_task_start_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
+            elif agent.status == 2:
+                assigned_tasks_lns.append((agent.id, get_task_goal_location(J, agent.task_sequence[-1]), get_task_goal_location(J, agent.task_sequence[-1])))
     
     # print("Assigned Tasks: ", assigned_tasks_lns)
     
@@ -54,6 +57,9 @@ def task_based_search_bounded_fi(S : Stats, G : Graph, map_name : str, Rs : Agen
             active.append(1)
         else:
             active.append(0)
+
+    # print(f"Unassigned Tasks Length {len(unassigned_task_ids)}")
+    # print(f"Assigned Task IDS {assigned_tasks_lns}")
 
     returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active)
 
