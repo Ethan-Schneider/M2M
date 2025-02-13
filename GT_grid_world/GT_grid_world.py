@@ -208,9 +208,9 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0]
+    seeds = [4]
     
-    max_number_tasks = [25]
+    max_number_tasks = [45]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))

@@ -55,6 +55,8 @@ class Stats:
         self.__estimated_pickup_duration = {}
         
         self.__actual_pickup_duration = {}
+
+        self.__opened_nodes = []
         
         # Sequence of paths for each robot, init with empty array
         self.__truncated_paths = [] 
@@ -82,6 +84,9 @@ class Stats:
         
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
+
+    def append_open_nodes(self, opened_nodes : int) -> None:
+        self.__opened_nodes.append(opened_nodes)
         
     def append_number_of_collisions(self, number_of_collisions : int) -> None:
         self.__collisions.append(number_of_collisions)
@@ -455,6 +460,7 @@ class Stats:
             "SoC(min)" : self.return_sum_of_costs(),
             "Total Runtime" : self.__total_runtime,
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
+            "Opened Nodes" : self.__opened_nodes,
             "Path Planning Runtimes" : self.__PF_time,
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
             "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
