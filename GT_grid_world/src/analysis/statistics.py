@@ -11,6 +11,12 @@ class Stats:
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         
+        # Temp SOC
+        self.__soc = 0
+
+        # Admissibility
+        self.__admisibility = []
+
         # Aisle and Driveway Occupancy
         self.__aisle_occupancy = []
         self.__driveway_occupancy = []
@@ -176,11 +182,14 @@ class Stats:
     def append_task_allocation(self, Rs : AgentLoader, J) -> None:
         for agent in Rs.agents:
             for task in agent.task_sequence:
-                assignment = (get_task_start_location(J, task), get_task_goal_location(J, task), agent.state)
-                self.__task_assignments[agent.id].append(assignment)
+                # assignment = (get_task_start_location(J, task), get_task_goal_location(J, task), agent.state)
+                self.__task_assignments[agent.id].append(task)
                 
     def return_full_paths(self) -> list:
         return self.__paths
+    
+    def set_soc(self, soc) -> None:
+        self.__soc += soc
     
     # ====================== Aisle and Driveway Occupancy Functions
     def add_aisle_occupancy(self, aisle_occupancy : list) -> None:
@@ -229,6 +238,10 @@ class Stats:
     def add_total_SIM_time(self, time : float) -> None:
         self.__SIM_time.append(time)
             
+
+    def add_admisibility(self, admisibility : list) -> None:
+        for b in admisibility:
+            self.__admisibility.append(b)
     
     # ====================== Utils
     def trim_data(self):
@@ -457,7 +470,7 @@ class Stats:
             "collisions" : int(np.sum(self.__collisions)),
             "stationary_robots" : self.compute_stationary_robots(),
             "throughput (tasks/min)": self.return_throughput(),
-            "SoC(min)" : self.return_sum_of_costs(),
+            "SoC(min)" : self.__soc,
             "Total Runtime" : self.__total_runtime,
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
             "Opened Nodes" : self.__opened_nodes,
@@ -465,6 +478,7 @@ class Stats:
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
             "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
             "Task Allocation Runtime" : self.__TA_time,
+            "admissibility" : self.__admisibility,
             "paths" : self.__paths,
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,

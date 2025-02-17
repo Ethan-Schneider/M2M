@@ -107,7 +107,7 @@ def pathPlan(G, map : str, Rs : AgentLoader, J : set, path_planning_strategy : s
             #     print("Execution Succeeded with Sequences:", sequences)
                 
             # If a solution cannot be found with a higher suboptimality bound, break
-            if w >= 1.6:
+            if w >= 11.2:
                 if latch:
                     break
                 for i, agent in enumerate(Rs.agents):

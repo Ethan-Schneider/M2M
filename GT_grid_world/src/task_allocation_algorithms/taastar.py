@@ -62,8 +62,10 @@ def taastar_fi(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set):
     for agent in Rs.agents:
         agent_status.append(agent.status)
 
-    opened_list, returned_sequence = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active, agent_status)
+    opened_list, returned_sequence, admissible = lns.LNS(map_name, assigned_tasks_lns, unassigned_tasks, Rs_final_states, sequences, active, agent_status)
     S.append_open_nodes(opened_list)
+
+    S.add_admisibility(admissible)
     # print("Returned Paths: ", returned_paths)
     
     # print(G.get_graph_size())

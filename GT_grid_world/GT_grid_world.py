@@ -83,6 +83,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             S.add_total_PF_time(tok-tik)
             
             print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
+            soc = 0
+            for agent in Rs.agents:
+                soc += len(agent.path_sequence)
+            S.set_soc(soc)
 
             print("=============================" +"Taking Step"+ "=============================")
             tik = time.time()
@@ -164,7 +168,7 @@ def main():
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
 def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
-    frequency = 1.0
+    frequency = 1
     inbound_outbound_ratio = 1.0 
     
     max_current_tasks = max_number_tasks
@@ -208,9 +212,9 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [4]
+    seeds = [0]
     
-    max_number_tasks = [45]
+    max_number_tasks = [25]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
