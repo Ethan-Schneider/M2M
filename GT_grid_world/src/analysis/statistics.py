@@ -28,6 +28,8 @@ class Stats:
         
         self.__task_assignments = []
         
+        self.__unallocated_agents = []
+        
         # Estimated Distance for Task (task_start -> task_goal) in the form (task_id, estimated_distance)
         self.__estimated_distance = {}
         
@@ -90,6 +92,14 @@ class Stats:
         
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
+        
+    def compute_unallocated_agents(self, Rs : AgentLoader):
+        num = 0
+        for agent in Rs.agents:
+            if not agent.task_sequence:
+                num += 1
+                
+        self.__unallocated_agents.append(num)
 
     def append_open_nodes(self, opened_nodes : int) -> None:
         self.__opened_nodes.append(opened_nodes)
@@ -469,6 +479,7 @@ class Stats:
             "estimated_duration_of_task_from_start_to_pick" : list(self.__estimated_pickup_duration.values()),
             "collisions" : int(np.sum(self.__collisions)),
             "stationary_robots" : self.compute_stationary_robots(),
+            "unallocated agents" : self.__unallocated_agents,
             "throughput (tasks/min)": self.return_throughput(),
             "SoC(min)" : self.__soc,
             "Total Runtime" : self.__total_runtime,

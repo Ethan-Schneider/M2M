@@ -93,6 +93,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             Rs, J = simulate.simulate(S, G, Rs, J)
             tok = time.time()
             S.add_total_SIM_time(tok-tik)
+            
+            S.compute_unallocated_agents(Rs)
 
             global_tok = time.time()
             
@@ -212,21 +214,21 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0]
+    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     
-    max_number_tasks = [25]
+    max_number_tasks = [20]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [25]*120
+    num_robots = [15]*120
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
-    task_assignment_strategy = "taastar"
+    # task_assignment_strategy = "taastar"
     # task_assignment_strategy = "tbs"
     # task_assignment_strategy = "tbs_bounded"
-    # task_assignment_strategy = "lns"
+    task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
