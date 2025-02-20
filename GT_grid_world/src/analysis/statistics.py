@@ -16,6 +16,7 @@ class Stats:
 
         # Admissibility
         self.__admisibility = []
+        self.__admisibility_differences = []
 
         # Aisle and Driveway Occupancy
         self.__aisle_occupancy = []
@@ -65,6 +66,7 @@ class Stats:
         self.__actual_pickup_duration = {}
 
         self.__opened_nodes = []
+        self.__expanded_nodes = []
         
         # Sequence of paths for each robot, init with empty array
         self.__truncated_paths = [] 
@@ -103,6 +105,9 @@ class Stats:
 
     def append_open_nodes(self, opened_nodes : int) -> None:
         self.__opened_nodes.append(opened_nodes)
+
+    def append_expanded_nodes(self, expanded_nodes : int) -> None:
+        self.__expanded_nodes.append(expanded_nodes)
         
     def append_number_of_collisions(self, number_of_collisions : int) -> None:
         self.__collisions.append(number_of_collisions)
@@ -253,6 +258,9 @@ class Stats:
         for b in admisibility:
             self.__admisibility.append(b)
     
+    def append_admisibility_differences(self, admisibility : list) -> None:
+        for b in admisibility:
+            self.__admisibility_differences.append(b)
     # ====================== Utils
     def trim_data(self):
         # Trim Actual Distance 
@@ -485,11 +493,13 @@ class Stats:
             "Total Runtime" : self.__total_runtime,
             "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
             "Opened Nodes" : self.__opened_nodes,
+            "Expanded Nodes" : self.__expanded_nodes,
             "Path Planning Runtimes" : self.__PF_time,
             "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
             "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
             "Task Allocation Runtime" : self.__TA_time,
             "admissibility" : self.__admisibility,
+            "admissibility_differences" : self.__admisibility_differences,
             "paths" : self.__paths,
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,

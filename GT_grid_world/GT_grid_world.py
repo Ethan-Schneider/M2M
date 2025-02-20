@@ -216,7 +216,7 @@ def entry():
 
     seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     
-    max_number_tasks = [20]
+    max_number_tasks = [15]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
@@ -225,10 +225,10 @@ def entry():
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
-    # task_assignment_strategy = "taastar"
+    task_assignment_strategy = "taastar"
     # task_assignment_strategy = "tbs"
     # task_assignment_strategy = "tbs_bounded"
-    task_assignment_strategy = "lns"
+    # task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
@@ -238,7 +238,7 @@ def entry():
     for seed in seeds:
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
-            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
+            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "new.json"      
             S = statistics.Stats(num_robots[i], T[i], output_file)
             G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
             
