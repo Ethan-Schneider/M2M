@@ -214,7 +214,7 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    seeds = [3, 4, 5, 6, 7, 8, 9]
     
     max_number_tasks = [15]
 
@@ -238,7 +238,7 @@ def entry():
     for seed in seeds:
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
-            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "new.json"      
+            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "nsq.json"      
             S = statistics.Stats(num_robots[i], T[i], output_file)
             G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
             
