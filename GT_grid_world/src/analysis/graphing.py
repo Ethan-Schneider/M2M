@@ -183,12 +183,21 @@ def actual_estimated_duration(actual_duration : list, estimate_duration : list, 
     # linear_regression = df['coef'].to_list()
     # lower_std = df['[0.025'].to_list()
     # upper_std = df['0.975]'].to_list()
-
+    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    y = x
+    plt.plot(x, y, 'r')
+    
+    y = x - 5
+    plt.plot(x, y, 'r--')
+    
+    y = x + 5
+    plt.plot(x, y, 'r--')
+    
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, 360))
-    plt.ylim((0, 360))
+    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
 
 
     # x = estimate_duration
@@ -231,12 +240,22 @@ def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duratio
     # linear_regression = df['coef'].to_list()
     # lower_std = df['[0.025'].to_list()
     # upper_std = df['0.975]'].to_list()
+    
+    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    y = x
+    plt.plot(x, y, 'r')
+    
+    y = x - 5
+    plt.plot(x, y, 'r--')
+    
+    y = x + 5
+    plt.plot(x, y, 'r--')
 
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, 360))
-    plt.ylim((0, 360))
+    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
 
 
     # x = estimate_duration
@@ -280,12 +299,22 @@ def actual_estimated_total_duration(actual_duration : list, estimate_duration : 
     # linear_regression = df['coef'].to_list()
     # lower_std = df['[0.025'].to_list()
     # upper_std = df['0.975]'].to_list()
+    
+    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    y = x
+    plt.plot(x, y, 'r')
+    
+    y = x - 5
+    plt.plot(x, y, 'r--')
+    
+    y = x + 5
+    plt.plot(x, y, 'r--')
 
     plt.scatter(actual_duration, estimate_duration)
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, 360))
-    plt.ylim((0, 360))
+    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
 
 
     # x = estimate_duration
@@ -382,4 +411,50 @@ def stationary_robots_over_timesteps(paths : list, subfolder : str = "") -> None
     
 #endregion
 
+#region Unallocated Agents Graph
+def unallocated_agents_over_timesteps(unallocated_agents : list, subfolder : str = "") -> None:
+    plt.plot(np.arange(len(unallocated_agents)), unallocated_agents, '-')
+
+    plt.xlabel("Time Step")
+    plt.ylabel("Number of Unallocated Robots")
+    plt.title("Number of Unallocated Robots Over Time")
+    plt.yticks(np.arange(min(unallocated_agents), max(unallocated_agents)+1, 1))
+    
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "number_of_unallocated_robots_over_time"), bbox_inches='tight', dpi=300)
+    plt.clf()
+#endregion
+
+#region Aisle and Driveway Occupancy Graphs
+def aisle_occupancy_over_timesteps(aisle_occupancy : list, subfolder : str = "") -> None:
+    plt.plot(np.arange(len(aisle_occupancy)), aisle_occupancy, '-')
+
+    plt.xlabel("Time Step")
+    plt.ylabel("Aisle Occupancy")
+    plt.title("Aisle Occupancy Over Time")
+    
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "aisle_occupancy_over_time"), bbox_inches='tight', dpi=300)
+    plt.clf()
+    
+def driveway_occupancy_over_timesteps(driveway_occupancy : list, subfolder : str = "") -> None:
+    plt.plot(np.arange(len(driveway_occupancy)), driveway_occupancy, '-')
+
+    plt.xlabel("Time Step")
+    plt.ylabel("Driveway Occupancy")
+    plt.title("Driveway Occupancy Over Time")
+    
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    plt.savefig(os.path.join(folder_path, "driveway_occupancy_over_time"), bbox_inches='tight', dpi=300)
+    plt.clf()
+#endregion
 # TODO: Generate graphs (same as the distance ones) for the duration of a task

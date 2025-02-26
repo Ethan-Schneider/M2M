@@ -169,7 +169,7 @@ def main():
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
-def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
+def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, seed : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
     frequency = 1
     inbound_outbound_ratio = 1.0 
     
@@ -197,7 +197,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, m
     # S.task_length()
     S.save_data()
     
-    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots)
+    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed)
     S.output_graphs(folder_name)
 
     if to_visualize:
@@ -214,21 +214,21 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [3, 4, 5, 6, 7, 8, 9]
+    seeds = [0]
     
-    max_number_tasks = [15]
+    max_number_tasks = [5]
 
-    T = [3600]*120
+    T = [100]*120
     # num_robots = list(range(7, 100))
-    num_robots = [15]*120
+    num_robots = [5]*120
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
     # task_assignment_strategy = "lns_fully_informed"
-    task_assignment_strategy = "taastar"
+    # task_assignment_strategy = "taastar"
     # task_assignment_strategy = "tbs"
     # task_assignment_strategy = "tbs_bounded"
-    # task_assignment_strategy = "lns"
+    task_assignment_strategy = "lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
@@ -238,11 +238,11 @@ def entry():
     for seed in seeds:
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
-            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "nsq.json"      
+            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
             S = statistics.Stats(num_robots[i], T[i], output_file)
             G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
             
-            arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+            arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()

@@ -465,6 +465,13 @@ class Stats:
         # Idle Time Graph
         stationary_robots_over_timesteps(self.__paths, subfolder=folder)
         
+        # Unallocated Agents Graph
+        unallocated_agents_over_timesteps(self.__unallocated_agents, subfolder=folder)
+        
+        #Aisle and Driveway Occupancy Graph
+        aisle_occupancy_over_timesteps(self.__aisle_occupancy, subfolder=folder)
+        driveway_occupancy_over_timesteps(self.__driveway_occupancy, subfolder=folder)
+        
         
     def save_data(self):
         velocity_timesteps = self.compute_velocity_timesteps()
