@@ -67,7 +67,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 actual_duration = S.get_actual_duration(agent.task_sequence[0]) + S.get_actual_pickup_duration(agent.task_sequence[0])
                 estimated_duration = S.get_estimated_duration(agent.task_sequence[0]) + S.get_estimated_pickup_duration(agent.task_sequence[0])
                     
-                if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.1:
+                if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.5:
                     B.dump(agent.id, agent.task_sequence[0], J, S)
                 
                 for task in J:
