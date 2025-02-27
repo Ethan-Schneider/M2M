@@ -2,9 +2,9 @@ import time
 import numpy as np
 
 from src import graph, simulate, task_allocation, case_request_generator, router, agent
-from src.analysis import visualize, statistics
+from src.analysis import visualize, statistics, buffer
 
-def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
+def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
             task_assignment_strategy : str = "cost_matrix", task_sequences : bool = False,
@@ -22,6 +22,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
+        # Update Buffer 
+        B.add(Rs.get_agent_states(), t)
+        
         print("=============================" + "Task Generation"+ "=============================")
         if t%frequency == 0:
             if len(J) < max_task_number:
@@ -56,7 +59,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 total += len(agent.task_sequence)
                 
             if total < max_task_number:
-                Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map)
+                Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map, t)
 
             tok = time.time()
             S.add_total_TA_time(tok-tik)
@@ -90,7 +93,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
             print("=============================" +"Taking Step"+ "=============================")
             tik = time.time()
-            Rs, J = simulate.simulate(S, G, Rs, J)
+            Rs, J = simulate.simulate(S, B, G, Rs, J, map, t)
             tok = time.time()
             S.add_total_SIM_time(tok-tik)
             
@@ -169,7 +172,7 @@ def main():
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
 
-def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, seed : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
+def arg_main(S : statistics.Stats, B: buffer.Buffer, G : graph.Graph, num_robots : int, T : int, max_number_tasks : int, seed : int, task_generation_strategy : str, task_assignment_strategy : str, task_sequences : bool, path_planning_strategy : str, map : str, time_limit : int = 99999, to_visualize : bool = False):
     frequency = 1
     inbound_outbound_ratio = 1.0 
     
@@ -189,7 +192,7 @@ def arg_main(S : statistics.Stats, G : graph.Graph, num_robots : int, T : int, m
     
     tik = time.time()
     # Execute online algorithm
-    execute(S, map, Rs, G, frequency, inbound_outbound_ratio, T, case_request_strategy=task_generation_strategy, max_task_number=max_current_tasks, task_assignment_strategy=task_assignment_strategy, path_planning_strategy=path_planning_strategy, time_limit=time_limit)    
+    execute(S, B, map, Rs, G, frequency, inbound_outbound_ratio, T, case_request_strategy=task_generation_strategy, max_task_number=max_current_tasks, task_assignment_strategy=task_assignment_strategy, path_planning_strategy=path_planning_strategy, time_limit=time_limit)    
     tok = time.time()
     S.set_total_runtime(tok-tik)  
     
@@ -218,7 +221,7 @@ def entry():
     
     max_number_tasks = [5]
 
-    T = [100]*120
+    T = [3600]*120
     # num_robots = list(range(7, 100))
     num_robots = [5]*120
     DOF = 4
@@ -239,10 +242,12 @@ def entry():
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
             output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
+            buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
+            B = buffer.Buffer(60, buffer_file)
             S = statistics.Stats(num_robots[i], T[i], output_file)
             G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
             
-            arg_main(S, G, num_robots[i], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+            arg_main(S, B, G, num_robots[i], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()

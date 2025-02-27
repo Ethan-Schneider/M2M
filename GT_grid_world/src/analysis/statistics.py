@@ -11,6 +11,8 @@ class Stats:
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         
+        self.__early_task_ids = []
+        
         # Temp SOC
         self.__soc = 0
 
@@ -102,6 +104,9 @@ class Stats:
                 num += 1
                 
         self.__unallocated_agents.append(num)
+        
+    def append_early_task_ids(self, task_id : int) -> None:
+        self.__early_task_ids.append(task_id)
 
     def append_open_nodes(self, opened_nodes : int) -> None:
         self.__opened_nodes.append(opened_nodes)
@@ -118,11 +123,20 @@ class Stats:
     def add_estimated_pickup_duration(self, task_id : int, estimated_duration : float) -> None:
         self.__estimated_pickup_duration[task_id] = estimated_duration
         
+    def get_estimated_duration(self, task_id : int) -> float:
+        return self.__estimated_duration[task_id]
+
+    def get_estimated_pickup_duration(self, task_id : int) -> float:
+        return self.__estimated_pickup_duration[task_id]
+        
     def add_actual_duration(self, task_id : int) -> None:
         self.__actual_duration[task_id] = 0    
     
     def update_actual_duration(self, task_id : int, actual_duration : float) -> None:
         self.__actual_duration[task_id] += actual_duration
+        
+    def get_actual_duration(self, task_id : int) -> float:
+        return self.__actual_duration[task_id]
         
     def update_num_path_plan_fail(self) -> None:
         self.__num_path_plan_fails += 1
@@ -136,8 +150,45 @@ class Stats:
     def update_actual_pickup_duration(self, task_id : int, actual_duration : float) -> None:
         self.__actual_pickup_duration[task_id] += actual_duration
         
+    def get_actual_pickup_duration(self, task_id : int) -> float:
+        return self.__actual_pickup_duration[task_id]
+        
     def remove_actual_pickup_duration(self, task_id : int) -> None:
         del self.__actual_pickup_duration[task_id]
+        
+    def remove_uncompleted_task_durations(self) -> None:
+        for task_id in self.__actual_duration.copy():
+            if task_id not in self.__completed_task_ids:
+                del self.__actual_duration[task_id]
+                
+        for task_id in self.__estimated_duration.copy():
+            if task_id not in self.__completed_task_ids:
+                del self.__estimated_duration[task_id]
+                
+        for task_id in self.__actual_pickup_duration.copy():
+            if task_id not in self.__completed_to_pickup_task_ids:
+                del self.__actual_pickup_duration[task_id]
+            
+        for task_id in self.__estimated_pickup_duration.copy():
+            if task_id not in self.__completed_to_pickup_task_ids:
+                del self.__estimated_pickup_duration[task_id]
+                
+    def remove_early_task_ids(self) -> None:
+        for task_id in self.__actual_duration.copy():
+            if task_id in self.__early_task_ids:
+                del self.__actual_duration[task_id]
+        
+        for task_id in self.__estimated_duration.copy():
+            if task_id in self.__early_task_ids:
+                del self.__estimated_duration[task_id]
+                
+        for task_id in self.__actual_pickup_duration.copy():
+            if task_id in self.__early_task_ids:
+                del self.__actual_pickup_duration[task_id]
+        
+        for task_id in self.__estimated_pickup_duration.copy(): 
+            if task_id in self.__early_task_ids:
+                del self.__estimated_pickup_duration[task_id]
         
     # def add_estimated_inbound_pickup_distance(self, estimated_distance : float) -> None:
     #     self.__estimated_inbound_pickup_distance.append(estimated_distance)
@@ -481,7 +532,10 @@ class Stats:
         # for i in range(len(self.__paths)):
         #     timestep_data[f'timestep_{i}'] = {"paths" : self.__paths[i], "allocation" : self.__task_assignments[i], "velocity_timesteps" : velocity_timesteps[i]}
         
-        
+        print(self.__actual_duration)
+        self.remove_uncompleted_task_durations()
+        self.remove_early_task_ids()
+        print(self.__actual_duration)
         
         data = {
             "timesteps_completed" : self.__T,

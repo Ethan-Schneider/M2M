@@ -165,53 +165,60 @@ def actual_estimated_duration(actual_duration : list, estimate_duration : list, 
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    # N = len(actual_duration)
-    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    N = len(actual_duration)
+    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    # X_with_intercept = np.empty(shape=(N, p))
-    # X_with_intercept[:, 0] = 1
-    # X_with_intercept[:, 1:p] = actual_duration
+    X_with_intercept = np.empty(shape=(N, p))
+    X_with_intercept[:, 0] = 1
+    X_with_intercept[:, 1:p] = actual_duration
 
 
-    # ols = sm.OLS(estimate_duration, X_with_intercept)
-    # ols_result = ols.fit()
-    # results_summary = ols_result.summary()
+    ols = sm.OLS(estimate_duration, X_with_intercept)
+    ols_result = ols.fit()
+    results_summary = ols_result.summary()
 
-    # results_as_html = results_summary.tables[1].as_html()
-    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    results_as_html = results_summary.tables[1].as_html()
+    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    # linear_regression = df['coef'].to_list()
-    # lower_std = df['[0.025'].to_list()
-    # upper_std = df['0.975]'].to_list()
+    linear_regression = df['coef'].to_list()
+    lower_std = df['[0.025'].to_list()
+    upper_std = df['0.975]'].to_list()
+    
     x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
     y = x
-    plt.plot(x, y, 'r')
+    # plt.plot(x, y, 'r', label="Perfectly Predicted Tasks")
     
-    y = x - 5
-    plt.plot(x, y, 'r--')
+    # y = x - 5
+    # plt.plot(x, y, 'r--')
     
-    y = x + 5
-    plt.plot(x, y, 'r--')
+    # y = x + 5
+    # plt.plot(x, y, 'r--')
     
-    plt.scatter(actual_duration, estimate_duration)
+    plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
     plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
     plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
-
+    plt.title("Estimated vs. Actual Task Duration from Pickup to Dropoff Location")
+    plt.grid(True)
 
     # x = estimate_duration
     # y = actual_duration
     # plt.plot(x, y, 'k')
 
 
-    # y = lower_std[1]*x + lower_std[0]
-    # plt.plot(x, y, '--r')
+    y = linear_regression[1]*x + linear_regression[0]
+    plt.plot(x, y, 'b', label="Linear Regression")
 
-    # y = upper_std[1]*x + upper_std[0]
-    # plt.plot(x, y, '--r')
+    y = lower_std[1]*x + lower_std[0]
+    plt.plot(x, y, '--b')
+
+    y = upper_std[1]*x + upper_std[0]
+    plt.plot(x, y, '--b')
 
     # ols_result.summary()
+    plt.legend(loc="upper left")
+    
     folder_path = "data/figures/" + subfolder + "/"
     if not os.path.exists(folder_path):
         os.makedirs(folder_path)
@@ -223,53 +230,61 @@ def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duratio
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    # N = len(actual_duration)
-    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    N = len(actual_duration)
+    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    # X_with_intercept = np.empty(shape=(N, p))
-    # X_with_intercept[:, 0] = 1
-    # X_with_intercept[:, 1:p] = actual_duration
+    X_with_intercept = np.empty(shape=(N, p))
+    X_with_intercept[:, 0] = 1
+    X_with_intercept[:, 1:p] = actual_duration
 
-    # ols = sm.OLS(estimate_duration, X_with_intercept)
-    # ols_result = ols.fit()
-    # results_summary = ols_result.summary()
+    ols = sm.OLS(estimate_duration, X_with_intercept)
+    ols_result = ols.fit()
+    results_summary = ols_result.summary()
 
-    # results_as_html = results_summary.tables[1].as_html()
-    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    results_as_html = results_summary.tables[1].as_html()
+    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    # linear_regression = df['coef'].to_list()
-    # lower_std = df['[0.025'].to_list()
-    # upper_std = df['0.975]'].to_list()
+    linear_regression = df['coef'].to_list()
+    lower_std = df['[0.025'].to_list()
+    upper_std = df['0.975]'].to_list()
+    
+    print(actual_duration)
+    print(estimate_duration)
     
     x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
     y = x
-    plt.plot(x, y, 'r')
+    # plt.plot(x, y, 'r', label="Perfectly Predicted Tasks")
     
-    y = x - 5
-    plt.plot(x, y, 'r--')
+    # y = x - 5
+    # plt.plot(x, y, 'r--')
     
-    y = x + 5
-    plt.plot(x, y, 'r--')
+    # y = x + 5
+    # plt.plot(x, y, 'r--')
 
-    plt.scatter(actual_duration, estimate_duration)
+    plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
     plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
     plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.grid(True)
 
-
+    plt.title("Estimated vs. Actual Task Duration from Agent Start Location to Pickup Location")
     # x = estimate_duration
     # y = actual_duration
     # plt.plot(x, y, 'k')
 
 
-    # y = lower_std[1]*x + lower_std[0]
-    # plt.plot(x, y, '--r')
+    y = linear_regression[1]*x + linear_regression[0]
+    plt.plot(x, y, 'b', label="Linear Regression")
 
-    # y = upper_std[1]*x + upper_std[0]
-    # plt.plot(x, y, '--r')
+    y = lower_std[1]*x + lower_std[0]
+    plt.plot(x, y, '--b')
+
+    y = upper_std[1]*x + upper_std[0]
+    plt.plot(x, y, '--b')
 
     # ols_result.summary()
+    plt.legend(loc="upper left")
     
     folder_path = "data/figures/" + subfolder + "/"
     if not os.path.exists(folder_path):
@@ -282,53 +297,59 @@ def actual_estimated_total_duration(actual_duration : list, estimate_duration : 
     actual_duration = np.asarray(actual_duration).reshape(-1, 1)
     estimate_duration = np.asarray(estimate_duration)
     
-    # N = len(actual_duration)
-    # p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
+    N = len(actual_duration)
+    p = actual_duration.shape[1] + 1  # plus one because LinearRegression adds an intercept term
 
-    # X_with_intercept = np.empty(shape=(N, p))
-    # X_with_intercept[:, 0] = 1
-    # X_with_intercept[:, 1:p] = actual_duration
+    X_with_intercept = np.empty(shape=(N, p))
+    X_with_intercept[:, 0] = 1
+    X_with_intercept[:, 1:p] = actual_duration
 
-    # ols = sm.OLS(estimate_duration, X_with_intercept)
-    # ols_result = ols.fit()
-    # results_summary = ols_result.summary()
+    ols = sm.OLS(estimate_duration, X_with_intercept)
+    ols_result = ols.fit()
+    results_summary = ols_result.summary()
 
-    # results_as_html = results_summary.tables[1].as_html()
-    # df = pd.read_html(results_as_html, header=0, index_col=0)[0]
+    results_as_html = results_summary.tables[1].as_html()
+    df = pd.read_html(results_as_html, header=0, index_col=0)[0]
 
-    # linear_regression = df['coef'].to_list()
-    # lower_std = df['[0.025'].to_list()
-    # upper_std = df['0.975]'].to_list()
+    linear_regression = df['coef'].to_list()
+    lower_std = df['[0.025'].to_list()
+    upper_std = df['0.975]'].to_list()
     
     x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
     y = x
-    plt.plot(x, y, 'r')
+    # plt.plot(x, y, 'k', label="Perfectly Predicted Tasks")
     
-    y = x - 5
-    plt.plot(x, y, 'r--')
+    # y = x - 5
+    # plt.plot(x, y, 'r--')
     
-    y = x + 5
-    plt.plot(x, y, 'r--')
+    # y = x + 5
+    # plt.plot(x, y, 'r--')
 
-    plt.scatter(actual_duration, estimate_duration)
+    plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
     plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
     plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.grid(True)
+    
+    plt.title("Estimated vs. Actual Task Duration")
 
 
     # x = estimate_duration
     # y = actual_duration
     # plt.plot(x, y, 'k')
 
+    y = linear_regression[1]*x + linear_regression[0]
+    plt.plot(x, y, 'b', label="Linear Regression")
 
-    # y = lower_std[1]*x + lower_std[0]
-    # plt.plot(x, y, '--r')
+    y = lower_std[1]*x + lower_std[0]
+    plt.plot(x, y, '--b')
 
-    # y = upper_std[1]*x + upper_std[0]
-    # plt.plot(x, y, '--r')
+    y = upper_std[1]*x + upper_std[0]
+    plt.plot(x, y, '--b')
 
     # ols_result.summary()
+    plt.legend(loc="upper left")
     
     folder_path = "data/figures/" + subfolder + "/"
     if not os.path.exists(folder_path):
@@ -401,6 +422,7 @@ def stationary_robots_over_timesteps(paths : list, subfolder : str = "") -> None
     plt.xlabel("Time Step")
     plt.ylabel("Number of Stationary Robots")
     plt.title("Number of Stationary Robots Over Time")
+    plt.yticks(np.arange(0, max(num_idle_robots)+1, 1))
     
     folder_path = "data/figures/" + subfolder + "/"
     if not os.path.exists(folder_path):
@@ -418,7 +440,7 @@ def unallocated_agents_over_timesteps(unallocated_agents : list, subfolder : str
     plt.xlabel("Time Step")
     plt.ylabel("Number of Unallocated Robots")
     plt.title("Number of Unallocated Robots Over Time")
-    plt.yticks(np.arange(min(unallocated_agents), max(unallocated_agents)+1, 1))
+    plt.yticks(np.arange(0, max(unallocated_agents)+1, 1))
     
     folder_path = "data/figures/" + subfolder + "/"
     if not os.path.exists(folder_path):

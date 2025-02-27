@@ -14,7 +14,7 @@ from .task_allocation_algorithms.task_based_search_bounded import task_based_sea
 
 import random
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, hash_map : dict = {}) -> AgentLoader:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, t : int, hash_map : dict = {}) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -36,7 +36,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     elif task_assignment_strategy == "random":
         return random_ta(G, S, Rs, J)
     elif task_assignment_strategy == "lns":
-        return lns_call(S, G, map, Rs, J)
+        return lns_call(S, G, map, Rs, J, t)
     elif task_assignment_strategy == "lns_fully_informed":
         return lns_fi(S, G, map, Rs, J)
     elif task_assignment_strategy == "taastar":
