@@ -184,7 +184,7 @@ def actual_estimated_duration(actual_duration : list, estimate_duration : list, 
     # lower_std = df['[0.025'].to_list()
     # upper_std = df['0.975]'].to_list()
     
-    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    x = np.linspace(0, 160, 100)
     y = x
     plt.plot(x, y, 'k', label="Perfectly Predicted Tasks")
     
@@ -197,8 +197,8 @@ def actual_estimated_duration(actual_duration : list, estimate_duration : list, 
     plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
-    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.xlim((0, 160))
+    plt.ylim((0, 160))
     plt.title("Estimated vs. Actual Task Duration from Pickup to Dropoff Location")
     plt.grid(True)
 
@@ -251,7 +251,7 @@ def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duratio
     print(actual_duration)
     print(estimate_duration)
     
-    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    x = np.linspace(0, 160, 100)
     y = x
     plt.plot(x, y, 'k', label="Perfectly Predicted Tasks")
     
@@ -264,8 +264,8 @@ def actual_estimated_to_pickup_duration(actual_duration : list, estimate_duratio
     plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
-    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.xlim((0, 160))
+    plt.ylim((0, 160))
     plt.grid(True)
 
     plt.title("Estimated vs. Actual Task Duration from Agent Start Location to Pickup Location")
@@ -315,7 +315,7 @@ def actual_estimated_total_duration(actual_duration : list, estimate_duration : 
     # lower_std = df['[0.025'].to_list()
     # upper_std = df['0.975]'].to_list()
     
-    x = np.linspace(0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50, 100)
+    x = np.linspace(0, 160, 100)
     y = x
     plt.plot(x, y, 'k', label="Perfectly Predicted Tasks")
     
@@ -328,8 +328,8 @@ def actual_estimated_total_duration(actual_duration : list, estimate_duration : 
     plt.scatter(actual_duration, estimate_duration, c='red', label='Completed Tasks')
     plt.xlabel("Actual Duration (s)")
     plt.ylabel("Estimated Duration (s)")
-    plt.xlim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
-    plt.ylim((0, np.max([np.max(actual_duration), np.max(estimate_duration)]) + 50))
+    plt.xlim((0, 160))
+    plt.ylim((0, 160))
     plt.grid(True)
     
     plt.title("Estimated vs. Actual Task Duration")
