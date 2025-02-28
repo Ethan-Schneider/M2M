@@ -83,6 +83,8 @@ class Buffer(object):
     def dump_lns_allocation(self, t : int, Rs : AgentLoader, J : set):
         tau_extras, tau_extra_assigned_cost, tau_unassigned_agent_costs, unassigned_agent_ids, agent_task_sequences, agent_task_sequence_cost = self.compute_allocation_dif(Rs, J)
         
+        
+        
         data = {
             "timestep" : t,
             "extra task ids" : tau_extras,
@@ -91,10 +93,11 @@ class Buffer(object):
             "unassigned agent ids" : unassigned_agent_ids,
             "agent task sequences" : agent_task_sequences,
             "agent task sequence costs" : agent_task_sequence_cost,
+            "tasks" : list(J),
             "states" : self.state_buffer
         }
         
-        filename = filename = self.filename + f"_{t}.json"
+        filename = filename = self.filename + f"_{t}_unallocated.json"
         
         with open(filename, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
