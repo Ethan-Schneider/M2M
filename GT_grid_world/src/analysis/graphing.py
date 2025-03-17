@@ -480,3 +480,50 @@ def driveway_occupancy_over_timesteps(driveway_occupancy : list, subfolder : str
     plt.clf()
 #endregion
 # TODO: Generate graphs (same as the distance ones) for the duration of a task
+
+def plot_task_reallocations_histogram(data: dict, subfolder : str, completed_tasks : list) -> None:
+    """Create a histogram showing the distribution of task reallocations.
+    
+    Args:
+        data: Dictionary containing task reallocation data
+        output_dir: Directory to save the plot
+    """
+    # Extract reallocation counts
+    
+    print(data)
+    reallocation_counts = data
+    
+    for task_id in list(reallocation_counts.keys()):
+        if task_id not in completed_tasks:
+            del reallocation_counts[task_id]
+    
+    if not reallocation_counts:
+        print("No task reallocations found in the data")
+        return
+        
+    reallocation_counts = list(reallocation_counts.values())
+        
+    # Create the histogram
+    plt.figure(figsize=(10, 6))
+    plt.hist(reallocation_counts, bins=range(min(reallocation_counts), max(reallocation_counts) + 2), 
+             align='left', rwidth=0.8)
+    
+    # Customize the plot
+    plt.title('Distribution of Task Reallocations')
+    plt.xlabel('Number of Times Task was Reallocated')
+    plt.ylabel('Number of Tasks')
+    plt.grid(True, alpha=0.3)
+    
+    # Add statistics
+    mean_reallocations = sum(reallocation_counts) / len(reallocation_counts)
+    max_reallocations = max(reallocation_counts)
+    plt.text(0.02, 0.98, f'Mean: {mean_reallocations:.2f}\nMax: {max_reallocations}',
+             transform=plt.gca().transAxes, verticalalignment='top')
+    
+    folder_path = "data/figures/" + subfolder + "/"
+    if not os.path.exists(folder_path):
+        os.makedirs(folder_path)
+    
+    # Save the plot
+    plt.savefig(os.path.join(folder_path, 'task_reallocations_histogram'), bbox_inches='tight', dpi=300)
+    plt.close()

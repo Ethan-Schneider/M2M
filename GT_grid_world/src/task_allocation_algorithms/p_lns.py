@@ -8,7 +8,7 @@ from ..graph import Graph
 from ..task_allocation_algorithms.external_algorithms.p_lns import lns
 from ..task_allocation_algorithms.external_algorithms.p_lns import dc
 
-def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t : int) -> AgentLoader:
+def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t : int, gaussian_method: str = "unallocated_tasks") -> AgentLoader:
 
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
@@ -51,8 +51,21 @@ def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, 
         if G.warehouse.findFull() and loc in G.warehouse.findFull():
             aisle_locations.append(loc)
     
-    returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences, aisle_locations)
+    # Convert gaussian_method to integer for C++ code
+    gaussian_method_int = 0 if gaussian_method == "unallocated_tasks" else 1
+    # gaussian_method_int = 1
+    
+    returned_sequence, gaussian_weights = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences, aisle_locations, gaussian_method_int)
     print(f"Returned Sequence: {returned_sequence}")
+    
+    assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
+    for task_id in unassigned_task_ids:
+        if task_id in assigned_returned_sequence:
+            S.add_task_reallocation(task_id)
+
+    # Log Gaussian weights
+    for warehouse_weight, method_weight in gaussian_weights:
+        S.add_gaussian_weights(warehouse_weight, method_weight)
 
     for robot_id, sequence in returned_sequence:
         if not sequence:

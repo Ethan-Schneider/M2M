@@ -48,6 +48,11 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
     
     returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
     print(f"Returned Sequence: {returned_sequence}")
+    
+    assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
+    for task_id in unassigned_task_ids:
+        if task_id in assigned_returned_sequence:
+            S.add_task_reallocation(task_id)
 
     for robot_id, sequence in returned_sequence:
         if not sequence:

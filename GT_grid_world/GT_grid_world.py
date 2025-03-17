@@ -64,16 +64,9 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             tok = time.time()
             S.add_total_TA_time(tok-tik)
             S.append_task_allocation(Rs, J)
-            
-            # Compute number of agents without assigned tasks
-            # If number if above threshold compute and dump buffer and state
-            # get Tau_extra: the tasks that are not currently being worked on for every agent
-            # Compute the assigned cost from tau[0] to Tau_extra in its respective task sequence
-            # compute for every task in Tau_extra, the cost to every unallocated agent from its start location to the task's start and goal location
-            # save the original cost and the estimated cost for all other agents for every Tau_extra, then save and dump the buffer 
 
-            if len(Rs.get_free_agents()) > 11 and t >= 100:
-                B.dump_lns_allocation(t, Rs, J)
+            # if len(Rs.get_free_agents()) > 11 and t >= 100:
+            #     B.dump_lns_allocation(t, Rs, J)
 
             # Check if any agent is allocated the same tasks
             for agent in Rs.agents:

@@ -97,6 +97,14 @@ class Stats:
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
         
+        self.__gaussian_weights = {
+            "warehouse": [],
+            "method": []
+        }
+        
+        # Track task reallocations
+        self.__task_reallocations = {}  # task_id -> number of times allocated before being worked on
+        
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
         for agent in Rs.agents:
@@ -523,6 +531,9 @@ class Stats:
         aisle_occupancy_over_timesteps(self.__aisle_occupancy, subfolder=folder)
         driveway_occupancy_over_timesteps(self.__driveway_occupancy, subfolder=folder)
         
+        # Task Reallocations Graph
+        plot_task_reallocations_histogram(self.__task_reallocations, folder, self.__completed_task_ids)
+        
         
     def save_data(self):
         velocity_timesteps = self.compute_velocity_timesteps()
@@ -565,9 +576,35 @@ class Stats:
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,
             "allocation" : self.__task_assignments,
-            "velocity_timesteps" : velocity_timesteps
+            "velocity_timesteps" : velocity_timesteps,
+            "gaussian_weights" : self.__gaussian_weights,
+            "task_reallocations" : self.__task_reallocations
         }
         
         
         with open(self.__output_file, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def add_gaussian_weights(self, warehouse_weight: float, method_weight: float) -> None:
+        """Add both Gaussian weights to the statistics.
+        
+        Args:
+            warehouse_weight (float): Weight computed using all warehouse locations
+            method_weight (float): Weight computed using the chosen method (unallocated tasks or warehouse items)
+        """
+        self.__gaussian_weights["warehouse"].append(warehouse_weight)
+        self.__gaussian_weights["method"].append(method_weight)
+
+    def add_task_reallocation(self, task_id: int) -> None:
+        """Increment the reallocation count for a task."""
+        if task_id not in self.__task_reallocations:
+            self.__task_reallocations[task_id] = 0
+        self.__task_reallocations[task_id] += 1
+
+    def get_task_reallocations(self) -> dict:
+        """Get the dictionary of task reallocations.
+        
+        Returns:
+            Dictionary mapping task IDs to their reallocation counts
+        """
+        return self.__task_reallocations
