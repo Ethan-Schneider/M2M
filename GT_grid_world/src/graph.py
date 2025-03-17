@@ -58,6 +58,8 @@ class Graph:
         driveway_locations = []
         robot_start_locations = []
         self.obstacles = []
+        self.aisle_locations = []  # Track aisle locations (e)
+        self.station_locations = []  # Track inbound/outbound stations (s)
                 
         # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
         f = open(filename, "r")
@@ -71,6 +73,14 @@ class Graph:
                     self.obstacles.append((i, j))
                     row.append(Node(cost, occupied=False, obstacle=True))
                     obstacle_row.append(1)
+                elif character == "e":
+                    obstacle_row.append(0)
+                    row.append(Node(cost, occupied=False, obstacle=False))
+                    self.aisle_locations.append((i, j))
+                elif character == "s":
+                    obstacle_row.append(0)
+                    row.append(Node(cost, occupied=False, obstacle=False))
+                    self.station_locations.append((i, j))
                 elif character == ".":
                     obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
@@ -92,7 +102,6 @@ class Graph:
         # TODO: Currently populating driveway in the same state as the warehouse, should consider changing  
         self.warehouse = Inventory(warehouse_locations, warehouse_strategy, initial_warehouse_capacity)
         self.driveway = Inventory(driveway_locations, warehouse_strategy, initial_warehouse_capacity)
-        
         
         if self.__num_robots > max_num_robots:
             raise Exception("Number of robots exceeds maximum number of robots for map")
@@ -287,4 +296,12 @@ class Graph:
             line += "\n"
             graph += line
         print(graph)
+                    
+    def get_aisle_locations(self) -> list:
+        """Returns list of aisle locations (e) in the map."""
+        return self.aisle_locations
+
+    def get_station_locations(self) -> list:
+        """Returns list of inbound/outbound station locations (s) in the map."""
+        return self.station_locations
                     

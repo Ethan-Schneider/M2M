@@ -7,7 +7,7 @@ from .task_allocation_algorithms.closest_robot import closest_robot
 from .task_allocation_algorithms.random import random_ta
 from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 from .task_allocation_algorithms.lns import lns_call
-
+from .task_allocation_algorithms.p_lns import p_lns_call
 import random
 
 def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, t : int, hash_map : dict = {}) -> AgentLoader:
@@ -31,6 +31,8 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return random_ta(G, S, Rs, J)
     elif task_assignment_strategy == "lns":
         return lns_call(S, G, map, Rs, J, t)
+    elif task_assignment_strategy == "p_lns":
+        return p_lns_call(S, G, map, Rs, J, t)
     else:
         print("ERROR: Unknown task assignment strategy " + task_assignment_strategy + ", please choose another one.")
         return Rs

@@ -227,7 +227,7 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0, 1, 2]
+    seeds = [0]
     
     max_number_tasks = [25]
 
@@ -237,7 +237,8 @@ def entry():
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    task_assignment_strategy = "lns"
+    # task_assignment_strategy = "lns"
+    task_assignment_strategy = "p_lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
