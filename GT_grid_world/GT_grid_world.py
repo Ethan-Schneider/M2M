@@ -203,7 +203,7 @@ def arg_main(S : statistics.Stats, B: buffer.Buffer, G : graph.Graph, num_robots
     # S.task_length()
     S.save_data()
     
-    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed)
+    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed) + "_full"
     S.output_graphs(folder_name)
 
     if to_visualize:
@@ -220,18 +220,18 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0]
+    seeds = [1, 2, 3]
     
-    max_number_tasks = [25]
+    max_number_tasks = [20, 25]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [25]*120
+    num_robots = [10, 15, 20, 25]*120
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    # task_assignment_strategy = "lns"
-    task_assignment_strategy = "p_lns"
+    task_assignment_strategy = "lns"
+    # task_assignment_strategy = "p_lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
@@ -241,13 +241,14 @@ def entry():
     for seed in seeds:
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
-            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
-            buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
-            B = buffer.Buffer(80, buffer_file)
-            S = statistics.Stats(num_robots[i], T[i], output_file)
-            G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
-            
-            arg_main(S, B, G, num_robots[i], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+            for j in range(len(num_robots)):
+                output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "_full.json"      
+                buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
+                B = buffer.Buffer(80, buffer_file)
+                S = statistics.Stats(num_robots[j], T[i], output_file)
+                G = graph.Graph(num_robots[j], map, DOF, True, "uniform", initial_inventory_amount)
+                
+                arg_main(S, B, G, num_robots[j], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()
