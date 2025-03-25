@@ -35,11 +35,16 @@ def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, 
     
     print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
+    Rs_first_goal_locations = []
     for robot in Rs.agents:
         if robot.task_sequence == []:
             Rs_final_states.append((robot.id, robot.state))
+            Rs_first_goal_locations.append(robot.state)
         else:
             Rs_final_states.append((robot.id, get_task_goal_location(J, robot.task_sequence[-1])))
+            Rs_first_goal_locations.append(get_task_start_location(J, robot.task_sequence[0]))
+            
+    Rs_current_states = [robot.state for robot in Rs.agents]
             
     sequences = [[] for _ in Rs.get_free_agents()]
     
@@ -55,7 +60,7 @@ def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, 
     gaussian_method_int = 0 if gaussian_method == "unallocated_tasks" else 1
     # gaussian_method_int = 1
     
-    returned_sequence, gaussian_weights = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences, aisle_locations, gaussian_method_int)
+    returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_current_states, Rs_first_goal_locations, Rs_final_states, sequences)#, aisle_locations, gaussian_method_int)
     print(f"Returned Sequence: {returned_sequence}")
     
     assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
@@ -64,8 +69,8 @@ def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, 
             S.add_task_reallocation(task_id)
 
     # Log Gaussian weights
-    for warehouse_weight, method_weight in gaussian_weights:
-        S.add_gaussian_weights(warehouse_weight, method_weight)
+    # for warehouse_weight, method_weight in gaussian_weights:
+    #     S.add_gaussian_weights(warehouse_weight, method_weight)
 
     for robot_id, sequence in returned_sequence:
         if not sequence:
