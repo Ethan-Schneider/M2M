@@ -58,20 +58,30 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
     for agent in Rs.agents:
         if agent.status == 1:
             if agent.state == get_task_start_location(J, agent.task_sequence[0]):
-                S.add_completed_to_pickup_task_id(agent.task_sequence[0])
+                task_id = agent.task_sequence[0]
+                S.add_completed_to_pickup_task_id(task_id)
+                # Update pickup duration when reaching pickup location
+                S.update_actual_pickup_duration(task_id, t - S.get_actual_pickup_duration(task_id))
                 agent.status = 2
         elif agent.status == 2:
             if agent.state == get_task_goal_location(J, agent.task_sequence[0]):
-                S.add_completed_task_id(agent.task_sequence[0])
+                task_id = agent.task_sequence[0]
+                S.add_completed_task_id(task_id, t)
+                S.update_service_time(task_id, t)
                 
-                actual_duration = S.get_actual_duration(agent.task_sequence[0]) + S.get_actual_pickup_duration(agent.task_sequence[0])
-                estimated_duration = S.get_estimated_duration(agent.task_sequence[0]) + S.get_estimated_pickup_duration(agent.task_sequence[0])
+                # Update actual duration when reaching goal location
+                S.update_actual_duration(task_id, t - S.get_actual_duration(task_id))
+                
+                actual_duration = S.get_actual_duration(task_id) + S.get_actual_pickup_duration(task_id)
+                S.update_task_cost(task_id, actual_duration)
+                
+                estimated_duration = S.get_estimated_duration(task_id) + S.get_estimated_pickup_duration(task_id)
                     
                 if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.8:
-                    B.dump(agent.id, agent.task_sequence[0], J, S)
+                    B.dump(agent.id, task_id, J, S)
                 
                 for task in J:
-                    if task[0] == agent.task_sequence[0]:
+                    if task[0] == task_id:
                         J.remove(task)
                         break
                     
@@ -80,22 +90,24 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                     agent.status = 0
                 else:
                     agent.status = 1
-                    S.add_actual_distance(agent.task_sequence[0])
-                    S.add_actual_pickup_distance(agent.task_sequence[0])
+                    new_task_id = agent.task_sequence[0]
+                    S.add_actual_distance(new_task_id)
+                    S.add_actual_pickup_distance(new_task_id)
                     
-                    S.add_actual_duration(agent.task_sequence[0])
-                    S.add_actual_pickup_duration(agent.task_sequence[0])
+                    # Initialize durations for new task
+                    S.add_actual_duration(new_task_id)
+                    S.add_actual_pickup_duration(new_task_id)
                     
-                    estimated_to_pickup_path = dc.distance(map_name, agent.state, get_task_start_location(J, agent.task_sequence[0]))
-                    estimated_task_path = dc.distance(map_name, get_task_start_location(J, agent.task_sequence[0]), get_task_goal_location(J, agent.task_sequence[0]))
+                    estimated_to_pickup_path = dc.distance(map_name, agent.state, get_task_start_location(J, new_task_id))
+                    estimated_task_path = dc.distance(map_name, get_task_start_location(J, new_task_id), get_task_goal_location(J, new_task_id))
 
-                    S.add_estimated_pickup_duration(agent.task_sequence[0], estimated_to_pickup_path)
-                    S.add_estimated_pickup_distance(agent.task_sequence[0], estimated_to_pickup_path)
+                    S.add_estimated_pickup_duration(new_task_id, estimated_to_pickup_path)
+                    S.add_estimated_pickup_distance(new_task_id, estimated_to_pickup_path)
 
-                    S.add_estimated_distance(agent.task_sequence[0], estimated_task_path)
-                    S.add_estimated_duration(agent.task_sequence[0], estimated_task_path)
+                    S.add_estimated_distance(new_task_id, estimated_task_path)
+                    S.add_estimated_duration(new_task_id, estimated_task_path)
                     
                     if t <= 100:
-                        S.append_early_task_ids(agent.task_sequence[0])
+                        S.append_early_task_ids(new_task_id)
 
     return Rs, J

@@ -80,7 +80,7 @@ def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, 
             task_id = sequence[0]
             
             S.append_early_task_ids(task_id)
-            
+
         # for task_id in sequence:
         #     if task_id not in Rs.agents[robot_id-1].task_sequence:
             Rs.agents[robot_id-1].task_sequence.append(task_id)

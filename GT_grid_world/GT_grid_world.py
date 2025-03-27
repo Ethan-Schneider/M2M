@@ -36,7 +36,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
+                J_new, last_task_id = case_request_generator.CRG(S, t,J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -170,7 +170,7 @@ def main():
     # S.print_statistics()
     # S.task_length()
     S.save_data()
-    S.output_graphs()
+    # S.output_graphs()
     
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
@@ -220,13 +220,13 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0, 1, 2, 3]
+    seeds = [0]
     
     max_number_tasks = [5]
 
-    T = [3600]*120
+    T = [500]*120
     # num_robots = list(range(7, 100))
-    num_robots = [10, 15, 20, 25]
+    num_robots = [10]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
