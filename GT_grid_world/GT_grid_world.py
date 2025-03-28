@@ -204,7 +204,7 @@ def arg_main(S : statistics.Stats, B: buffer.Buffer, G : graph.Graph, num_robots
     S.save_data()
     
     folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed) + "_full"
-    S.output_graphs(folder_name)
+    # S.output_graphs(folder_name)
 
     if to_visualize:
         print("============================Visualizing Output============================")
@@ -220,13 +220,13 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0]
+    seeds = [3]
     
-    max_number_tasks = [5]
+    max_number_tasks = [35]
 
-    T = [500]*120
+    T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [10]
+    num_robots = [35]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
