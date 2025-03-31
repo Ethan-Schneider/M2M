@@ -220,13 +220,13 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [0, 1, 2, 3]
+    seeds = [0, 1, 2]
     
-    max_number_tasks = [5]
+    max_number_tasks = [25]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [5, 15, 25, 35, 45]
+    num_robots = [15, 25, 35, 45, 55]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"

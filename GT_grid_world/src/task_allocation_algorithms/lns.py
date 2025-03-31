@@ -54,10 +54,11 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
         if task_id in assigned_returned_sequence:
             S.add_task_reallocation(task_id)
 
+    free_agents = Rs.get_free_agents()
     for robot_id, sequence in returned_sequence:
         if not sequence:
             continue
-        robot_id = Rs.get_free_agents()[robot_id-1].id + 1 # Get the actual robot id from the free agents list
+        robot_id = free_agents[robot_id-1].id + 1 # Get the actual robot id from the free agents list
         if Rs.agents[robot_id-1].task_sequence == []:
             Rs.agents[robot_id-1].status = 1
             task_id = sequence[0]
