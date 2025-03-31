@@ -35,7 +35,7 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
     
     print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
-    for robot in Rs.agents:
+    for robot in Rs.get_free_agents():
         if robot.task_sequence == []:
             Rs_final_states.append((robot.id, robot.state))
         else:
@@ -57,6 +57,7 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
     for robot_id, sequence in returned_sequence:
         if not sequence:
             continue
+        robot_id = Rs.get_free_agents()[robot_id-1].id + 1 # Get the actual robot id from the free agents list
         if Rs.agents[robot_id-1].task_sequence == []:
             Rs.agents[robot_id-1].status = 1
             task_id = sequence[0]

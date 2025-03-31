@@ -220,18 +220,18 @@ def entry():
     time_limit = 86400
     # 30 0 1030 25 key error at 178
 
-    seeds = [3]
+    seeds = [0, 1, 2, 3]
     
-    max_number_tasks = [35]
+    max_number_tasks = [5]
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [35]
+    num_robots = [5, 15, 25, 35, 45]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    # task_assignment_strategy = "lns"
-    task_assignment_strategy = "p_lns"
+    task_assignment_strategy = "lns"
+    # task_assignment_strategy = "p_lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
@@ -239,10 +239,11 @@ def entry():
     visualize = False
     
     for seed in seeds:
+        print(f"Seed: {seed}")
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
             for j in range(len(num_robots)):
-                output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "_full.json"      
+                output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "_no_seq_full.json"      
                 buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
                 B = buffer.Buffer(80, buffer_file)
                 S = statistics.Stats(num_robots[j], T[i], output_file)
