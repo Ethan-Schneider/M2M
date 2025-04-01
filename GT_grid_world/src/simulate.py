@@ -31,13 +31,14 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 #     print(euclidian_distance(old_state, agent.state))
                 #     print(f"Duration so far for first part of task {agent.task_sequence[0]}: {S.get_actual_pickup_duration(agent.task_sequence[0])}")
                 S.update_actual_pickup_distance(agent.task_sequence[0], euclidian_distance(old_state, agent.state))
-                S.update_actual_pickup_duration(agent.task_sequence[0], 1)
+                S.update_actual_pickup_duration(agent.task_sequence[0], S.get_actual_pickup_duration(agent.task_sequence[0]) + 1)
+                
             elif agent.status == 2:
                 # if agent.task_sequence[0] == 2:
                 #     print(euclidian_distance(old_state, agent.state))
                 #     print(f"Duration so far for second part task {agent.task_sequence[0]}: {S.get_actual_duration(agent.task_sequence[0])}")
                 S.update_actual_distance(agent.task_sequence[0], euclidian_distance(old_state, agent.state))
-                S.update_actual_duration(agent.task_sequence[0], 1)
+                S.update_actual_duration(agent.task_sequence[0], S.get_actual_duration(agent.task_sequence[0]) + 1)
             else:
                 pass
     
@@ -70,15 +71,15 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 S.update_service_time(task_id, t)
                 
                 # Update actual duration when reaching goal location
-                S.update_actual_duration(task_id, t - S.get_actual_duration(task_id))
+                # S.update_actual_duration(task_id, t - S.get_actual_duration(task_id))
                 
-                actual_duration = S.get_actual_duration(task_id) + S.get_actual_pickup_duration(task_id)
-                S.update_task_cost(task_id, actual_duration)
+                # actual_duration = S.get_actual_duration(task_id) + S.get_actual_pickup_duration(task_id)
+                # S.update_task_cost(task_id, actual_duration)
                 
-                estimated_duration = S.get_estimated_duration(task_id) + S.get_estimated_pickup_duration(task_id)
+                # estimated_duration = S.get_estimated_duration(task_id) + S.get_estimated_pickup_duration(task_id)
                     
-                if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.8:
-                    B.dump(agent.id, task_id, J, S)
+                # if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.8:
+                #     B.dump(agent.id, task_id, J, S)
                 
                 for task in J:
                     if task[0] == task_id:
