@@ -3,14 +3,11 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
-from .task_allocation_algorithms.closest_robot import closest_robot
 from .task_allocation_algorithms.random import random_ta
-from .task_allocation_algorithms.cost_matrix import cost_matrix_TA
 from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.p_lns import p_lns_call
-import random
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, task_sequences : bool, map : str, t : int, hash_map : dict = {}) -> AgentLoader:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, map : str, t : int) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -19,12 +16,11 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         Rs (list): Agent Loader Object
         J (set): Set of tasks in the form {(task_id, start_loc, goal_loc)}
         task_assignment_strategy (str): Chosen task_allocation algorithm to use
-        to_pickup (set): Set of all robot_ids which are on the to_pickup segment of their task
-        free_agents (set): Set of all robot_ids which are free agents
-        hash_map (dict, optional): _description_. Defaults to {}.
+        map (str): Map name
+        t (int): Current timestep
 
     Returns:
-        Tuple[list, set, set]: Returns updated task assignment, set of free_agents, and set of to_pickup agents
+        AgentLoader: Returns updated AgentLoader object
     """
 
     if task_assignment_strategy == "random":

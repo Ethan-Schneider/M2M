@@ -26,17 +26,10 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
             G.set_occupied(agent.state, True)
             
             if agent.status == 1:
-                # if agent.task_sequence[0] == 2:
-                #     print(f"Task 2 start location: {get_task_start_location(J, 2)} and goal location: {get_task_goal_location(J, 2)} with agent state: {agent.state}")
-                #     print(euclidian_distance(old_state, agent.state))
-                #     print(f"Duration so far for first part of task {agent.task_sequence[0]}: {S.get_actual_pickup_duration(agent.task_sequence[0])}")
                 S.update_actual_pickup_distance(agent.task_sequence[0], euclidian_distance(old_state, agent.state))
                 S.update_actual_pickup_duration(agent.task_sequence[0], S.get_actual_pickup_duration(agent.task_sequence[0]) + 1)
                 
             elif agent.status == 2:
-                # if agent.task_sequence[0] == 2:
-                #     print(euclidian_distance(old_state, agent.state))
-                #     print(f"Duration so far for second part task {agent.task_sequence[0]}: {S.get_actual_duration(agent.task_sequence[0])}")
                 S.update_actual_distance(agent.task_sequence[0], euclidian_distance(old_state, agent.state))
                 S.update_actual_duration(agent.task_sequence[0], S.get_actual_duration(agent.task_sequence[0]) + 1)
             else:
@@ -50,18 +43,13 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
     # Update Statistics for Asile and Driveway Occupancy
     S.add_aisle_occupancy(G.get_aisle_occupancy())
     S.add_driveway_occupancy(G.get_driveway_occupancy())
-    # S.add_aisle_occupancy(G.get_aisle_occupied())
-    # S.add_driveway_occupancy(G.get_driveway_occupied())
     
-    # Update free_agents, to_pickup, and to_delivery
-    # TODO: Update warehouse and driveway inventory when a robot has reached goal location (i.e. for both for loops below) 
           
     for agent in Rs.agents:
         if agent.status == 1:
             if agent.state == get_task_start_location(J, agent.task_sequence[0]):
                 task_id = agent.task_sequence[0]
                 S.add_completed_to_pickup_task_id(task_id)
-                # Update pickup duration when reaching pickup location
                 S.update_actual_pickup_duration(task_id, t - S.get_actual_pickup_duration(task_id))
                 agent.status = 2
         elif agent.status == 2:
@@ -69,17 +57,6 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 task_id = agent.task_sequence[0]
                 S.add_completed_task_id(task_id, t)
                 S.update_service_time(task_id, t)
-                
-                # Update actual duration when reaching goal location
-                # S.update_actual_duration(task_id, t - S.get_actual_duration(task_id))
-                
-                # actual_duration = S.get_actual_duration(task_id) + S.get_actual_pickup_duration(task_id)
-                # S.update_task_cost(task_id, actual_duration)
-                
-                # estimated_duration = S.get_estimated_duration(task_id) + S.get_estimated_pickup_duration(task_id)
-                    
-                # if np.abs((actual_duration - estimated_duration)/estimated_duration) > 0.8:
-                #     B.dump(agent.id, task_id, J, S)
                 
                 for task in J:
                     if task[0] == task_id:
@@ -95,7 +72,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                     S.add_actual_distance(new_task_id)
                     S.add_actual_pickup_distance(new_task_id)
                     
-                    # Initialize durations for new task
+                    # Initialize durations for new task 
                     S.add_actual_duration(new_task_id)
                     S.add_actual_pickup_duration(new_task_id)
                     

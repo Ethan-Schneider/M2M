@@ -8,17 +8,14 @@ from src.analysis import visualize, statistics, buffer
 def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
-            task_assignment_strategy : str = "cost_matrix", task_sequences : bool = False,
-            path_planning_strategy : str = "ecbs", time_limit : int = 99999, hash_map : dict = {}):
+            task_assignment_strategy : str = "lns",
+            path_planning_strategy : str = "ecbs", time_limit : int = 99999):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
-    # Initilize robot allocation to empty: allocation is defined as (task_id, robot_id)
-    # If task_sequences, then Ra is defined as ([task_ids], robot_id)
 
     last_task_id = 0
     
     global_tik = time.time()
-    skip = False
     
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
@@ -37,7 +34,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                J_new, last_task_id = case_request_generator.CRG(S, t,J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
+                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -45,64 +42,64 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             
         tik = time.time()
 
-        if not skip:
-            print("=============================" + "Task Allocation"+ "=============================")
-            # Check if all tasks are allocated, if so, skip
-            total = 0
-            for agent in Rs.agents:
-                total += len(agent.task_sequence)
-                
-            if total < max_task_number:
-                Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, task_sequences, map, t)
-
-            tok = time.time()
-            S.add_total_TA_time(tok-tik)
-            S.append_task_allocation(Rs, J)
-
-            # Check if any agent is allocated the same tasks
-            for agent in Rs.agents:
-                task_ids = set()
-                for task_id in agent.task_sequence:
-                    if task_id in task_ids:
-                        raise ValueError(f"Task {task_id} is allocated to multiple agents.")
-                    task_ids.add(task_id)
+        print("=============================" + "Task Allocation"+ "=============================")
+        # Check if all tasks are allocated, if so, skip
+        total = 0
+        for agent in Rs.agents:
+            total += len(agent.task_sequence)
             
-            print("=============================" +"Routing"+ "=============================")
-            tik = time.time()
+        if total < max_task_number:
+            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, map, t)
 
-            for agent in Rs.agents:
-                if agent.path_sequence == []:
-                    Rs = router.pathPlan(G, map, Rs, J, path_planning_strategy, S)
-                    break
-                
-            tok = time.time()
-            S.add_total_PF_time(tok-tik)
-            
-            print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
-            soc = 0
-            for agent in Rs.agents:
-                soc += len(agent.path_sequence)
-            S.set_soc(soc)
+        tok = time.time()
+        S.add_total_TA_time(tok-tik)
+        S.append_task_allocation(Rs, J)
 
-            print("=============================" +"Taking Step"+ "=============================")
-            tik = time.time()
-            Rs, J = simulate.simulate(S, B, G, Rs, J, map, t)
-            tok = time.time()
-            S.add_total_SIM_time(tok-tik)
-            
-            S.compute_unallocated_agents(Rs)
+        # Check if any agent is allocated the same tasks
+        for agent in Rs.agents:
+            task_ids = set()
+            for task_id in agent.task_sequence:
+                if task_id in task_ids:
+                    raise ValueError(f"Task {task_id} is allocated to multiple agents.")
+                task_ids.add(task_id)
+        
+        print("=============================" +"Routing"+ "=============================")
+        tik = time.time()
 
-            global_tok = time.time()
+        for agent in Rs.agents:
+            if agent.path_sequence == []:
+                Rs = router.pathPlan(map, Rs, J, path_planning_strategy, S)
+                break
             
-            if (global_tok - global_tik) >= time_limit:
-                return
+        tok = time.time()
+        S.add_total_PF_time(tok-tik)
+        
+        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
+        soc = 0
+        for agent in Rs.agents:
+            soc += len(agent.path_sequence)
+        S.set_soc(soc)
+
+        print("=============================" +"Taking Step"+ "=============================")
+        tik = time.time()
+        Rs, J = simulate.simulate(S, B, G, Rs, J, map, t)
+        tok = time.time()
+        S.add_total_SIM_time(tok-tik)
+        
+        S.compute_unallocated_agents(Rs)
+
+        global_tok = time.time()
+        
+        if (global_tok - global_tik) >= time_limit:
+            return
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
          task_generation_strategy: str, task_assignment_strategy: str,
          path_planning_strategy: str, map_name: str, time_limit: int = 86400,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
-         frequency: float = 1.0, inbound_outbound_ratio: float = 1.0):
+         frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
+         output_graphs: bool = False):
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -120,6 +117,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         initial_inventory: Initial inventory amount
         frequency: Frequency of task generation
         inbound_outbound_ratio: Ratio of inbound to outbound tasks
+        output_graphs: Whether to output analysis graphs
     """
     np.random.seed(seed)
     
@@ -152,9 +150,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     S.set_total_runtime(tok-tik)
     
     S.save_data()
-
-    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed) + "_full"
-    # S.output_graphs(folder_name)
+    
+    folder_name = f"{T}_{task_generation_strategy}_{task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_full"
+    if output_graphs:
+        S.output_graphs(folder_name)
     
     if visualize_output:
         print("============================Visualizing Output============================")
@@ -190,6 +189,8 @@ if __name__=="__main__":
                        help='Frequency of task generation')
     parser.add_argument('--inbound-outbound-ratio', type=float, default=1.0,
                        help='Ratio of inbound to outbound tasks')
+    parser.add_argument('--output-graphs', action='store_true',
+                       help='Output analysis graphs')
     
     args = parser.parse_args()
     
@@ -206,5 +207,6 @@ if __name__=="__main__":
         visualize_output=args.visualize,
         initial_inventory=args.initial_inventory,
         frequency=args.frequency,
-        inbound_outbound_ratio=args.inbound_outbound_ratio
+        inbound_outbound_ratio=args.inbound_outbound_ratio,
+        output_graphs=args.output_graphs
     )
