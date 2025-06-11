@@ -1,17 +1,13 @@
 import numpy as np
 
 from .node import Node
-from .inventory import Inventory
+from .inventory_manager.inventory import Inventory
 
 class Graph:
-    def __init__(self, num_robots : int, file_name: str = None, DOF:int = 4, deterministic = True, *args) -> None:
-        if (DOF != 4) and (DOF != 8):
-            raise Exception("DOF must be 4 or 8")
-        else:
-            self.__DOF = DOF
-        self.__deterministic = deterministic
+    def __init__(self, num_robots : int, file_name: str = None, *args) -> None:
         self.__num_robots = num_robots
-        self.__graph = self.__load_graph(file_name, args[0], args[1])
+        self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, args[0], args[1])
+        self.__aisle_start, self.__driveway_start = self.__get_aisle_driveway_start()
         
     def __load_graph(self, filename : str, warehouse_strategy : str, initial_warehouse_capacity : float):
         """This method takes in a map file, parses the metadata and map data, 
@@ -26,7 +22,8 @@ class Graph:
             Exception: If the number of robots the user wants to generate exceeds
             the maximum number of robots defined in the map file, raise an exception.
         """
-        graph = []
+        occupancy_graph = []
+        obstacle_graph = []
         cost = 4
         
         # Read-in map file
@@ -56,6 +53,8 @@ class Graph:
         driveway_locations = []
         robot_start_locations = []
         self.obstacles = []
+        self.aisle_locations = []  # Track aisle locations (e)
+        self.station_locations = []  # Track inbound/outbound stations (s)
                 
         # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
         f = open(filename, "r")
@@ -63,11 +62,22 @@ class Graph:
         f.readline()
         for i, line in enumerate(f):
             row = []
+            obstacle_row = []
             for j, character in enumerate(line):
                 if character == "@":
                     self.obstacles.append((i, j))
                     row.append(Node(cost, occupied=False, obstacle=True))
+                    obstacle_row.append(1)
+                elif character == "e":
+                    obstacle_row.append(0)
+                    row.append(Node(cost, occupied=False, obstacle=False))
+                    self.aisle_locations.append((i, j))
+                elif character == "s":
+                    obstacle_row.append(0)
+                    row.append(Node(cost, occupied=False, obstacle=False))
+                    self.station_locations.append((i, j))
                 elif character == ".":
+                    obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
                     if (i, j) in empty_points[:num_warehouse_locations]:
                         warehouse_locations.append((i, j))
@@ -76,9 +86,11 @@ class Graph:
                     else:
                         pass
                 elif character == "r":
+                    obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
                     robot_start_locations.append((i, j))
-            graph.append(row)
+            occupancy_graph.append(row)
+            obstacle_graph.append(obstacle_row)
         
         # Initialize Warehouse and Driveway as Warehouse objects 
         # Note: it will populate the warehouse with the given strategy
@@ -86,17 +98,34 @@ class Graph:
         self.warehouse = Inventory(warehouse_locations, warehouse_strategy, initial_warehouse_capacity)
         self.driveway = Inventory(driveway_locations, warehouse_strategy, initial_warehouse_capacity)
         
-        
         if self.__num_robots > max_num_robots:
             raise Exception("Number of robots exceeds maximum number of robots for map")
         
         # Randomly place N robots into the environment's M start locations
         for i in range(self.__num_robots):
             location = robot_start_locations[np.random.choice(len(robot_start_locations))]
-            graph[location[0]][location[1]].set_occupied(True)
+            occupancy_graph[location[0]][location[1]].set_occupied(True)
             robot_start_locations.remove(location)
         
-        return np.asarray(graph)
+        return np.asarray(occupancy_graph), np.asarray(obstacle_graph)
+    
+    def __get_aisle_driveway_start(self):
+        on_aisle = True
+        for i, row in enumerate(self.__obstacle_graph):
+            if on_aisle:
+                if 1 in row:
+                    continue
+                else:
+                    beginning_aisle = i-1
+                    on_aisle = False
+            else:
+                if 1 in row:
+                    beginning_driveway = i
+                    break
+                else:
+                    continue
+            
+        return beginning_aisle, beginning_driveway
     
     def get_neighbors(self, node: tuple, ignore_robots : bool = False) -> list:
         """Returns list of non-occupied neighbor nodes in order (N, E, S, W).
@@ -110,8 +139,8 @@ class Graph:
         Returns:
             list: _description_
         """
-        if node[0] >= self.__graph.shape[0] or node[1] >= self.__graph.shape[1] or node[0] < 0 or node[1] < 0:
-            raise Exception("Node %s is out of range of graph with shape %s" % (node, self.__graph.shape))
+        if node[0] >= self.__occupancy_graph.shape[0] or node[1] >= self.__occupancy_graph.shape[1] or node[0] < 0 or node[1] < 0:
+            raise Exception("Node %s is out of range of graph with shape %s" % (node, self.__occupancy_graph.shape))
         
         north = (node[0]-1, node[1])
         east = (node[0], node[1]+1)
@@ -122,10 +151,10 @@ class Graph:
             if north[0] < 0  or self.__get_if_obstacle(north):
                 north = None
                 
-            if east[1] == self.__graph.shape[1] or self.__get_if_obstacle(east):
+            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_obstacle(east):
                 east = None
                 
-            if south[0] == self.__graph.shape[0] or self.__get_if_obstacle(south):
+            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_obstacle(south):
                 south = None   
             
             if west[1] < 0 or self.__get_if_obstacle(west):
@@ -134,10 +163,10 @@ class Graph:
             if north[0] < 0  or self.__get_if_occupied(north):
                 north = None
                 
-            if east[1] == self.__graph.shape[1] or self.__get_if_occupied(east):
+            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_occupied(east):
                 east = None
                 
-            if south[0] == self.__graph.shape[0] or self.__get_if_occupied(south):
+            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_occupied(south):
                 south = None   
             
             if west[1] < 0 or self.__get_if_occupied(west):
@@ -149,41 +178,63 @@ class Graph:
         return neighbors
     
     def __get_if_occupied(self, node: tuple) -> bool:
-        return self.__graph[node[0], node[1]].get_occupied()
+        return self.__occupancy_graph[node[0], node[1]].get_occupied()
     
     def __get_if_obstacle(self, node: tuple) -> bool:
-        return self.__graph[node[0], node[1]].get_occupied()
+        return self.__occupancy_graph[node[0], node[1]].get_occupied()
+    
+    def get_aisle_occupancy(self) -> list:
+        aisle_occupied = []
+        for col in range(self.__occupancy_graph.shape[1]):
+            # Skip if the column is an obstacle
+            if self.__obstacle_graph[self.__aisle_start, col] == 1:
+                continue
+            agent_count = np.count_nonzero(np.array([x.get_occupied() for x in self.__occupancy_graph[0:self.__aisle_start, col]]))
+            aisle_occupied.append(agent_count)
+        return aisle_occupied
+    
+    def get_driveway_occupancy(self) -> list:
+        driveway_occupied = []
+        for col in range(self.__occupancy_graph.shape[1]):
+            # Skip if the column is an obstacle
+            if self.__obstacle_graph[self.__driveway_start, col] == 1:
+                continue
+            agent_count = np.count_nonzero(np.array([x.get_occupied() for x in self.__occupancy_graph[self.__driveway_start:, col]]))
+            driveway_occupied.append(agent_count)
+        return driveway_occupied
     
     def get_all_occupied(self) -> list:
         occupied = []
-        for row in range(self.__graph.shape[0]):
-            for col in range(self.__graph.shape[1]):
-                if self.__graph[row, col].get_occupied():
+        for row in range(self.__occupancy_graph.shape[0]):
+            for col in range(self.__occupancy_graph.shape[1]):
+                if self.__occupancy_graph[row, col].get_occupied():
                     occupied.append((row, col))
         return occupied
     
     def get_all_unoccupied(self) -> list:
         unoccupied = []
-        for row in range(self.__graph.shape[0]):
-            for col in range(self.__graph.shape[1]):
-                if not self.__graph[row, col].get_occupied():
+        for row in range(self.__occupancy_graph.shape[0]):
+            for col in range(self.__occupancy_graph.shape[1]):
+                if not self.__occupancy_graph[row, col].get_occupied():
                     unoccupied.append((row, col))
         return unoccupied
     
     def get_all_non_obstacles(self) -> list:
         empty_space = []
-        for row in range(self.__graph.shape[0]):
-            for col in range(self.__graph.shape[1]):
-                if not self.__graph[row, col].get_obstacle():
+        for row in range(self.__occupancy_graph.shape[0]):
+            for col in range(self.__occupancy_graph.shape[1]):
+                if not self.__occupancy_graph[row, col].get_obstacle():
                     empty_space.append((row, col))
         return empty_space
     
     def set_occupied(self, node : tuple, occupied : bool) -> None:
-        self.__graph[node[0], node[1]].set_occupied(occupied)
+        self.__occupancy_graph[node[0], node[1]].set_occupied(occupied)
     
     def get_cost(self, loc1, loc2): 
-        return self.__graph[loc2[0], loc2[1]].get_cost()
+        return self.__occupancy_graph[loc2[0], loc2[1]].get_cost()
         
+    def get_graph_size(self):
+        return self.__occupancy_graph.shape
     
     def draw_tile(self, id, style):
         r = " . "
@@ -210,24 +261,42 @@ class Graph:
         print("~~~" * self.width)
         
     def draw_graph(self):
-        for row in range(self.__graph.shape[0]):
-            for col in range(self.__graph.shape[1]):
-                if self.__graph.shape[row, col].get_obstacle():
-                    print("@")
-                elif self.__graph.shape[row, col].get_occupied():
-                    print("r")
+        graph = ""
+        for row in range(self.__occupancy_graph.shape[0]):
+            line = ""
+            for col in range(self.__occupancy_graph.shape[1]):
+                if self.__occupancy_graph[row, col].get_obstacle():
+                    line += "@"
+                elif self.__occupancy_graph[row, col].get_occupied():
+                    line += "r"
                 else:
-                    print(".")
-            print("\n")
+                    line += "."
+            line += "\n"
+            graph += line
+        print(graph)
+            
+    def draw_graph_with_highlight(self, positions : list) -> None:
+        graph = ""
+        for row in range(self.__occupancy_graph.shape[0]):
+            line = ""
+            for col in range(self.__occupancy_graph.shape[1]):
+                if self.__occupancy_graph[row, col].get_obstacle():
+                    line += "@"
+                elif self.__occupancy_graph[row, col].get_occupied():
+                    line += "r"
+                elif (row, col) in positions:
+                    line += "0"
+                else:
+                    line += "."
+            line += "\n"
+            graph += line
+        print(graph)
                     
+    def get_aisle_locations(self) -> list:
+        """Returns list of aisle locations (e) in the map."""
+        return self.aisle_locations
 
-def main():
-    g = Graph(20, 20, 4, [(1, 19), (1, 18), (1, 17), 
-                          (3, 19), (3, 18), (3, 17), 
-                          (5, 19), (5, 18), (5, 17), 
-                          (7, 19), (7, 18), (7, 17),
-                          (9, 19), (9, 18), (9, 17)])
-    g.draw_grid()
-
-if __name__ == "__main__":
-    main()
+    def get_station_locations(self) -> list:
+        """Returns list of inbound/outbound station locations (s) in the map."""
+        return self.station_locations
+                    
