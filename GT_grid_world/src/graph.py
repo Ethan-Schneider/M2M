@@ -4,12 +4,7 @@ from .node import Node
 from .inventory_manager.inventory import Inventory
 
 class Graph:
-    def __init__(self, num_robots : int, file_name: str = None, DOF:int = 4, deterministic = True, *args) -> None:
-        if (DOF != 4) and (DOF != 8):
-            raise Exception("DOF must be 4 or 8")
-        else:
-            self.__DOF = DOF
-        self.__deterministic = deterministic
+    def __init__(self, num_robots : int, file_name: str = None, *args) -> None:
         self.__num_robots = num_robots
         self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, args[0], args[1])
         self.__aisle_start, self.__driveway_start = self.__get_aisle_driveway_start()
