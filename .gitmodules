@@ -14,18 +14,6 @@
 [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns"]
 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
 	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns_fully_informed"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns_fully_informed
-	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/taastar"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/taastar
-	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/task_based_search"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/task_based_search
-	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/task_based_search_bounded"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/task_based_search_bounded
-	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/taastar_old_ecbs"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/taastar_old_ecbs
+[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns"]
+	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns
 	url = https://github.gatech.edu/eschneider32/LNS.git

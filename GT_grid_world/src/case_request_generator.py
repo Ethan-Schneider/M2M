@@ -2,8 +2,9 @@ import numpy as np
 from .graph import Graph
 from .inventory_manager.item import ItemCategory
 from .utils import *
+from .analysis.statistics import Stats
     
-def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, max_task_number : int, strategy: str = "uniform", seed : int = 0) -> tuple[set, int]:
+def CRG(S : Stats, t : int, J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int, max_task_number : int, strategy: str = "uniform", seed : int = 0) -> tuple[set, int]:
     """_summary_
 
     Args:
@@ -40,16 +41,19 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
         for task in tasks_to_generate:
             #Generate inbound task
             if task == 1:
-                J_new.add((last_task_id + 1, np.random.choice(np.arange(G.driveway.max_pos)), np.random.choice(np.arange(G.warehouse.max_pos))))
+                # For inbound tasks, pickup from station and deliver to aisle
+                pickup_location = np.random.choice(G.get_station_locations())
+                delivery_location = np.random.choice(G.get_aisle_locations())
+                J_new.add((last_task_id + 1, pickup_location, delivery_location))
                 last_task_id += 1
             #Generate outbound task
             elif task == 0:
-                J_new = J_new | set([(last_task_id + 1, np.random.choice(np.arange(G.warehouse.max_pos)), np.random.choice(np.arange(G.driveway.max_pos)))])
+                # For outbound tasks, pickup from aisle and deliver to station
+                pickup_location = np.random.choice(G.get_aisle_locations())
+                delivery_location = np.random.choice(G.get_station_locations())
+                J_new.add((last_task_id + 1, pickup_location, delivery_location))
                 last_task_id += 1
     elif strategy == "informed_uniform":
-        # TODO: Implement informed_uniform strategy: where the algorithm will uniformly sample an item from ItemCategory for inbound or outbound, then uniformly sample from 
-        # the warehouse for that item or for empty spaces to put that item.  
-
         # Generate items for i/o tasks
         items = []
         for _ in tasks_to_generate:
@@ -61,96 +65,79 @@ def CRG(J: set, G : Graph, N: int, inbound_to_outbound: float, last_task_id: int
             current_task_locations.add(task[1])
             current_task_locations.add(task[2])
             
-        # print(f"Current Task Locations: {current_task_locations}")
-
-        # Construct list of current task locations in the driveway and aisle
-        driveway_locations = []
+        # Construct list of current task locations in the aisle and stations
         aisle_locations = []
+        station_locations = []
         # Iterate over every currently existing task
         for task in J:
             # Get the start and goal locations for the task
             start_loc = get_task_start_location(J, task[0])
             goal_loc = get_task_goal_location(J, task[0])
             
-            # Check which position is in the driveway and aisle, and append them accordingly
-            if start_loc[0] >= 4:
-                driveway_locations.append(start_loc[1])
-                aisle_locations.append(goal_loc[1])
+            # Check which position is in the aisle and station, and append them accordingly
+            if start_loc in G.get_aisle_locations():
+                aisle_locations.append(start_loc)
+                station_locations.append(goal_loc)
             else:
-                driveway_locations.append(goal_loc[1])
-                aisle_locations.append(start_loc[1])
+                aisle_locations.append(goal_loc)
+                station_locations.append(start_loc)
         
         for i, item in enumerate(items):
-            if tasks_to_generate[i] == 0:
-                # Generate locations for item pickup that are not part of a task yet
-                locations_for_item = list(set(G.warehouse.find(item)) - current_task_locations)
+            if tasks_to_generate[i] == 0:  # Outbound task
+                # Generate locations for item pickup from aisle that are not part of a task yet
+                locations_for_item = list(set(G.get_aisle_locations()) - current_task_locations)
                 if not locations_for_item:
                     continue
                 
                 while True:
-                # Uniformly choose a pickup location
+                    # Uniformly choose a pickup location from aisle
                     pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
-
-                    aisle_loc = pickup_location[1]
-                    if np.count_nonzero(aisle_locations == aisle_loc) >= 1:
-                        continue
-                    else:
+                    if pickup_location not in aisle_locations:
                         break
                 
-                # Generate locations for item dropoff that are not part of a task
-                locations_for_dropoff = list(set(G.driveway.findEmpty()) - current_task_locations)
+                # Generate locations for item dropoff at station that are not part of a task
+                locations_for_dropoff = list(set(G.get_station_locations()) - current_task_locations)
                 if not locations_for_dropoff:
                     continue
                 
                 while True:
-                # Uniformly choose a dropoff location
-
+                    # Uniformly choose a dropoff location from stations
                     dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
-
-                    driveway_loc = dropoff_location[1]
-                    if np.count_nonzero(driveway_locations == driveway_loc) >= 1:
-                        continue
-                    else:
+                    if dropoff_location not in station_locations:
                         break
                 
                 J_new.add((last_task_id, pickup_location, dropoff_location))
+                S.add_task_release(last_task_id, t)
                 last_task_id += 1
                 
                 current_task_locations.add(pickup_location)
                 current_task_locations.add(dropoff_location)
                 
-            elif tasks_to_generate[i] == 1:
-                # Generate locations for item pickup that are not part of a task yet
-                locations_for_item = list(set(G.driveway.findEmpty()) - current_task_locations)
+            elif tasks_to_generate[i] == 1:  # Inbound task
+                # Generate locations for item pickup from station that are not part of a task yet
+                locations_for_item = list(set(G.get_station_locations()) - current_task_locations)
                 if not locations_for_item:
                     continue
 
                 while True:
-                    # Uniformly choose a pickup location
+                    # Uniformly choose a pickup location from stations
                     pickup_location = locations_for_item[np.random.choice(len(locations_for_item), 1)[0]]
-
-                    driveway_loc = pickup_location[1]
-                    if np.count_nonzero(driveway_locations == driveway_loc) >= 1:
-                        continue
-                    else:
+                    if pickup_location not in station_locations:
                         break
                 
-                # Generate locations for item dropoff that are not part of a task
-                locations_for_dropoff = list(set(G.warehouse.findEmpty()) - current_task_locations)
+                # Generate locations for item dropoff at aisle that are not part of a task
+                locations_for_dropoff = list(set(G.get_aisle_locations()) - current_task_locations)
                 if not locations_for_dropoff:
                     continue
                 
                 while True:
-                    # Uniformly choose a dropoff location
+                    # Uniformly choose a dropoff location from aisles
                     dropoff_location = locations_for_dropoff[np.random.choice(len(locations_for_dropoff), 1)[0]]
-
-                    aisle_loc = dropoff_location[1]
-                    if np.count_nonzero(aisle_locations == aisle_loc) >= 1:
-                        continue
-                    else:
+                    if dropoff_location not in aisle_locations:
                         break
                 
                 J_new.add((last_task_id, pickup_location, dropoff_location))
+                S.add_task_release(last_task_id, t)
                 last_task_id += 1
                 
                 current_task_locations.add(pickup_location)

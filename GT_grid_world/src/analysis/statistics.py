@@ -16,6 +16,18 @@ class Stats:
         # Temp SOC
         self.__soc = 0
 
+        # Task completion timestamps
+        self.__task_completion_timestamps = {}  # task_id -> timestep
+        self.__task_release_timestamps = {}     # task_id -> timestep
+        self.__service_times = {}               # task_id -> service_time
+        self.__total_service_time = 0
+        self.__average_service_time = 0
+        
+        # Cost statistics
+        self.__total_task_costs = {}           # task_id -> total_duration
+        self.__sum_of_costs = 0
+        self.__average_task_cost = 0
+
         # Admissibility
         self.__admisibility = []
         self.__admisibility_differences = []
@@ -97,6 +109,14 @@ class Stats:
         #TODO: SoC (Sum(self.__actual_duration))
         #TODO: Throughput ((len(actual_duration) / T)*60)
         
+        self.__gaussian_weights = {
+            "warehouse": [],
+            "method": []
+        }
+        
+        # Track task reallocations
+        self.__task_reallocations = {}  # task_id -> number of times allocated before being worked on
+        
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
         for agent in Rs.agents:
@@ -124,54 +144,48 @@ class Stats:
         self.__estimated_pickup_duration[task_id] = estimated_duration
         
     def get_estimated_duration(self, task_id : int) -> float:
-        return self.__estimated_duration[task_id]
+        return self.__estimated_duration.get(task_id, 0)
 
     def get_estimated_pickup_duration(self, task_id : int) -> float:
-        return self.__estimated_pickup_duration[task_id]
+        return self.__estimated_pickup_duration.get(task_id, 0)
         
     def add_actual_duration(self, task_id : int) -> None:
         self.__actual_duration[task_id] = 0    
     
     def update_actual_duration(self, task_id : int, actual_duration : float) -> None:
-        self.__actual_duration[task_id] += actual_duration
+        self.__actual_duration[task_id] = actual_duration
         
     def get_actual_duration(self, task_id : int) -> float:
-        return self.__actual_duration[task_id]
+        return self.__actual_duration.get(task_id, 0)
         
     def update_num_path_plan_fail(self) -> None:
         self.__num_path_plan_fails += 1
         
     def remove_actual_duration(self, task_id : int) -> None:
-        del self.__actual_duration[task_id]
+        if task_id in self.__actual_duration:
+            del self.__actual_duration[task_id]
         
     def add_actual_pickup_duration(self, task_id : int) -> None:
         self.__actual_pickup_duration[task_id] = 0    
     
     def update_actual_pickup_duration(self, task_id : int, actual_duration : float) -> None:
-        self.__actual_pickup_duration[task_id] += actual_duration
+        self.__actual_pickup_duration[task_id] = actual_duration
         
     def get_actual_pickup_duration(self, task_id : int) -> float:
-        return self.__actual_pickup_duration[task_id]
+        return self.__actual_pickup_duration.get(task_id, 0)
         
     def remove_actual_pickup_duration(self, task_id : int) -> None:
-        del self.__actual_pickup_duration[task_id]
+        if task_id in self.__actual_pickup_duration:
+            del self.__actual_pickup_duration[task_id]
         
     def remove_uncompleted_task_durations(self) -> None:
-        for task_id in self.__actual_duration.copy():
-            if task_id not in self.__completed_task_ids:
-                del self.__actual_duration[task_id]
-                
-        for task_id in self.__estimated_duration.copy():
-            if task_id not in self.__completed_task_ids:
-                del self.__estimated_duration[task_id]
-                
-        for task_id in self.__actual_pickup_duration.copy():
-            if task_id not in self.__completed_to_pickup_task_ids:
-                del self.__actual_pickup_duration[task_id]
-            
-        for task_id in self.__estimated_pickup_duration.copy():
-            if task_id not in self.__completed_to_pickup_task_ids:
-                del self.__estimated_pickup_duration[task_id]
+        completed_tasks = set(self.__completed_task_ids)
+        for task_id in list(self.__actual_duration.keys()):
+            if task_id not in completed_tasks:
+                self.remove_actual_duration(task_id)
+        for task_id in list(self.__actual_pickup_duration.keys()):
+            if task_id not in completed_tasks:
+                self.remove_actual_pickup_duration(task_id)
                 
     def remove_early_task_ids(self) -> None:
         for task_id in self.__actual_duration.copy():
@@ -276,8 +290,15 @@ class Stats:
     
     # ====================== Completed Task Id Functions
     
-    def add_completed_task_id(self, task_id : int) -> None:
+    def add_completed_task_id(self, task_id : int, timestep : int) -> None:
+        """Add a completed task with its completion timestep.
+        
+        Args:
+            task_id (int): The ID of the completed task
+            timestep (int): The timestep when the task was completed
+        """
         self.__completed_task_ids.append(task_id)
+        self.__task_completion_timestamps[task_id] = timestep
         
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
@@ -523,29 +544,37 @@ class Stats:
         aisle_occupancy_over_timesteps(self.__aisle_occupancy, subfolder=folder)
         driveway_occupancy_over_timesteps(self.__driveway_occupancy, subfolder=folder)
         
+        # Task Reallocations Graph
+        plot_task_reallocations_histogram(self.__task_reallocations, folder, self.__completed_task_ids)
+        
         
     def save_data(self):
         velocity_timesteps = self.compute_velocity_timesteps()
-        # print(self.__task_assignments)
-        
-        # timestep_data = {}
-        # for i in range(len(self.__paths)):
-        #     timestep_data[f'timestep_{i}'] = {"paths" : self.__paths[i], "allocation" : self.__task_assignments[i], "velocity_timesteps" : velocity_timesteps[i]}
         
         print(self.__actual_duration)
         self.remove_uncompleted_task_durations()
-        self.remove_early_task_ids()
         print(self.__actual_duration)
+        
+        # Calculate final statistics
+        avg_service_time, total_service_time = self.get_service_time_stats()
+        avg_task_cost, total_costs = self.get_cost_stats()
         
         data = {
             "timesteps_completed" : self.__T,
             "number_of_robots" : self.__num_of_robots,
             "total_completed_tasks" : int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
-            "actual_duration_of_task_from_pick_to_place" : list(self.__actual_duration.values()),
-            "estimated_duration_of_task_from_pick_to_place" : list(self.__estimated_duration.values()),
-            "actual_duration_of_task_from_start_to_pick" : list(self.__actual_pickup_duration.values()),
-            "estimated_duration_of_task_from_start_to_pick" : list(self.__estimated_pickup_duration.values()),
+            "task_completion_timestamps": self.__task_completion_timestamps,
+            "task_release_timestamps": self.__task_release_timestamps,
+            "service_times": self.__service_times,
+            "average_service_time": avg_service_time,
+            "total_service_time": total_service_time,
+            "average_task_cost": avg_task_cost,
+            "sum_of_costs": total_costs,
+            "actual_duration_of_task_from_pick_to_place" : self.__actual_duration,
+            "estimated_duration_of_task_from_pick_to_place" : self.__estimated_duration,
+            "actual_duration_of_task_from_start_to_pick" : self.__actual_pickup_duration,
+            "estimated_duration_of_task_from_start_to_pick" : self.__estimated_pickup_duration,
             "collisions" : int(np.sum(self.__collisions)),
             "stationary_robots" : self.compute_stationary_robots(),
             "unallocated agents" : self.__unallocated_agents,
@@ -565,9 +594,92 @@ class Stats:
             "aisle_occupancy" : self.__aisle_occupancy,
             "driveway_occupancy" : self.__driveway_occupancy,
             "allocation" : self.__task_assignments,
-            "velocity_timesteps" : velocity_timesteps
+            "velocity_timesteps" : velocity_timesteps,
+            "gaussian_weights" : self.__gaussian_weights,
+            "task_reallocations" : self.__task_reallocations
         }
         
         
         with open(self.__output_file, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
+
+    def add_gaussian_weights(self, warehouse_weight: float, method_weight: float) -> None:
+        """Add both Gaussian weights to the statistics.
+        
+        Args:
+            warehouse_weight (float): Weight computed using all warehouse locations
+            method_weight (float): Weight computed using the chosen method (unallocated tasks or warehouse items)
+        """
+        self.__gaussian_weights["warehouse"].append(warehouse_weight)
+        self.__gaussian_weights["method"].append(method_weight)
+
+    def add_task_reallocation(self, task_id: int) -> None:
+        """Increment the reallocation count for a task."""
+        if task_id not in self.__task_reallocations:
+            self.__task_reallocations[task_id] = 0
+        self.__task_reallocations[task_id] += 1
+
+    def get_task_reallocations(self) -> dict:
+        """Get the dictionary of task reallocations.
+        
+        Returns:
+            Dictionary mapping task IDs to their reallocation counts
+        """
+        return self.__task_reallocations
+
+    def get_task_completion_timestamps(self) -> dict:
+        """Get the dictionary of task completion timestamps.
+        
+        Returns:
+            Dictionary mapping task IDs to their completion timesteps
+        """
+        return self.__task_completion_timestamps
+
+    def add_task_release(self, task_id: int, timestep: int) -> None:
+        """Record when a task is released into the system.
+        
+        Args:
+            task_id (int): The ID of the released task
+            timestep (int): The timestep when the task was released
+        """
+        self.__task_release_timestamps[task_id] = timestep
+
+    def update_service_time(self, task_id: int, completion_timestep: int) -> None:
+        """Update service time statistics for a completed task.
+        
+        Args:
+            task_id (int): The ID of the completed task
+            completion_timestep (int): The timestep when the task was completed
+        """
+        if task_id in self.__task_release_timestamps:
+            service_time = completion_timestep - self.__task_release_timestamps[task_id]
+            self.__service_times[task_id] = service_time
+            self.__total_service_time += service_time
+            self.__average_service_time = self.__total_service_time / len(self.__service_times)
+
+    def update_task_cost(self, task_id: int, duration: float) -> None:
+        """Update cost statistics for a task.
+        
+        Args:
+            task_id (int): The ID of the task
+            duration (float): The total duration of the task
+        """
+        self.__total_task_costs[task_id] = duration
+        self.__sum_of_costs += duration
+        self.__average_task_cost = self.__sum_of_costs / len(self.__total_task_costs)
+
+    def get_service_time_stats(self) -> tuple:
+        """Get service time statistics.
+        
+        Returns:
+            tuple: (average_service_time, total_service_time)
+        """
+        return self.__average_service_time, self.__total_service_time
+
+    def get_cost_stats(self) -> tuple:
+        """Get cost statistics.
+        
+        Returns:
+            tuple: (average_task_cost, sum_of_costs)
+        """
+        return self.__average_task_cost, self.__sum_of_costs

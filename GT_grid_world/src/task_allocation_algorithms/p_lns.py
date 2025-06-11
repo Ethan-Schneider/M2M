@@ -5,10 +5,10 @@ from ..utils import *
 from ..analysis.statistics import Stats
 from ..graph import Graph
 
-from ..task_allocation_algorithms.external_algorithms.lns import lns
-from ..task_allocation_algorithms.external_algorithms.lns import dc
+from ..task_allocation_algorithms.external_algorithms.p_lns import lns
+from ..task_allocation_algorithms.external_algorithms.p_lns import dc
 
-def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t : int) -> AgentLoader:
+def p_lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t : int, gaussian_method: str = "unallocated_tasks") -> AgentLoader:
 
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
@@ -35,18 +35,32 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
     
     print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
-    for robot in Rs.get_free_agents():
+    Rs_first_goal_locations = []
+    for robot in Rs.agents:
         if robot.task_sequence == []:
             Rs_final_states.append((robot.id, robot.state))
+            Rs_first_goal_locations.append(robot.state)
         else:
             Rs_final_states.append((robot.id, get_task_goal_location(J, robot.task_sequence[-1])))
+            Rs_first_goal_locations.append(get_task_start_location(J, robot.task_sequence[0]))
+            
+    Rs_current_states = [robot.state for robot in Rs.agents]
             
     sequences = [[] for _ in Rs.get_free_agents()]
     
     print(f"Unassigned Task Ids: {unassigned_task_ids}")
     
+    # Get aisle locations that contain items
+    aisle_locations = []
+    for loc in G.get_aisle_locations():
+        if G.warehouse.findFull() and loc in G.warehouse.findFull():
+            aisle_locations.append(loc)
     
-    returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
+    # Convert gaussian_method to integer for C++ code
+    gaussian_method_int = 0 if gaussian_method == "unallocated_tasks" else 1
+    # gaussian_method_int = 1
+    
+    returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_current_states, Rs_first_goal_locations, Rs_final_states, sequences)#, aisle_locations, gaussian_method_int)
     print(f"Returned Sequence: {returned_sequence}")
     
     assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
@@ -54,17 +68,19 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
         if task_id in assigned_returned_sequence:
             S.add_task_reallocation(task_id)
 
-    free_agents = Rs.get_free_agents()
+    # Log Gaussian weights
+    # for warehouse_weight, method_weight in gaussian_weights:
+    #     S.add_gaussian_weights(warehouse_weight, method_weight)
+
     for robot_id, sequence in returned_sequence:
         if not sequence:
             continue
-        robot_id = free_agents[robot_id-1].id + 1 # Get the actual robot id from the free agents list
         if Rs.agents[robot_id-1].task_sequence == []:
             Rs.agents[robot_id-1].status = 1
             task_id = sequence[0]
             
             S.append_early_task_ids(task_id)
-            
+
         # for task_id in sequence:
         #     if task_id not in Rs.agents[robot_id-1].task_sequence:
             Rs.agents[robot_id-1].task_sequence.append(task_id)

@@ -36,7 +36,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                J_new, last_task_id = case_request_generator.CRG(J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
+                J_new, last_task_id = case_request_generator.CRG(S, t,J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -64,16 +64,9 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             tok = time.time()
             S.add_total_TA_time(tok-tik)
             S.append_task_allocation(Rs, J)
-            
-            # Compute number of agents without assigned tasks
-            # If number if above threshold compute and dump buffer and state
-            # get Tau_extra: the tasks that are not currently being worked on for every agent
-            # Compute the assigned cost from tau[0] to Tau_extra in its respective task sequence
-            # compute for every task in Tau_extra, the cost to every unallocated agent from its start location to the task's start and goal location
-            # save the original cost and the estimated cost for all other agents for every Tau_extra, then save and dump the buffer 
 
-            if len(Rs.get_free_agents()) > 11 and t >= 100:
-                B.dump_lns_allocation(t, Rs, J)
+            # if len(Rs.get_free_agents()) > 11 and t >= 100:
+            #     B.dump_lns_allocation(t, Rs, J)
 
             # Check if any agent is allocated the same tasks
             for agent in Rs.agents:
@@ -177,7 +170,7 @@ def main():
     # S.print_statistics()
     # S.task_length()
     S.save_data()
-    S.output_graphs()
+    # S.output_graphs()
     
     # print("============================Visualizing Output============================")
     # visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 'data/videos/' + str(path_planning_strategy) + "_" + str(T) + "_" + str(task_assignment_strategy) + ".mp4", speed=4)
@@ -210,8 +203,8 @@ def arg_main(S : statistics.Stats, B: buffer.Buffer, G : graph.Graph, num_robots
     # S.task_length()
     S.save_data()
     
-    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed)
-    S.output_graphs(folder_name)
+    folder_name = str(T) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots) + "_" + str(max_number_tasks) + "_" + str(seed) + "_full"
+    # S.output_graphs(folder_name)
 
     if to_visualize:
         print("============================Visualizing Output============================")
@@ -233,15 +226,12 @@ def entry():
 
     T = [3600]*120
     # num_robots = list(range(7, 100))
-    num_robots = [25]*120
+    num_robots = [15, 25, 35, 45, 55]
     DOF = 4
     task_generation_strategy = "informed_uniform"
     # task_assignment_strategy = "random"
-    # task_assignment_strategy = "lns_fully_informed"
-    # task_assignment_strategy = "taastar"
-    # task_assignment_strategy = "tbs"
-    # task_assignment_strategy = "tbs_bounded"
     task_assignment_strategy = "lns"
+    # task_assignment_strategy = "p_lns"
     # task_assignment_strategy = "cost_matrix"
     task_sequences = True
     path_planning_strategy = "ecbs"
@@ -249,15 +239,17 @@ def entry():
     visualize = False
     
     for seed in seeds:
+        print(f"Seed: {seed}")
         np.random.seed(seed)
         for i in range(len(max_number_tasks)):
-            output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + ".json"      
-            buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[i]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
-            B = buffer.Buffer(80, buffer_file)
-            S = statistics.Stats(num_robots[i], T[i], output_file)
-            G = graph.Graph(num_robots[i], map, DOF, True, "uniform", initial_inventory_amount)
-            
-            arg_main(S, B, G, num_robots[i], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
+            for j in range(len(num_robots)):
+                output_file = "data/raw_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed) + "_no_seq_full.json"      
+                buffer_file = "data/buffer_data/" + str(T[i]) + "_" + str(task_generation_strategy) + "_" + str(task_assignment_strategy) + "_" +str(path_planning_strategy) + "_" + str(num_robots[j]) + "_" + str(max_number_tasks[i]) + "_" + str(seed)
+                B = buffer.Buffer(80, buffer_file)
+                S = statistics.Stats(num_robots[j], T[i], output_file)
+                G = graph.Graph(num_robots[j], map, DOF, True, "uniform", initial_inventory_amount)
+                
+                arg_main(S, B, G, num_robots[j], T[i], max_number_tasks[i], seed, task_generation_strategy, task_assignment_strategy, task_sequences, path_planning_strategy, map, time_limit, visualize)
 
 if __name__=="__main__":
     entry()
