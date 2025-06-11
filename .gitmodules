@@ -1,16 +1,10 @@
 
-[submodule "task_allocation/MCA-RMCA"]
-	path = task_allocation/MCA-RMCA
-	url = https://github.com/nobodyczcz/MCA-RMCA
 [submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/EECBS"]
 	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/EECBS
 	url = https://github.com/Ethan-Schneider/EECBS.git
 [submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/PBS"]
 	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/PBS
 	url = https://github.com/Ethan-Schneider/PBS.git
-[submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/MAPF_PC"]
-	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/MAPF_PC
-	url = https://github.com/Ethan-Schneider/MAPF_PC.git
 [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns"]
 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
 	url = https://github.gatech.edu/eschneider32/LNS.git
