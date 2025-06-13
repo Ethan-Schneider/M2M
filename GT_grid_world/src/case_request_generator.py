@@ -29,12 +29,9 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
         - Updated last_task_id
     """
     
-    #TODO: Add logic for skipping task generation is no more tasks can be generated on the map (e.g. every location has some task assigned to it, 
-    # all warehouse locations are full of items so no more inbound tasks can be generated, etc.)
-    
-    # BUG: This causes error with tasks having the same start or goal location bc it is allowing so many tasks to be generated that it is less likely that the router will have to deal with a same location bug
-    # if len(J) > max_task_number:
-    #     return J, last_task_id
+    # Check if we've reached the maximum number of tasks
+    if len(J) >= max_task_number:
+        return set(), last_task_id
     
     inbound_probability = inbound_to_outbound / (inbound_to_outbound + 1)
     outbound_probability = 1 - inbound_probability
