@@ -1,22 +1,23 @@
 import numpy as np
 
 from .node import Node
-from .inventory_manager.inventory import Inventory
+from .inventory_manager.inventory import Inventory, WeightInitialization
 
 class Graph:
-    def __init__(self, num_robots : int, file_name: str = None, *args) -> None:
+    def __init__(self, num_robots : int, file_name: str = None, initial_warehouse_capacity: float = 25.0, num_skus: int = 10, weight_init_method: str = "random") -> None:
         self.__num_robots = num_robots
-        self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, args[0], args[1])
+        self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, initial_warehouse_capacity, num_skus, weight_init_method)
         self.__aisle_start, self.__driveway_start = self.__get_aisle_driveway_start()
         
-    def __load_graph(self, filename : str, warehouse_strategy : str, initial_warehouse_capacity : float):
+    def __load_graph(self, filename : str, initial_warehouse_capacity : float, num_skus : int, weight_init_method : str):
         """This method takes in a map file, parses the metadata and map data, 
         then saves a map representation, warehouse and driveway item representation, 
         height, width, and initializes robot start locations.
 
         Args:
             filename (str): Filename of the map
-            warehouse_strategy (str): Strategy for how to generate the initial warehouse inventory
+            weight_init_method (str): Method for initializing SKU weights
+            initial_warehouse_capacity (float): Initial fill percentage for the warehouse
 
         Raises:
             Exception: If the number of robots the user wants to generate exceeds
@@ -25,7 +26,7 @@ class Graph:
         occupancy_graph = []
         obstacle_graph = []
         cost = 4
-        
+        print(num_skus)
         # Read-in map file
         f = open(filename, "r")
         
@@ -92,11 +93,22 @@ class Graph:
             occupancy_graph.append(row)
             obstacle_graph.append(obstacle_row)
         
-        # Initialize Warehouse and Driveway as Warehouse objects 
-        # Note: it will populate the warehouse with the given strategy
-        # TODO: Currently populating driveway in the same state as the warehouse, should consider changing  
-        self.warehouse = Inventory(warehouse_locations, warehouse_strategy, initial_warehouse_capacity)
-        self.driveway = Inventory(driveway_locations, warehouse_strategy, initial_warehouse_capacity)
+        # Initialize Warehouse and Driveway as Inventory objects
+        weight_init = WeightInitialization.RANDOM if weight_init_method == "random" else WeightInitialization.UNIFORM
+        
+        self.warehouse = Inventory(
+            num_skus=num_skus,
+            warehouse_locations=warehouse_locations,
+            fill_percentage=initial_warehouse_capacity,
+            weight_init=weight_init
+        )
+        
+        self.driveway = Inventory(
+            num_skus=num_skus,
+            warehouse_locations=driveway_locations,
+            fill_percentage=initial_warehouse_capacity,
+            weight_init=weight_init
+        )
         
         if self.__num_robots > max_num_robots:
             raise Exception("Number of robots exceeds maximum number of robots for map")

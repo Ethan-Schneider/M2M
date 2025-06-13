@@ -34,7 +34,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, case_request_strategy)
+                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -99,7 +99,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          path_planning_strategy: str, map_name: str, time_limit: int = 86400,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
-         output_graphs: bool = False):
+         output_graphs: bool = False, num_skus: int = 10,
+         weight_init_method: str = "random") -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -114,10 +115,12 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         map_name: Name of the map to use
         time_limit: Maximum runtime in seconds
         visualize_output: Whether to generate visualization
-        initial_inventory: Initial inventory amount
+        initial_inventory: Initial inventory fill percentage (0.0 to 100.0)
         frequency: Frequency of task generation
         inbound_outbound_ratio: Ratio of inbound to outbound tasks
         output_graphs: Whether to output analysis graphs
+        num_skus: Number of unique SKUs in the warehouse
+        weight_init_method: Method for initializing SKU weights ("random" or "uniform")
     """
     np.random.seed(seed)
     
@@ -126,7 +129,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     
     B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(num_robots, T, output_file)
-    G = graph.Graph(num_robots, map_name, True, "uniform", initial_inventory)
+    G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
     
     # Initialize state of robots (robot_id, state)
     robots = []
@@ -184,13 +187,18 @@ if __name__=="__main__":
     parser.add_argument('--visualize', action='store_true',
                        help='Generate visualization output')
     parser.add_argument('--initial-inventory', type=float, default=25.0,
-                       help='Initial inventory amount')
+                       help='Initial inventory fill percentage (0.0 to 100.0)')
     parser.add_argument('--frequency', type=float, default=1.0,
                        help='Frequency of task generation')
     parser.add_argument('--inbound-outbound-ratio', type=float, default=1.0,
                        help='Ratio of inbound to outbound tasks')
     parser.add_argument('--output-graphs', action='store_true',
                        help='Output analysis graphs')
+    parser.add_argument('--num-skus', type=int, default=10,
+                       help='Number of unique SKUs in the warehouse')
+    parser.add_argument('--weight-init-method', type=str, default='random',
+                       choices=['random', 'uniform'],
+                       help='Method for initializing SKU weights')
     
     args = parser.parse_args()
     
@@ -208,5 +216,7 @@ if __name__=="__main__":
         initial_inventory=args.initial_inventory,
         frequency=args.frequency,
         inbound_outbound_ratio=args.inbound_outbound_ratio,
-        output_graphs=args.output_graphs
+        output_graphs=args.output_graphs,
+        num_skus=args.num_skus,
+        weight_init_method=args.weight_init_method
     )
