@@ -26,7 +26,6 @@ class Graph:
         occupancy_graph = []
         obstacle_graph = []
         cost = 4
-        print(num_skus)
         # Read-in map file
         f = open(filename, "r")
         
@@ -80,12 +79,12 @@ class Graph:
                 elif character == ".":
                     obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
-                    if (i, j) in empty_points[:num_warehouse_locations]:
-                        warehouse_locations.append((i, j))
-                    elif (i, j) in empty_points[(-1*num_driveway_locations):]:
-                        driveway_locations.append((i, j))
-                    else:
-                        pass
+                    # if (i, j) in empty_points[:num_warehouse_locations]:
+                    #     warehouse_locations.append((i, j))
+                    # elif (i, j) in empty_points[(-1*num_driveway_locations):]:
+                    #     driveway_locations.append((i, j))
+                    # else:
+                    #     pass
                 elif character == "r":
                     obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
@@ -98,14 +97,14 @@ class Graph:
         
         self.warehouse = Inventory(
             num_skus=num_skus,
-            warehouse_locations=warehouse_locations,
+            warehouse_locations=self.aisle_locations,
             fill_percentage=initial_warehouse_capacity,
             weight_init=weight_init
         )
         
         self.driveway = Inventory(
             num_skus=num_skus,
-            warehouse_locations=driveway_locations,
+            warehouse_locations=self.station_locations,
             fill_percentage=initial_warehouse_capacity,
             weight_init=weight_init
         )

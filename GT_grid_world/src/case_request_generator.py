@@ -10,6 +10,9 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
         strategy: str = "uninformed_uniform") -> Tuple[Set[Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
+    Each task is defined as (task_id, S_n, D_n) where:
+    - S_n is the frozenset of possible start locations
+    - D_n is the frozenset of possible destination locations
     
     Args:
         S: Statistics object for tracking metrics
@@ -25,7 +28,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
     
     Returns:
         Tuple containing:
-        - Set of new tasks (task_id, start_location, goal_location)
+        - Set of new tasks (task_id, start_locations_frozenset, goal_locations_frozenset)
         - Updated last_task_id
     """
     
@@ -41,39 +44,38 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
     # Get current task locations to avoid conflicts
     current_task_locations = set()
     for task in J:
-        current_task_locations.add(task[1])  # start location
-        current_task_locations.add(task[2])  # goal location
+        # For each task, add all possible start and goal locations to current_task_locations
+        current_task_locations.update(task[1])  # start locations set
+        current_task_locations.update(task[2])  # goal locations set
+    
     print(strategy)
     if strategy == "uninformed_uniform":
         for task in tasks_to_generate:
             if task == 1:  # Inbound task
-                # Pickup from station, deliver to empty aisle location
-                pickup_location = G.get_station_locations()[np.random.choice(len(G.get_station_locations()), 1)[0]]
-                empty_locations = [loc for loc in G.get_aisle_locations() 
-                                 if loc not in current_task_locations]
-                if not empty_locations:
-                    continue
-                delivery_location = empty_locations[np.random.choice(len(empty_locations), 1)[0]]
+                # Start locations are all driveway nodes
+                start_locations = frozenset(G.get_station_locations())
                 
-                J_new.add((last_task_id + 1, pickup_location, delivery_location))
+                # Goal locations are all empty aisle locations
+                goal_locations = frozenset(loc for loc in G.get_aisle_locations() 
+                                        if loc not in current_task_locations)
+                
+                if not goal_locations:
+                    continue
+                
+                J_new.add((last_task_id + 1, start_locations, goal_locations))
                 last_task_id += 1
                 
             elif task == 0:  # Outbound task
-                # Pickup from aisle with items, deliver to station
-                full_locations = inventory.get_full_locations()
-                available_locations = [loc for loc in full_locations 
-                                     if loc not in current_task_locations]
-                if not available_locations:
-                    continue
-                    
-                pickup_location = available_locations[np.random.choice(len(available_locations), 1)[0]]
-                station_locations = [loc for loc in G.get_station_locations() 
-                                   if loc not in current_task_locations]
-                if not station_locations:
-                    continue
-                delivery_location = station_locations[np.random.choice(len(station_locations), 1)[0]]
+                # Start locations are all aisle locations containing SKUs
+                start_locations = frozenset(inventory.get_full_locations())
                 
-                J_new.add((last_task_id + 1, pickup_location, delivery_location))
+                # Goal locations are all driveway nodes
+                goal_locations = frozenset(G.get_station_locations())
+                
+                if not start_locations:
+                    continue
+                
+                J_new.add((last_task_id + 1, start_locations, goal_locations))
                 last_task_id += 1
     
     elif strategy == "informed_uniform":
@@ -88,33 +90,29 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
             sku_id = np.random.choice(sku_ids, p=weights)
             
             if task == 1:  # Inbound task
-                # Pickup from station, deliver to empty aisle location
-                pickup_location = G.get_station_locations()[np.random.choice(len(G.get_station_locations()), 1)[0]]
-                empty_locations = [loc for loc in G.get_aisle_locations() 
-                                 if loc not in current_task_locations]
-                if not empty_locations:
-                    continue
-                delivery_location = empty_locations[np.random.choice(len(empty_locations), 1)[0]]
+                # Start locations are all driveway nodes
+                start_locations = frozenset(G.get_station_locations())
                 
-                J_new.add((last_task_id + 1, pickup_location, delivery_location))
+                # Goal locations are all empty aisle locations
+                goal_locations = frozenset(loc for loc in G.get_aisle_locations() 
+                                        if loc not in current_task_locations)
+                
+                if not goal_locations:
+                    continue
+                
+                J_new.add((last_task_id + 1, start_locations, goal_locations))
                 last_task_id += 1
                 
             elif task == 0:  # Outbound task
-                # Pickup from aisle location containing the selected SKU
-                sku_locations = inventory.get_sku_instances(sku_id)
-                available_locations = [loc for loc in sku_locations 
-                                     if loc not in current_task_locations]
-                if not available_locations:
-                    continue
-                    
-                pickup_location = available_locations[np.random.choice(len(available_locations), 1)[0]]
-                station_locations = [loc for loc in G.get_station_locations() 
-                                   if loc not in current_task_locations]
-                if not station_locations:
-                    continue
-                delivery_location = station_locations[np.random.choice(len(station_locations), 1)[0]]
+                # Start locations are all locations containing the selected SKU
+                start_locations = frozenset(inventory.get_sku_instances(sku_id))
                 
-                J_new.add((last_task_id + 1, pickup_location, delivery_location))
+                # Goal locations are all driveway nodes
+                goal_locations = frozenset(G.get_station_locations())
+                if not start_locations:
+                    continue
+                
+                J_new.add((last_task_id + 1, start_locations, goal_locations))
                 last_task_id += 1
     
     else:

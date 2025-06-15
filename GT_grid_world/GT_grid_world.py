@@ -34,7 +34,9 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
+                print("Generating new tasks")
                 J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
+                print(f"New tasks: {J_new}")
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -175,7 +177,7 @@ if __name__=="__main__":
                        choices=['informed_uniform', 'uninformed_uniform'],
                        help='Task generation strategy')
     parser.add_argument('--task-assign-strategy', type=str, required=True,
-                       choices=['lns', 'p_lns', 'cost_matrix', 'random'],
+                       choices=['lns', 'p_lns', 'cost_matrix', 'random', 'M2M_lns'],
                        help='Task assignment strategy')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs'],

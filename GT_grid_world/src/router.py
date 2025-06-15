@@ -13,11 +13,11 @@ def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str,
         # If robot is going to pickup, set goal location to the task's start location
         if agent.status == 1:
             # Get current assigned task's start location
-            goal_locations.append(get_task_start_location(J, agent.task_sequence[0]))
+            goal_locations.append(agent.task_sequence[0][1])
             
         # If robot is going to delivery, set goal location to the task's goal location
         elif agent.status == 2:
-            goal_locations.append(get_task_goal_location(J, agent.task_sequence[0]))
+            goal_locations.append(agent.task_sequence[0][2])
             
         # If robot is a free_agent, set goal location to current state
         else:
@@ -42,7 +42,7 @@ def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str,
             S.update_num_path_plan_fail()
             
         # If a solution cannot be found with a higher suboptimality bound, break
-        if w >= 11.2:
+        if w >= 1.2:
             if latch:
                 break
             for i, agent in enumerate(Rs.agents):
