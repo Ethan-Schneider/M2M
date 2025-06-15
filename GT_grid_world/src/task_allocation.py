@@ -3,10 +3,10 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
-from .task_allocation_algorithms.random import random_ta
 from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.p_lns import p_lns_call
-from .task_allocation_algorithms.M2M_lns import M2M_lns
+from .task_allocation_algorithms.initial_solutions.greedy_allocation import greedy_call
+from .task_allocation_algorithms.initial_solutions.random_allocation import random_call  
 
 def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, map : str, t : int) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
@@ -25,13 +25,13 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     """
 
     if task_assignment_strategy == "random":
-        return random_ta(G, S, Rs, J)
+        return random_call(S, G, Rs, J)
     elif task_assignment_strategy == "lns":
         return lns_call(S, G, map, Rs, J, t)
     elif task_assignment_strategy == "p_lns":
         return p_lns_call(S, G, map, Rs, J, t)
-    elif task_assignment_strategy == "M2M_lns":
-        return M2M_lns(S, G, Rs, J)
+    elif task_assignment_strategy == "greedy":
+        return greedy_call(S, G, Rs, J)
     else:
         print("ERROR: Unknown task assignment strategy " + task_assignment_strategy + ", please choose another one.")
         return Rs
