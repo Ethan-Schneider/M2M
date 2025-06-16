@@ -177,7 +177,7 @@ if __name__=="__main__":
                        choices=['informed_uniform', 'uninformed_uniform'],
                        help='Task generation strategy')
     parser.add_argument('--task-assign-strategy', type=str, required=True,
-                       choices=['lns', 'p_lns', 'cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret'],
+                       choices=['lns', 'p_lns', 'cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC'],
                        help='Task assignment strategy')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs'],

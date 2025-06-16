@@ -5,7 +5,8 @@ from .utils import *
 
 from .task_allocation_algorithms.lns import lns_call
 from .task_allocation_algorithms.p_lns import p_lns_call
-from .task_allocation_algorithms.initial_solutions.max_regret import max_regret_call
+from .task_allocation_algorithms.initial_solutions.max_regret_FC import max_regret_FC_call
+from .task_allocation_algorithms.initial_solutions.randomized_max_regret_FC import randomized_max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.FCF import FCF_call
 from .task_allocation_algorithms.initial_solutions.greedy_allocation import greedy_call
 from .task_allocation_algorithms.initial_solutions.randomized_greedy import randomized_greedy_call
@@ -39,8 +40,10 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
         return randomized_greedy_call(S, G, Rs, J)
     elif task_assignment_strategy == "FCF":
         return FCF_call(S, G, Rs, J)
-    elif task_assignment_strategy == "max_regret":
-        return max_regret_call(S, G, Rs, J)
+    elif task_assignment_strategy == "max_regret_FC":
+        return max_regret_FC_call(S, G, Rs, J)
+    elif task_assignment_strategy == "randomized_max_regret_FC":
+        return randomized_max_regret_FC_call(S, G, Rs, J)
     else:
         print("ERROR: Unknown task assignment strategy " + task_assignment_strategy + ", please choose another one.")
         return Rs

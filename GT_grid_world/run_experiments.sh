@@ -18,7 +18,7 @@ inbound_outbound_ratio=(1.0)
 num_skus=(5)
 weight_init_method="random"
 task_gen_strategy="informed_uniform"
-task_assign_strategy="randomized_greedy"
+task_assign_strategy="randomized_max_regret_FC"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"
 

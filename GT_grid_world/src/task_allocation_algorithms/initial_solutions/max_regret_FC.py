@@ -6,9 +6,9 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def max_regret_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
+def max_regret_FC_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
-    Perform max regret allocation of tasks to agents based on minimum cost elements in the tensor.
+    Perform max regret FC allocation of tasks to agents based on minimum cost elements in the tensor.
     
     Args:
         cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
@@ -127,7 +127,7 @@ def max_regret_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_lo
 
     return allocations, total_cost
 
-def max_regret_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
+def max_regret_FC_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
             strategy: str = "lns", map_name: str = None, t: int = 0) -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
@@ -163,9 +163,9 @@ def max_regret_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     print(f"idx_to_task_id: {idx_to_task_id}")
     
     tik = time.time()
-    allocations, total_cost = max_regret_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
+    allocations, total_cost = max_regret_FC_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
     tok = time.time()
-    print(f"Time taken to perform max regret allocation: {tok - tik} seconds")
+    print(f"Time taken to perform max regret FC allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
     print(f"Total cost: {total_cost}")
     print(f"Robot Task Sequences")
