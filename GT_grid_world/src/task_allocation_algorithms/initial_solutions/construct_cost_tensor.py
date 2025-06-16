@@ -23,20 +23,25 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph) -> np.ndarra
         - P is number of possible start locations
         - Q is number of possible goal locations
     """
-    M = len(Rs.agents)  # Number of agents
-    N = len(J)  # Number of tasks
-
-    # Get all possible start and goal locations from tasks
-    all_start_locs = set()
-    all_goal_locs = set()
-    for task in J:
-        all_start_locs.update(task[1])  # start_locations_frozenset
-        all_goal_locs.update(task[2])  # goal_locations_frozenset
-
     allocated_tasks = set()
     for agent in Rs.agents:
         for task in agent.task_sequence:
             allocated_tasks.add(task[0])
+
+    unallocated_tasks = [task for task in J if task[0] not in allocated_tasks]
+
+    M = len(Rs.agents)  # Number of agents
+    N = len(unallocated_tasks) # Number of tasks
+
+    # Get all possible start and goal locations from unallocated tasks
+    all_start_locs = set()
+    all_goal_locs = set()
+    for task in unallocated_tasks:
+        all_start_locs.update(task[1])  # start_locations_frozenset
+        all_goal_locs.update(task[2])  # goal_locations_frozenset
+
+    # idx to task_id mapping
+    idx_to_task_id = {idx: task[0] for idx, task in enumerate(unallocated_tasks)}
     
     # Convert to sorted lists for consistent indexing
     start_locs = sorted(list(all_start_locs))
@@ -60,9 +65,7 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph) -> np.ndarra
     
     # Calculate costs only for valid combinations
     for m in range(M):
-        for n, task in enumerate(J):
-            if n in allocated_tasks:
-                continue
+        for n, task in enumerate(unallocated_tasks):
             # Get valid start and goal locations for this task
             valid_starts = [loc for loc in task[1] if loc not in allocated_locs]
             valid_goals = [loc for loc in task[2] if loc not in allocated_locs]
@@ -81,4 +84,4 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph) -> np.ndarra
                     
                     cost_tensor[m, n, i, j] = cost
     
-    return cost_tensor, start_locs, goal_locs
+    return cost_tensor, start_locs, goal_locs, idx_to_task_id

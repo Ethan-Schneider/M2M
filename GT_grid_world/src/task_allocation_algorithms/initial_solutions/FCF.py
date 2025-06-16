@@ -6,7 +6,7 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
+def FCF_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
     
@@ -31,16 +31,23 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
     
     # Track each agent's current goal location
     agent_goal_locs = [None] * M
-    
-    while True:
+
+    for n in range(N):
         # Find minimum cost element
-        min_cost = np.min(working_tensor)
+        min_cost = np.min(working_tensor[:, n, :, :])
         if min_cost == np.inf:
-            break
-            
-        # Get indices of minimum cost element
-        m, n, p, q = np.unravel_index(np.argmin(working_tensor), working_tensor.shape)
-        allocations.append((int(m), int(n), int(p), int(q)))
+            continue
+
+        # Get the 3D slice for this task
+        task_slice = working_tensor[:, n, :, :]
+        # Find min in the 3D slice
+        min_idx_3d = np.unravel_index(np.argmin(task_slice), task_slice.shape)
+        # Convert back to 4D indices
+        m = min_idx_3d[0]
+        p = min_idx_3d[1]
+        q = min_idx_3d[2]
+        
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])
@@ -91,7 +98,7 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
 
     return allocations, total_cost
 
-def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
+def FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
             strategy: str = "lns", map_name: str = None, t: int = 0) -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
@@ -113,27 +120,18 @@ def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
         while len(agent.task_sequence) > 1:
             agent.task_sequence.pop(-1)
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
 
     # Construct cost tensor
     tik = time.time()
     cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
-
-    print(f"idx_to_task_id: {idx_to_task_id}")
     
     tik = time.time()
-    allocations, total_cost = greedy_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
+    allocations, total_cost = FCF_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
     tok = time.time()
-    print(f"Time taken to perform greedy allocation: {tok - tik} seconds")
-    print(f"Allocations: {allocations}")
-    print(f"Total cost: {total_cost}")
-    print(f"Robot Task Sequences")
-    for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
+    print(f"Time taken to perform FCF allocation: {tok - tik} seconds")
     
     return Rs

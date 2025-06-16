@@ -6,9 +6,9 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
+def max_regret_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
-    Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
+    Perform max regret allocation of tasks to agents based on minimum cost elements in the tensor.
     
     Args:
         cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
@@ -38,9 +38,45 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
         if min_cost == np.inf:
             break
             
-        # Get indices of minimum cost element
-        m, n, p, q = np.unravel_index(np.argmin(working_tensor), working_tensor.shape)
-        allocations.append((int(m), int(n), int(p), int(q)))
+        # Calculate regret for each task
+        max_regret = -np.inf
+        max_regret_task = None
+        max_regret_indices = None
+        
+        for n in range(N):
+            # Get all costs for this task
+            task_costs = working_tensor[:, n, :, :]
+            if np.min(task_costs) == np.inf:
+                continue
+                
+            # Flatten the costs and get unique sorted values
+            flat_costs = np.unique(task_costs.flatten())
+            if len(flat_costs) < 2:  # Skip if there's only one valid cost
+                continue
+                
+            # Calculate regret (difference between min and second min)
+            regret = flat_costs[1] - flat_costs[0]
+            
+            if regret > max_regret:
+                max_regret = regret
+                max_regret_task = n
+                # Get the indices of the minimum cost for this task
+                task_slice = working_tensor[:, n, :, :]
+                min_idx_3d = np.unravel_index(np.argmin(task_slice), task_slice.shape)
+                m = min_idx_3d[0]
+                p = min_idx_3d[1]
+                q = min_idx_3d[2]
+                max_regret_indices = (m, n, p, q)
+        
+        print(f"max_regret_task: {max_regret_task}")
+        print(f"max_regret_indices: {max_regret_indices}")
+        print(f"max_regret: {max_regret}")
+        if max_regret_task is None:  # No more tasks with valid regrets
+            break
+            
+        # Use the indices from the task with max regret
+        m, n, p, q = max_regret_indices
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])
@@ -56,7 +92,7 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
 
-        total_cost += min_cost
+        total_cost += working_tensor[m, n, p, q]
         
         # Update agent's goal location
         agent_goal_locs[m] = q
@@ -91,7 +127,7 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
 
     return allocations, total_cost
 
-def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
+def max_regret_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
             strategy: str = "lns", map_name: str = None, t: int = 0) -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
@@ -127,9 +163,9 @@ def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     print(f"idx_to_task_id: {idx_to_task_id}")
     
     tik = time.time()
-    allocations, total_cost = greedy_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
+    allocations, total_cost = max_regret_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
     tok = time.time()
-    print(f"Time taken to perform greedy allocation: {tok - tik} seconds")
+    print(f"Time taken to perform max regret allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
     print(f"Total cost: {total_cost}")
     print(f"Robot Task Sequences")

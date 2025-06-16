@@ -12,15 +12,15 @@ parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 seeds=(0)
 num_robots=(3)
 time_horizons=(3600)
-max_tasks=(10)
+max_tasks=(20)
 frequencies=(1.0)
 inbound_outbound_ratio=(1.0)
 num_skus=(5)
 weight_init_method="random"
 task_gen_strategy="informed_uniform"
-task_assign_strategy="greedy"
+task_assign_strategy="random"
 path_planning_strategy="ecbs"
-map="data/maps/small_test"
+map="data/maps/symbotic_small"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do

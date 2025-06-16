@@ -6,7 +6,7 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
+def random_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
     
@@ -38,9 +38,19 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
         if min_cost == np.inf:
             break
             
-        # Get indices of minimum cost element
-        m, n, p, q = np.unravel_index(np.argmin(working_tensor), working_tensor.shape)
-        allocations.append((int(m), int(n), int(p), int(q)))
+        # Get valid (non-infinite) entries
+        valid_entries = np.where(working_tensor != np.inf)
+        if len(valid_entries[0]) == 0:
+            break
+            
+        # Randomly select one of the valid entries
+        random_idx = np.random.randint(0, len(valid_entries[0]))
+        m = valid_entries[0][random_idx]
+        n = valid_entries[1][random_idx]
+        p = valid_entries[2][random_idx]
+        q = valid_entries[3][random_idx]
+        
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])
@@ -91,7 +101,7 @@ def greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
 
     return allocations, total_cost
 
-def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
+def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
             strategy: str = "lns", map_name: str = None, t: int = 0) -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
@@ -113,21 +123,17 @@ def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
         while len(agent.task_sequence) > 1:
-            agent.task_sequence.pop(-1)
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
+            agent.task_sequence.pop(0)
 
     # Construct cost tensor
     tik = time.time()
     cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
-
-    print(f"idx_to_task_id: {idx_to_task_id}")
     
     tik = time.time()
-    allocations, total_cost = greedy_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
+    allocations, total_cost = random_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
     tok = time.time()
     print(f"Time taken to perform greedy allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
