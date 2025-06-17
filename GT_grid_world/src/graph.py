@@ -1,13 +1,92 @@
 import numpy as np
+import os
 
 from .node import Node
 from .inventory_manager.inventory import Inventory, WeightInitialization
+
+def manhattan_distance(p1 : tuple, p2 : tuple) -> float: 
+    return np.abs(p2[1] - p1[1]) + np.abs(p2[0] - p1[0])
+
+class AStar:
+    def __init__(self, G, start : tuple, goal : tuple) -> None:
+        self.admissible_heuristic = manhattan_distance
+        self.goal = goal
+        self.start = start
+        self.get_neighbors = G.get_neighbors
+        self.G = G  # Store reference to graph to check obstacles
+
+    def reconstruct_path(self, came_from : dict, current : tuple) -> list:
+        total_path = [current]
+        while current in came_from.keys():
+            current = came_from[current]
+            total_path.append(current)
+        return total_path[::-1]
+
+    def search(self):
+        """
+        low level search 
+        """
+        initial_state = self.start
+        step_cost = 1
+        
+        # Check if start or goal is an obstacle
+        if self.G.get_if_obstacle(initial_state) or self.G.get_if_obstacle(self.goal):
+            return False
+        
+        closed_set = set()
+        open_set = {initial_state}
+
+        came_from = {}
+
+        g_score = {} 
+        g_score[initial_state] = 0
+
+        f_score = {} 
+
+        f_score[initial_state] = self.admissible_heuristic(initial_state, initial_state)
+
+        while open_set:
+            temp_dict = {open_item:f_score.setdefault(open_item, float("inf")) for open_item in open_set}
+            current = min(temp_dict, key=temp_dict.get)
+
+            # If current state is goal, return path
+            if self.goal == current:
+                return self.reconstruct_path(came_from, current)
+
+            # Add current to closed and remove from open sets
+            open_set -= {current}
+            closed_set |= {current}
+
+            # Get list of neighbors from current node - use ignore_robots=False to respect obstacles
+            neighbor_list = self.get_neighbors(current, False)
+
+            for neighbor in neighbor_list:
+                if neighbor in closed_set:
+                    continue
+                
+                tentative_g_score = g_score.setdefault(current, float("inf")) + step_cost
+
+                if neighbor not in open_set:
+                    open_set |= {neighbor}
+                elif tentative_g_score >= g_score.setdefault(neighbor, float("inf")):
+                    continue
+
+                came_from[neighbor] = current
+
+                g_score[neighbor] = tentative_g_score
+                f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, current)
+        return False
 
 class Graph:
     def __init__(self, num_robots : int, file_name: str = None, initial_warehouse_capacity: float = 25.0, num_skus: int = 10, weight_init_method: str = "random") -> None:
         self.__num_robots = num_robots
         self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, initial_warehouse_capacity, num_skus, weight_init_method)
         self.__aisle_start, self.__driveway_start = self.__get_aisle_driveway_start()
+        
+        # Initialize distance matrix
+        self.__distance_matrix = None
+        if file_name:
+            self.__load_or_compute_distance_matrix(file_name)
         
     def __load_graph(self, filename : str, initial_warehouse_capacity : float, num_skus : int, weight_init_method : str):
         """This method takes in a map file, parses the metadata and map data, 
@@ -55,6 +134,7 @@ class Graph:
         self.obstacles = []
         self.aisle_locations = []  # Track aisle locations (e)
         self.station_locations = []  # Track inbound/outbound stations (s)
+        self.all_locations = []
                 
         # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
         f = open(filename, "r")
@@ -64,6 +144,7 @@ class Graph:
             row = []
             obstacle_row = []
             for j, character in enumerate(line):
+                self.all_locations.append((i, j))
                 if character == "@":
                     self.obstacles.append((i, j))
                     row.append(Node(cost, occupied=False, obstacle=True))
@@ -159,28 +240,28 @@ class Graph:
         west = (node[0], node[1]-1)
         
         if ignore_robots: 
-            if north[0] < 0  or self.__get_if_obstacle(north):
+            if north[0] < 0  or self.get_if_obstacle(north):
                 north = None
                 
-            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_obstacle(east):
+            if east[1] == self.__occupancy_graph.shape[1] or self.get_if_obstacle(east):
                 east = None
                 
-            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_obstacle(south):
+            if south[0] == self.__occupancy_graph.shape[0] or self.get_if_obstacle(south):
                 south = None   
             
-            if west[1] < 0 or self.__get_if_obstacle(west):
+            if west[1] < 0 or self.get_if_obstacle(west):
                 west = None            
         else:
-            if north[0] < 0  or self.__get_if_occupied(north):
+            if north[0] < 0  or self.__get_if_occupied(north) or self.get_if_obstacle(north):
                 north = None
                 
-            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_occupied(east):
+            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_occupied(east) or self.get_if_obstacle(east):
                 east = None
                 
-            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_occupied(south):
+            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_occupied(south) or self.get_if_obstacle(south):
                 south = None   
             
-            if west[1] < 0 or self.__get_if_occupied(west):
+            if west[1] < 0 or self.__get_if_occupied(west) or self.get_if_obstacle(west):
                 west = None
             
         neighbors = [north, east, south, west]
@@ -191,8 +272,8 @@ class Graph:
     def __get_if_occupied(self, node: tuple) -> bool:
         return self.__occupancy_graph[node[0], node[1]].get_occupied()
     
-    def __get_if_obstacle(self, node: tuple) -> bool:
-        return self.__occupancy_graph[node[0], node[1]].get_occupied()
+    def get_if_obstacle(self, node: tuple) -> bool:
+        return self.__occupancy_graph[node[0], node[1]].get_obstacle()
     
     def get_aisle_occupancy(self) -> list:
         aisle_occupied = []
@@ -310,4 +391,79 @@ class Graph:
     def get_station_locations(self) -> list:
         """Returns list of inbound/outbound station locations (s) in the map."""
         return self.station_locations
+                    
+    def __load_or_compute_distance_matrix(self, map_file: str) -> None:
+        """Load the distance matrix from file if it exists, otherwise compute and save it.
+        
+        Args:
+            map_file (str): Path to the map file
+        """
+        # Get the directory and base filename
+        dir_name = os.path.dirname(map_file)
+        base_name = os.path.splitext(os.path.basename(map_file))[0]
+        matrix_file = os.path.join(dir_name, f"{base_name}_distances.npy")
+        
+        # Try to load existing matrix
+        if os.path.exists(matrix_file):
+            self.__distance_matrix = np.load(matrix_file)
+            return
+            
+        # Compute new matrix
+        print("Computing distance matrix...")
+        n = self.height * self.width
+        self.__distance_matrix = np.full((n, n), np.inf)
+        
+        # Set diagonal to 0
+        np.fill_diagonal(self.__distance_matrix, 0)
+        
+        # Get all non-obstacle locations
+        valid_locations = self.get_all_non_obstacles()
+        
+        # Compute distances between all pairs
+        for i, start in enumerate(valid_locations):
+            if i % 10 == 0:
+                print(f"Computing distances for location {i}/{len(valid_locations)}")
+            
+            for goal in valid_locations:
+                if start == goal:
+                    continue
+                    
+                # Convert 2D coordinates to 1D index
+                start_idx = start[0] * self.width + start[1]
+                goal_idx = goal[0] * self.width + goal[1]
+                
+                # Skip if we already computed this pair
+                if self.__distance_matrix[goal_idx, start_idx] != np.inf:
+                    self.__distance_matrix[start_idx, goal_idx] = self.__distance_matrix[goal_idx, start_idx]
+                    continue
+                
+                # Compute path using A*
+                path = AStar(self, start, goal).search()
+                if path:
+                    self.__distance_matrix[start_idx, goal_idx] = len(path) - 1  # -1 because path includes start node
+                    
+        # Save the matrix
+        np.save(matrix_file, self.__distance_matrix)
+        print("Distance matrix saved to", matrix_file)
+        
+    def get_distance(self, start: tuple, goal: tuple) -> float:
+        """Get the shortest path distance between two locations.
+        
+        Args:
+            start (tuple): Starting location (row, col)
+            goal (tuple): Goal location (row, col)
+            
+        Returns:
+            float: Shortest path distance, or inf if no path exists
+        """
+        if self.__distance_matrix is None:
+            raise ValueError("Distance matrix not initialized. Make sure to provide a map file when creating the Graph.")
+            
+        start_idx = start[0] * self.width + start[1]
+        goal_idx = goal[0] * self.width + goal[1]
+        
+        return self.__distance_matrix[start_idx, goal_idx]
+    
+    def get_distance_matrix(self) -> np.ndarray:
+        return self.__distance_matrix
                     

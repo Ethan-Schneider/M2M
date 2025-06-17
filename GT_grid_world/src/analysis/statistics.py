@@ -6,10 +6,32 @@ from .graphing import *
 from ..agent import *
 
 class Stats: 
-    def __init__(self, num_robots : int, simulation_time : int, output_file : str) -> None:
-        self.__output_file = output_file
+    def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
+                 seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
+                 task_assignment_strategy: str = None, path_planning_strategy: str = None,
+                 time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
+                 frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
+                 num_skus: int = None, weight_init_method: str = None) -> None:
+        # Store input parameters
+        self.__seed = seed
         self.__num_of_robots = num_robots
         self.__T = simulation_time
+        self.__max_tasks = max_tasks
+        self.__task_generation_strategy = task_generation_strategy
+        self.__task_assignment_strategy = task_assignment_strategy
+        self.__path_planning_strategy = path_planning_strategy
+        self.__map_name = map_name
+        self.__time_limit = time_limit
+        self.__visualize_output = visualize_output
+        self.__initial_inventory = initial_inventory
+        self.__frequency = frequency
+        self.__inbound_outbound_ratio = inbound_outbound_ratio
+        self.__output_graphs = output_graphs
+        self.__num_skus = num_skus
+        self.__weight_init_method = weight_init_method
+        self.__cost_calculation_method = cost_calculation_method
+
+        self.__output_file = output_file
         
         self.__early_task_ids = []
         
@@ -57,18 +79,6 @@ class Stats:
         # Actual duration for Task (time @ task_goal - time @ task_start) in the form (task_id, actual_duration)
         self.__actual_duration = {}
         
-        # # Estimated distance for (robot_start_location -> task_start_location) in the form (task_id, estimated_distance)
-        # self.__estimated_inbound_pickup_distance = []
-        
-        # # Actual distance for (robot_start_location -> task_start_location) in the form (task_id, actual_distance)
-        # self.__actual_inbound_pickup_distance = []
-        
-        # # Estimated distance for (robot_start_location -> task_start_location) in the form (task_id, estimated_distance)
-        # self.__estimated_outbound_pickup_distance = []
-        
-        # # Actual distance for (robot_start_location -> task_start_location) in the form (task_id, actual_distance)
-        # self.__actual_outbound_pickup_distance = []
-        
         # Estimated distance for (robot_start_location -> task_start_location) in the form (task_id, estimated_distance)
         self.__estimated_pickup_distance = {}
         
@@ -90,12 +100,8 @@ class Stats:
             self.__paths.append([])
             self.__task_assignments.append([])
             
-            
-        self.__T = simulation_time
-        
         self.__completed_task_ids = []
         self.__completed_to_pickup_task_ids = []
-        
         
         # Runtime Stastics: 
         self.__total_runtime = []
@@ -105,9 +111,6 @@ class Stats:
         self.__SIM_time = []
         
         self.__num_path_plan_fails = 0
-        
-        #TODO: SoC (Sum(self.__actual_duration))
-        #TODO: Throughput ((len(actual_duration) / T)*60)
         
         self.__gaussian_weights = {
             "warehouse": [],
@@ -560,9 +563,28 @@ class Stats:
         avg_task_cost, total_costs = self.get_cost_stats()
         
         data = {
-            "timesteps_completed" : self.__T,
-            "number_of_robots" : self.__num_of_robots,
-            "total_completed_tasks" : int(len(self.__completed_task_ids)),
+            # Input parameters from main
+            "seed": self.__seed,
+            "num_robots": self.__num_of_robots,
+            "time_horizon": self.__T,
+            "max_tasks": self.__max_tasks,
+            "task_generation_strategy": self.__task_generation_strategy,
+            "task_assignment_strategy": self.__task_assignment_strategy,
+            "path_planning_strategy": self.__path_planning_strategy,
+            "map_name": self.__map_name,
+            "time_limit": self.__time_limit,
+            "visualize_output": self.__visualize_output,
+            "initial_inventory": self.__initial_inventory,
+            "frequency": self.__frequency,
+            "inbound_outbound_ratio": self.__inbound_outbound_ratio,
+            "output_graphs": self.__output_graphs,
+            "num_skus": self.__num_skus,
+            "weight_init_method": self.__weight_init_method,
+            "cost_calculation_method": self.__cost_calculation_method,
+            
+            # Simulation results
+            "timesteps_completed": self.__T,
+            "total_completed_tasks": int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
@@ -571,34 +593,33 @@ class Stats:
             "total_service_time": total_service_time,
             "average_task_cost": avg_task_cost,
             "sum_of_costs": total_costs,
-            "actual_duration_of_task_from_pick_to_place" : self.__actual_duration,
-            "estimated_duration_of_task_from_pick_to_place" : self.__estimated_duration,
-            "actual_duration_of_task_from_start_to_pick" : self.__actual_pickup_duration,
-            "estimated_duration_of_task_from_start_to_pick" : self.__estimated_pickup_duration,
-            "collisions" : int(np.sum(self.__collisions)),
-            "stationary_robots" : self.compute_stationary_robots(),
-            "unallocated agents" : self.__unallocated_agents,
+            "actual_duration_of_task_from_pick_to_place": self.__actual_duration,
+            "estimated_duration_of_task_from_pick_to_place": self.__estimated_duration,
+            "actual_duration_of_task_from_start_to_pick": self.__actual_pickup_duration,
+            "estimated_duration_of_task_from_start_to_pick": self.__estimated_pickup_duration,
+            "collisions": int(np.sum(self.__collisions)),
+            "stationary_robots": self.compute_stationary_robots(),
+            "unallocated_agents": self.__unallocated_agents,
             "throughput (tasks/min)": self.return_throughput(),
-            "SoC(min)" : self.__soc,
-            "Total Runtime" : self.__total_runtime,
-            "Total Path Planning Runtime" : int(np.sum(self.__PF_time)),
-            "Opened Nodes" : self.__opened_nodes,
-            "Expanded Nodes" : self.__expanded_nodes,
-            "Path Planning Runtimes" : self.__PF_time,
-            "Total Task Allocaiton Runtime" : int(np.sum(self.__TA_time)),
-            "Number of Path Plan Fails" : int(self.__num_path_plan_fails),
-            "Task Allocation Runtime" : self.__TA_time,
-            "admissibility" : self.__admisibility,
-            "admissibility_differences" : self.__admisibility_differences,
-            "paths" : self.__paths,
-            "aisle_occupancy" : self.__aisle_occupancy,
-            "driveway_occupancy" : self.__driveway_occupancy,
-            "allocation" : self.__task_assignments,
-            "velocity_timesteps" : velocity_timesteps,
-            "gaussian_weights" : self.__gaussian_weights,
-            "task_reallocations" : self.__task_reallocations
+            "SoC(min)": self.__soc,
+            "Total Runtime": self.__total_runtime,
+            "Total Path Planning Runtime": int(np.sum(self.__PF_time)),
+            "Opened Nodes": self.__opened_nodes,
+            "Expanded Nodes": self.__expanded_nodes,
+            "Path Planning Runtimes": self.__PF_time,
+            "Total Task Allocation Runtime": int(np.sum(self.__TA_time)),
+            "Number of Path Plan Fails": int(self.__num_path_plan_fails),
+            "Task Allocation Runtime": self.__TA_time,
+            "admissibility": self.__admisibility,
+            "admissibility_differences": self.__admisibility_differences,
+            "paths": self.__paths,
+            "aisle_occupancy": self.__aisle_occupancy,
+            "driveway_occupancy": self.__driveway_occupancy,
+            "allocation": self.__task_assignments,
+            "velocity_timesteps": velocity_timesteps,
+            "gaussian_weights": self.__gaussian_weights,
+            "task_reallocations": self.__task_reallocations
         }
-        
         
         with open(self.__output_file, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)

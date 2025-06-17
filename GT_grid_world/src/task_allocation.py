@@ -12,7 +12,7 @@ from .task_allocation_algorithms.initial_solutions.greedy_allocation import gree
 from .task_allocation_algorithms.initial_solutions.randomized_greedy import randomized_greedy_call
 from .task_allocation_algorithms.initial_solutions.random_allocation import random_call  
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, map : str, t : int) -> AgentLoader:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -29,21 +29,21 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, task_assignm
     """
 
     if task_assignment_strategy == "random":
-        return random_call(S, G, Rs, J)
+        return random_call(S, G, Rs, J, cost_calculation_method)
     elif task_assignment_strategy == "lns":
         return lns_call(S, G, map, Rs, J, t)
     elif task_assignment_strategy == "p_lns":
         return p_lns_call(S, G, map, Rs, J, t)
     elif task_assignment_strategy == "greedy":
-        return greedy_call(S, G, Rs, J)
+        return greedy_call(S, G, Rs, J, cost_calculation_method)
     elif task_assignment_strategy == "randomized_greedy":
-        return randomized_greedy_call(S, G, Rs, J)
+        return randomized_greedy_call(S, G, Rs, J, cost_calculation_method)
     elif task_assignment_strategy == "FCF":
-        return FCF_call(S, G, Rs, J)
+        return FCF_call(S, G, Rs, J, cost_calculation_method)
     elif task_assignment_strategy == "max_regret_FC":
-        return max_regret_FC_call(S, G, Rs, J)
+        return max_regret_FC_call(S, G, Rs, J, cost_calculation_method)
     elif task_assignment_strategy == "randomized_max_regret_FC":
-        return randomized_max_regret_FC_call(S, G, Rs, J)
+        return randomized_max_regret_FC_call(S, G, Rs, J, cost_calculation_method)
     else:
         print("ERROR: Unknown task assignment strategy " + task_assignment_strategy + ", please choose another one.")
         return Rs

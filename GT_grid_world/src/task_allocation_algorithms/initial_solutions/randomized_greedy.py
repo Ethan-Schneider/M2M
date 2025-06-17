@@ -6,7 +6,7 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def randomized_greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int]) -> Tuple[List[Tuple[int, int, int, int]], float]:
+def randomized_greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform randomized greedy allocation of tasks to agents based on k smallest cost elements in the tensor.
     
@@ -97,15 +97,21 @@ def randomized_greedy_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, s
                                         new_start_loc = start_locs[p]
                                         new_goal_loc = goal_locs[q]
                                         # Calculate cost from current goal to new start
-                                        goal_to_start_cost = manhattan_distance(current_goal_loc, new_start_loc)
-                                        # Calculate cost from new start to new goal
-                                        start_to_goal_cost = manhattan_distance(new_start_loc, new_goal_loc)
+                                        if method == "manhattan":
+                                            goal_to_start_cost = manhattan_distance(current_goal_loc, new_start_loc)
+                                            # Calculate cost from new start to new goal
+                                            start_to_goal_cost = manhattan_distance(new_start_loc, new_goal_loc)
+                                        elif method == "shortest_path":
+                                            goal_to_start_cost = G.get_distance(current_goal_loc, new_start_loc)
+                                            start_to_goal_cost = G.get_distance(new_start_loc, new_goal_loc)
+                                        else:
+                                            raise ValueError(f"Invalid cost calculation method: {method}")
                                         working_tensor[m, n, p, q] = goal_to_start_cost + start_to_goal_cost
 
     return allocations, total_cost
 
 def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
-            strategy: str = "lns", map_name: str = None, t: int = 0) -> AgentLoader:
+            strategy: str = "lns", map_name: str = None, t: int = 0, method : str = "manhattan") -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
     
@@ -133,14 +139,14 @@ def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
 
     # Construct cost tensor
     tik = time.time()
-    cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G)
+    cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
 
     print(f"idx_to_task_id: {idx_to_task_id}")
     
     tik = time.time()
-    allocations, total_cost = randomized_greedy_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id)
+    allocations, total_cost = randomized_greedy_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id, method)
     tok = time.time()
     print(f"Time taken to perform randomized greedy allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")

@@ -9,7 +9,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
             task_assignment_strategy : str = "lns",
-            path_planning_strategy : str = "ecbs", time_limit : int = 99999):
+            path_planning_strategy : str = "ecbs", time_limit : int = 99999,
+            cost_calculation_method : str = "manhattan"):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -51,7 +52,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             total += len(agent.task_sequence)
             
         if total < max_task_number:
-            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, map, t)
+            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, map, t, cost_calculation_method)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -102,7 +103,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
          output_graphs: bool = False, num_skus: int = 10,
-         weight_init_method: str = "random") -> None:
+         weight_init_method: str = "random",
+         cost_calculation_method: str = "manhattan") -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -123,6 +125,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         output_graphs: Whether to output analysis graphs
         num_skus: Number of unique SKUs in the warehouse
         weight_init_method: Method for initializing SKU weights ("random" or "uniform")
+        cost_calculation_method: Method for calculating cost ("manhattan" or "shortest_path")
     """
     np.random.seed(seed)
     
@@ -130,9 +133,28 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}"
     
     B = buffer.Buffer(80, buffer_file)
-    S = statistics.Stats(num_robots, T, output_file)
+    S = statistics.Stats(
+        num_robots=num_robots,
+        simulation_time=T,
+        output_file=output_file,
+        map_name=map_name,
+        cost_calculation_method=cost_calculation_method,
+        seed=seed,
+        max_tasks=max_number_tasks,
+        task_generation_strategy=task_generation_strategy,
+        task_assignment_strategy=task_assignment_strategy,
+        path_planning_strategy=path_planning_strategy,
+        time_limit=time_limit,
+        visualize_output=visualize_output,
+        initial_inventory=initial_inventory,
+        frequency=frequency,
+        inbound_outbound_ratio=inbound_outbound_ratio,
+        output_graphs=output_graphs,
+        num_skus=num_skus,
+        weight_init_method=weight_init_method
+    )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
-    
+
     # Initialize state of robots (robot_id, state)
     robots = []
     for robot_id, location in enumerate(G.get_all_occupied()):
@@ -150,7 +172,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             max_task_number=max_number_tasks, 
             task_assignment_strategy=task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
-            time_limit=time_limit)
+            time_limit=time_limit,
+            cost_calculation_method=cost_calculation_method)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -201,7 +224,9 @@ if __name__=="__main__":
     parser.add_argument('--weight-init-method', type=str, default='random',
                        choices=['random', 'uniform'],
                        help='Method for initializing SKU weights')
-    
+    parser.add_argument('--cost-calculation-method', type=str, default='manhattan',
+                       choices=['manhattan', 'shortest_path'],
+                       help='Method for calculating cost')
     args = parser.parse_args()
     
     main(
@@ -220,5 +245,6 @@ if __name__=="__main__":
         inbound_outbound_ratio=args.inbound_outbound_ratio,
         output_graphs=args.output_graphs,
         num_skus=args.num_skus,
-        weight_init_method=args.weight_init_method
+        weight_init_method=args.weight_init_method,
+        cost_calculation_method=args.cost_calculation_method
     )

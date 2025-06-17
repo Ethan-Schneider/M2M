@@ -7,7 +7,7 @@ def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     """Calculate Manhattan distance between two locations."""
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
 
-def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph) -> np.ndarray:
+def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> np.ndarray:
     """
     Construct a 4D cost tensor for task allocation.
     
@@ -78,9 +78,13 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph) -> np.ndarra
                     # Cost is sum of:
                     # 1. Distance from agent's final location to start location
                     # 2. Distance from start location to goal location
-
-                    cost = (manhattan_distance(Rs.agents[m].state, start_loc) + 
-                           manhattan_distance(start_loc, goal_loc))
+                    if method == "manhattan":
+                        cost = (manhattan_distance(Rs.agents[m].state, start_loc) + 
+                            manhattan_distance(start_loc, goal_loc))
+                    elif method == "shortest_path":
+                        cost = G.get_distance(Rs.agents[m].state, start_loc) + G.get_distance(start_loc, goal_loc)
+                    else:
+                        raise ValueError(f"Invalid cost calculation method: {method}")
                     
                     cost_tensor[m, n, i, j] = cost
     

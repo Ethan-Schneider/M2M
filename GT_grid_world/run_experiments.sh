@@ -11,14 +11,15 @@ parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 # Define arrays of parameters to test
 seeds=(0)
 num_robots=(3)
-time_horizons=(3600)
+time_horizons=(3602)
 max_tasks=(20)
 frequencies=(1.0)
 inbound_outbound_ratio=(1.0)
 num_skus=(5)
 weight_init_method="random"
 task_gen_strategy="informed_uniform"
-task_assign_strategy="randomized_max_regret_FC"
+task_assign_strategy="randomized_greedy"
+cost_calculation_method="manhattan"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"
 
@@ -58,7 +59,8 @@ for seed in "${seeds[@]}"; do
                             --inbound-outbound-ratio "$inbound_outbound_ratio" \
                             --num-skus "$num_sku" \
                             --weight-init-method "$weight_init_method" \
-                            --map "$map"
+                            --map "$map" \
+                            --cost-calculation-method "$cost_calculation_method"
                         
                         # Optional: Add a small delay between runs
                         sleep 1
