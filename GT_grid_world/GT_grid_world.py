@@ -8,7 +8,8 @@ from src.analysis import visualize, statistics, buffer
 def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
-            task_assignment_strategy : str = "lns",
+            initial_task_assignment_strategy : str = "lns",
+            improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 99999,
             cost_calculation_method : str = "manhattan"):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
@@ -35,9 +36,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                print("Generating new tasks")
                 J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
-                print(f"New tasks: {J_new}")
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -52,7 +51,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             total += len(agent.task_sequence)
             
         if total < max_task_number:
-            Rs = task_allocation.TaskAllocation(S, G, Rs, J, task_assignment_strategy, map, t, cost_calculation_method)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -98,7 +97,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
-         task_generation_strategy: str, task_assignment_strategy: str,
+         task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
          path_planning_strategy: str, map_name: str, time_limit: int = 86400,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
@@ -114,7 +113,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         T: Time horizon
         max_number_tasks: Maximum number of tasks
         task_generation_strategy: Strategy for generating tasks
-        task_assignment_strategy: Strategy for assigning tasks
+        initial_task_assignment_strategy: Strategy for assigning tasks
+        improvement_task_assignment_strategy: Strategy for improving tasks
         path_planning_strategy: Strategy for path planning
         map_name: Name of the map to use
         time_limit: Maximum runtime in seconds
@@ -129,8 +129,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     """
     np.random.seed(seed)
     
-    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_no_seq_full.json"
-    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}"
+    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_no_seq_full.json"
+    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}"
     
     B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
@@ -142,7 +142,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         seed=seed,
         max_tasks=max_number_tasks,
         task_generation_strategy=task_generation_strategy,
-        task_assignment_strategy=task_assignment_strategy,
+        initial_task_assignment_strategy=initial_task_assignment_strategy,
+        improvement_task_assignment_strategy=improvement_task_assignment_strategy,
         path_planning_strategy=path_planning_strategy,
         time_limit=time_limit,
         visualize_output=visualize_output,
@@ -170,7 +171,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     execute(S, B, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
             case_request_strategy=task_generation_strategy, 
             max_task_number=max_number_tasks, 
-            task_assignment_strategy=task_assignment_strategy, 
+            initial_task_assignment_strategy=initial_task_assignment_strategy, 
+            improvement_task_assignment_strategy=improvement_task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
             time_limit=time_limit,
             cost_calculation_method=cost_calculation_method)
@@ -179,14 +181,14 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     
     S.save_data()
     
-    folder_name = f"{T}_{task_generation_strategy}_{task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_full"
+    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_full"
     if output_graphs:
         S.output_graphs(folder_name)
     
     if visualize_output:
         print("============================Visualizing Output============================")
         visualize.main((G.width, G.height), G.obstacles, S.return_full_paths(), 
-                      f'data/videos/{path_planning_strategy}_{T}_{task_assignment_strategy}.mp4', 
+                      f'data/videos/{path_planning_strategy}_{T}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}.mp4', 
                       speed=4)
 
 if __name__=="__main__":
@@ -199,9 +201,12 @@ if __name__=="__main__":
     parser.add_argument('--task-gen-strategy', type=str, required=True, 
                        choices=['informed_uniform', 'uninformed_uniform'],
                        help='Task generation strategy')
-    parser.add_argument('--task-assign-strategy', type=str, required=True,
-                       choices=['lns', 'p_lns', 'cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC'],
+    parser.add_argument('--initial-task-assign-strategy', type=str, required=True,
+                       choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC'],
                        help='Task assignment strategy')
+    parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
+                       choices=['py_lns', 'c_lns', 'c_p_lns', 'none'],
+                       help='Task assignment strategy for improvement')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs'],
                        help='Path planning strategy')
@@ -235,7 +240,8 @@ if __name__=="__main__":
         T=args.time_horizon,
         max_number_tasks=args.max_tasks,
         task_generation_strategy=args.task_gen_strategy,
-        task_assignment_strategy=args.task_assign_strategy,
+        initial_task_assignment_strategy=args.initial_task_assign_strategy,
+        improvement_task_assignment_strategy=args.improvement_task_assign_strategy,
         path_planning_strategy=args.path_planning_strategy,
         map_name=args.map,
         time_limit=args.time_limit,

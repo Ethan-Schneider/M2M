@@ -4,9 +4,9 @@ from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
-from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
+from .construct_cost_tensor_pair import construct_cost_tensor_pair
 
-def random_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
+def random_allocation(S : Stats, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
     
@@ -24,22 +24,15 @@ def random_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
           - q is the goal location index
         - Total cost of all allocations
     """
-    M, N, P, Q = cost_tensor.shape
+    M, __, P, __ = cost_tensor.shape
     allocations = []
-    working_tensor = cost_tensor.copy()
     total_cost = 0.0
-    
-    # Track each agent's current goal location
-    agent_goal_locs = [None] * M
+
+    C = cost_tensor + cost_tensor_agent_start.reshape(M, 1, P, 1)
     
     while True:
-        # Find minimum cost element
-        min_cost = np.min(working_tensor)
-        if min_cost == np.inf:
-            break
-            
         # Get valid (non-infinite) entries
-        valid_entries = np.where(working_tensor != np.inf)
+        valid_entries = np.where(C != np.inf)
         if len(valid_entries[0]) == 0:
             break
             
@@ -49,8 +42,10 @@ def random_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
         n = valid_entries[1][random_idx]
         p = valid_entries[2][random_idx]
         q = valid_entries[3][random_idx]
+
+        total_cost += C[m, n, p, q]
         
-        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
+        allocations.append((int(m), int(n), int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])
@@ -65,50 +60,18 @@ def random_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: 
 
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
-
-        total_cost += min_cost
-        
-        # Update agent's goal location
-        agent_goal_locs[m] = q
         
         # Update tensor by setting inf for:
         # 1. All allocations for this task n
-        working_tensor[:, n, :, :] = np.inf
+        C[:, n, :, :] = np.inf
         # 2. All allocations using this start location p
-        working_tensor[:, :, p, :] = np.inf
+        C[:, :, p, :] = np.inf
         # 3. All allocations using this goal location q
-        working_tensor[:, :, :, q] = np.inf
-        
-        # 4. Update costs for all remaining allocations for this agent
-        # For each remaining task and start location
-        for n in range(N):
-            if working_tensor[m, n, :, :].min() != np.inf:
-                for p in range(P):
-                    if working_tensor[m, n, p, :].min() != np.inf:
-                        for q in range(Q):
-                            if working_tensor[m, n, p, q] != np.inf:
-                                    # Calculate new cost from agent's current goal location to new start location
-                                    if agent_goal_locs[m] is not None:
-                                        # Get the actual locations
-                                        current_goal_loc = goal_locs[agent_goal_locs[m]]
-                                        new_start_loc = start_locs[p]
-                                        new_goal_loc = goal_locs[q]
-                                        # Calculate cost from current goal to new start
-                                        if method == "manhattan":
-                                            goal_to_start_cost = manhattan_distance(current_goal_loc, new_start_loc)
-                                            # Calculate cost from new start to new goal
-                                            start_to_goal_cost = manhattan_distance(new_start_loc, new_goal_loc)
-                                        elif method == "shortest_path":
-                                            goal_to_start_cost = G.get_distance(current_goal_loc, new_start_loc)
-                                            start_to_goal_cost = G.get_distance(new_start_loc, new_goal_loc)
-                                        else:
-                                            raise ValueError(f"Invalid cost calculation method: {method}")
-                                        working_tensor[m, n, p, q] = goal_to_start_cost + start_to_goal_cost
+        C[:, :, :, q] = np.inf
 
     return allocations, total_cost
 
-def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
-            strategy: str = "lns", map_name: str = None, t: int = 0, method : str = "manhattan") -> AgentLoader:
+def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = "manhattan") -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
     
@@ -117,15 +80,12 @@ def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         G: Graph representing the warehouse
         Rs: AgentLoader containing all agents
         J: Set of tasks to be assigned
-        strategy: Assignment strategy (currently only "lns" supported)
-        map_name: Name of the map being used
-        t: Current timestep
         
     Returns:
         Updated AgentLoader with assigned tasks
     """
     if not J:  # No tasks to assign
-        return Rs
+        return Rs, [], 0.0
     
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
@@ -134,12 +94,12 @@ def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
 
     # Construct cost tensor
     tik = time.time()
-    cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
+    cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor_pair(J, Rs, G, method)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
     
     tik = time.time()
-    allocations, total_cost = random_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id, method)
+    allocations, total_cost = random_allocation(S, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
     tok = time.time()
     print(f"Time taken to perform greedy allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
@@ -148,4 +108,4 @@ def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     for agent in Rs.agents:
         print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
     
-    return Rs
+    return Rs, allocations, total_cost

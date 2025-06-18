@@ -91,11 +91,10 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
             
             if task == 1:  # Inbound task
                 # Start locations are all driveway nodes
-                start_locations = frozenset(G.get_station_locations())
+                start_locations = frozenset(G.driveway.get_empty_locations())
                 
                 # Goal locations are all empty aisle locations
-                goal_locations = frozenset(loc for loc in G.get_aisle_locations() 
-                                        if loc not in current_task_locations)
+                goal_locations = frozenset(G.warehouse.get_empty_locations())
                 
                 if not goal_locations:
                     continue
@@ -105,10 +104,10 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
                 
             elif task == 0:  # Outbound task
                 # Start locations are all locations containing the selected SKU
-                start_locations = frozenset(inventory.get_sku_instances(sku_id))
+                start_locations = frozenset(G.warehouse.get_sku_instances(sku_id))
                 
                 # Goal locations are all driveway nodes
-                goal_locations = frozenset(G.get_station_locations())
+                goal_locations = frozenset(G.driveway.get_empty_locations())
                 if not start_locations:
                     continue
                 

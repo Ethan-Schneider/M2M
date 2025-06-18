@@ -8,7 +8,7 @@ from ..agent import *
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
-                 task_assignment_strategy: str = None, path_planning_strategy: str = None,
+                 initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
                  num_skus: int = None, weight_init_method: str = None) -> None:
@@ -18,7 +18,8 @@ class Stats:
         self.__T = simulation_time
         self.__max_tasks = max_tasks
         self.__task_generation_strategy = task_generation_strategy
-        self.__task_assignment_strategy = task_assignment_strategy
+        self.__initial_task_assignment_strategy = initial_task_assignment_strategy
+        self.__improvement_task_assignment_strategy = improvement_task_assignment_strategy
         self.__path_planning_strategy = path_planning_strategy
         self.__map_name = map_name
         self.__time_limit = time_limit
@@ -569,7 +570,8 @@ class Stats:
             "time_horizon": self.__T,
             "max_tasks": self.__max_tasks,
             "task_generation_strategy": self.__task_generation_strategy,
-            "task_assignment_strategy": self.__task_assignment_strategy,
+            "initial_task_assignment_strategy": self.__initial_task_assignment_strategy,
+            "improvement_task_assignment_strategy": self.__improvement_task_assignment_strategy,
             "path_planning_strategy": self.__path_planning_strategy,
             "map_name": self.__map_name,
             "time_limit": self.__time_limit,

@@ -4,9 +4,9 @@ from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
-from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
+from .construct_cost_tensor_pair import construct_cost_tensor_pair, manhattan_distance
 
-def max_regret_FC_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
+def max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform max regret FC allocation of tasks to agents based on minimum cost elements in the tensor.
     
@@ -24,59 +24,55 @@ def max_regret_FC_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start
           - q is the goal location index
         - Total cost of all allocations
     """
-    M, N, P, Q = cost_tensor.shape
+    M, N, P, __ = cost_tensor.shape
     allocations = []
-    working_tensor = cost_tensor.copy()
     total_cost = 0.0
     
-    # Track each agent's current goal location
-    agent_goal_locs = [None] * M
-    
+    unallocated_tasks = list(range(N))
     while True:
-        # Find minimum cost element
-        min_cost = np.min(working_tensor)
-        if min_cost == np.inf:
-            break
-            
         # Calculate regret for each task
         max_regret = -np.inf
-        max_regret_task = None
         max_regret_indices = None
         
-        for n in range(N):
-            # Get all costs for this task
-            task_costs = working_tensor[:, n, :, :]
-            if np.min(task_costs) == np.inf:
-                continue
+        for n in unallocated_tasks:
+            C = cost_tensor[:, n, :, :] + cost_tensor_agent_start.reshape(M, P, 1)
                 
-            # Flatten the costs and get unique sorted values
-            flat_costs = np.unique(task_costs.flatten())
-            if len(flat_costs) < 2:  # Skip if there's only one valid cost
+            # Find the first and second minimum values of C
+            flat_costs = C.flatten()
+            valid_costs = flat_costs[flat_costs != np.inf]
+            
+            if len(valid_costs) < 2:  # Skip if there are fewer than 2 valid costs
                 continue
-                
-            # Calculate regret (difference between min and second min)
-            regret = flat_costs[1] - flat_costs[0]
+            
+            # Sort valid costs and get first and second minimum
+            sorted_costs = np.sort(valid_costs)
+            first_min = sorted_costs[0]
+            second_min = sorted_costs[1]
+            
+            # Calculate regret (absolute difference between first and second min)
+            regret = abs(second_min - first_min)
             
             if regret > max_regret:
                 max_regret = regret
-                max_regret_task = n
                 # Get the indices of the minimum cost for this task
-                task_slice = working_tensor[:, n, :, :]
-                min_idx_3d = np.unravel_index(np.argmin(task_slice), task_slice.shape)
+                min_idx_3d = np.unravel_index(np.argmin(C), C.shape)
                 m = min_idx_3d[0]
                 p = min_idx_3d[1]
                 q = min_idx_3d[2]
                 max_regret_indices = (m, n, p, q)
-        
-        print(f"max_regret_task: {max_regret_task}")
-        print(f"max_regret_indices: {max_regret_indices}")
-        print(f"max_regret: {max_regret}")
-        if max_regret_task is None:  # No more tasks with valid regrets
-            break
             
         # Use the indices from the task with max regret
         m, n, p, q = max_regret_indices
-        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
+
+        if n in unallocated_tasks:
+            unallocated_tasks.remove(n)
+
+        val = cost_tensor[m, n, p, q] + cost_tensor_agent_start[m, p]
+
+        if val == np.inf:
+            break
+
+        allocations.append((int(m), int(n), int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])
@@ -92,49 +88,32 @@ def max_regret_FC_allocation(S, cost_tensor: np.ndarray, Rs : AgentLoader, start
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
 
-        total_cost += working_tensor[m, n, p, q]
-        
-        # Update agent's goal location
-        agent_goal_locs[m] = q
+        total_cost += val
+
+        if len(unallocated_tasks) == 0:
+            break
         
         # Update tensor by setting inf for:
         # 1. All allocations for this task n
-        working_tensor[:, n, :, :] = np.inf
+        cost_tensor[:, n, :, :] = np.inf
         # 2. All allocations using this start location p
-        working_tensor[:, :, p, :] = np.inf
+        cost_tensor[:, :, p, :] = np.inf
         # 3. All allocations using this goal location q
-        working_tensor[:, :, :, q] = np.inf
+        cost_tensor[:, :, :, q] = np.inf
         
-        # 4. Update costs for all remaining allocations for this agent
-        # For each remaining task and start location
-        for n in range(N):
-            if working_tensor[m, n, :, :].min() != np.inf:
-                for p in range(P):
-                    if working_tensor[m, n, p, :].min() != np.inf:
-                        for q in range(Q):
-                            if working_tensor[m, n, p, q] != np.inf:
-                                    # Calculate new cost from agent's current goal location to new start location
-                                    if agent_goal_locs[m] is not None:
-                                        # Get the actual locations
-                                        current_goal_loc = goal_locs[agent_goal_locs[m]]
-                                        new_start_loc = start_locs[p]
-                                        new_goal_loc = goal_locs[q]
-                                        # Calculate cost from current goal to new start
-                                        if method == "manhattan":
-                                            goal_to_start_cost = manhattan_distance(current_goal_loc, new_start_loc)
-                                            # Calculate cost from new start to new goal
-                                            start_to_goal_cost = manhattan_distance(new_start_loc, new_goal_loc)
-                                        elif method == "shortest_path":
-                                            goal_to_start_cost = G.get_distance(current_goal_loc, new_start_loc)
-                                            start_to_goal_cost = G.get_distance(new_start_loc, new_goal_loc)
-                                        else:
-                                            raise ValueError(f"Invalid cost calculation method: {method}")
-                                        working_tensor[m, n, p, q] = goal_to_start_cost + start_to_goal_cost
+        # 4. Update costs for agent-start allocation for agent m
+        for p in range(P):
+            if method == "manhattan":
+                cost = manhattan_distance(Rs.agents[m].state, start_locs[p])
+            elif method == "shortest_path":
+                cost = G.get_distance(Rs.agents[m].state, start_locs[p])
+            else:
+                raise ValueError(f"Invalid cost calculation method: {method}")
+            cost_tensor_agent_start[m, p] = cost
 
     return allocations, total_cost
 
-def max_regret_FC_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
-            strategy: str = "lns", map_name: str = None, t: int = 0, method : str = "manhattan") -> AgentLoader:
+def max_regret_FC_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = "manhattan") -> AgentLoader:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
     
@@ -151,25 +130,21 @@ def max_regret_FC_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         Updated AgentLoader with assigned tasks
     """
     if not J:  # No tasks to assign
-        return Rs
+        return Rs, [], 0.0
     
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
         while len(agent.task_sequence) > 1:
             agent.task_sequence.pop(-1)
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
 
     # Construct cost tensor
     tik = time.time()
-    cost_tensor, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
+    cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor_pair(J, Rs, G, method)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
 
-    print(f"idx_to_task_id: {idx_to_task_id}")
-    
     tik = time.time()
-    allocations, total_cost = max_regret_FC_allocation(S, cost_tensor, Rs, start_locs, goal_locs, idx_to_task_id, method)
+    allocations, total_cost = max_regret_FC_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
     tok = time.time()
     print(f"Time taken to perform max regret FC allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
@@ -178,4 +153,4 @@ def max_regret_FC_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
     for agent in Rs.agents:
         print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
     
-    return Rs
+    return Rs, allocations, total_cost

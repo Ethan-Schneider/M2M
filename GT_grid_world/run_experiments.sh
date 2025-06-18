@@ -10,16 +10,18 @@ parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
 seeds=(0)
-num_robots=(3)
-time_horizons=(3602)
+num_robots=(5)
+time_horizons=(100)
 max_tasks=(20)
 frequencies=(1.0)
 inbound_outbound_ratio=(1.0)
 num_skus=(5)
+initial_inventory=(25.0)
 weight_init_method="random"
 task_gen_strategy="informed_uniform"
-task_assign_strategy="randomized_greedy"
-cost_calculation_method="manhattan"
+initial_task_assign_strategy="randomized_max_regret_FC"
+improvement_task_assign_strategy="none"
+cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"
 
@@ -40,7 +42,8 @@ for seed in "${seeds[@]}"; do
                         echo "  Number of SKUs: $num_sku"
                         echo "  Weight Init Method: $weight_init_method"
                         echo "  Task Gen Strategy: $task_gen_strategy"
-                        echo "  Task Assign Strategy: $task_assign_strategy"
+                        echo "  Initial Task Assign Strategy: $initial_task_assign_strategy"
+                        echo "  Improvement Task Assign Strategy: $improvement_task_assign_strategy"
                         echo "  Path Planning Strategy: $path_planning_strategy"
                         echo "  Map: $map"
                         echo "----------------------------------------"
@@ -51,7 +54,8 @@ for seed in "${seeds[@]}"; do
                             --time-horizon "$T" \
                             --max-tasks "$max_task" \
                             --task-gen-strategy "$task_gen_strategy" \
-                            --task-assign-strategy "$task_assign_strategy" \
+                            --initial-task-assign-strategy "$initial_task_assign_strategy" \
+                            --improvement-task-assign-strategy "$improvement_task_assign_strategy" \
                             --path-planning-strategy "$path_planning_strategy" \
                             --time-limit 86400 \
                             --initial-inventory 25.0 \
