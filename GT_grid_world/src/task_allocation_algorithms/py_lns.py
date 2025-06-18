@@ -46,7 +46,7 @@ class LNS:
         self.best_cost = float('inf')
         
         # Construct initial cost tensor
-        self.cost_tensor, self.start_locs, self.goal_locs, self.idx_to_task_id = construct_cost_tensor(
+        self.cost_tensor, self.cost_tensor_agent_start, self.start_locs, self.goal_locs, self.idx_to_task_id = construct_cost_tensor(
             J, Rs, G, cost_calculation_method
         )
         
@@ -84,8 +84,6 @@ class LNS:
         inital_task_assignment_time += tok - tik
         current_cost = self._calculate_total_cost(current_solution)
 
-
-        
         # Initialize best solution and allocations
         self.best_solution = current_solution
         self.best_cost = current_cost
@@ -94,6 +92,8 @@ class LNS:
         print(f"Initial cost: {current_cost}")  
         
         iteration = 0
+        print(f"Time so far: {time.time() - start_time}")
+        print(f"Time limit: {self.time_limit}")
         while time.time() - start_time < self.time_limit:
             # Create a copy of current solution to modify
             temp_solution = self._copy_solution(current_solution)
@@ -101,36 +101,23 @@ class LNS:
             
             # Remove allocations
             tik = time.time()
-            removed_allocations = random_removal(temp_solution, self.removal_size)
+            temp_solution, temp_allocations = random_removal(temp_solution, temp_allocations, self.removal_size)
             tok = time.time()
             removal_time += tok - tik
-            
-            # Skip iteration if no allocations were removed
-            if not removed_allocations:
-                continue
-                
-            # Update allocations list by removing the removed allocations
-            for agent_idx, task_idx, start_idx, goal_idx in removed_allocations:
-                temp_allocations = [alloc for alloc in temp_allocations 
-                                  if not (alloc[0] == agent_idx and alloc[1] == task_idx)]
-                
+
             # Update cost tensor based on removed allocations
             tik = time.time()
-            updated_tensor = self._update_cost_tensor(removed_allocations)
+            updated_tensor = self._update_cost_tensor(temp_allocations)
             tok = time.time()
             update_cost_tensor_time += tok - tik
             
             # Repair solution
             tik = time.time()
-            new_solution = greedy_repair(self.S, self.G, updated_tensor, temp_solution, 
+            new_solution, temp_allocations, new_cost = greedy_repair(self.S, self.G, updated_tensor, self.cost_tensor_agent_start, temp_solution, 
                                        self.start_locs, self.goal_locs, 
                                        self.idx_to_task_id, temp_allocations, self.cost_calculation_method)
             tok = time.time()
             repair_time += tok - tik
-            print(f"Iteration {iteration} repair time: {tok-tik}")
-            
-            # Calculate new cost
-            new_cost = self._calculate_total_cost(new_solution)
             
             # Update if better
             if new_cost < current_cost:
@@ -189,6 +176,9 @@ class LNS:
                         start_to_goal = self.G.get_distance(curr_start, curr_goal)
                     
                     total_cost += goal_to_start + start_to_goal
+            elif len(agent.task_sequence) == 1:
+                total_cost += self.G.get_distance(agent.state, agent.task_sequence[0][1])
+                total_cost += self.G.get_distance(agent.task_sequence[0][1], agent.task_sequence[0][2])
         return total_cost
     
     def _update_cost_tensor(self, removed_allocations: List[Tuple[int, int, int, int]]) -> np.ndarray:

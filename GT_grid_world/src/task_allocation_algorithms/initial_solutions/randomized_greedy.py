@@ -4,7 +4,7 @@ from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
-from .construct_cost_tensor_pair import construct_cost_tensor_pair, manhattan_distance
+from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
 def randomized_greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
@@ -88,8 +88,7 @@ def randomized_greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, 
 
     return allocations, total_cost
 
-def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
-            strategy: str = "lns", map_name: str = None, t: int = 0, method : str = "manhattan") -> AgentLoader:
+def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = "manhattan") -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm.
     
@@ -104,6 +103,8 @@ def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         
     Returns:
         Updated AgentLoader with assigned tasks
+        List of allocations
+        Total cost of all allocations
     """
     if not J:  # No tasks to assign
         return Rs, [], 0.0
@@ -117,7 +118,7 @@ def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
 
     # Construct cost tensor
     tik = time.time()
-    cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor_pair(J, Rs, G, method)
+    cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
     tok = time.time()
     print(f"Time taken to construct cost tensor: {tok - tik} seconds")
 
