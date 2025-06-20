@@ -1,5 +1,4 @@
 import numpy as np
-import time
 from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
@@ -11,10 +10,16 @@ def randomized_greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, 
     Perform randomized greedy allocation of tasks to agents based on k smallest cost elements in the tensor.
     
     Args:
+        S: Statistics object for tracking metrics
+        G: Graph representing the warehouse
         cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
+        cost_tensor_agent_start: 2D numpy array of shape (M, P) containing costs for agent-start allocations
         Rs: AgentLoader containing all agents
         start_locs: List of start locations
         goal_locs: List of goal locations
+        idx_to_task_id: Dictionary mapping task indices to task IDs
+        method: Method for calculating costs
+        
     Returns:
         Tuple containing:
         - List of tuples (m, n, p, q) representing allocations where:
@@ -97,9 +102,7 @@ def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], m
         G: Graph representing the warehouse
         Rs: AgentLoader containing all agents
         J: Set of tasks to be assigned
-        strategy: Assignment strategy (currently only "lns" supported)
-        map_name: Name of the map being used
-        t: Current timestep
+        method: Method for calculating costs
         
     Returns:
         Updated AgentLoader with assigned tasks
@@ -111,24 +114,12 @@ def randomized_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], m
     
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
         while len(agent.task_sequence) > 1:
             agent.task_sequence.pop(-1)
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
 
     # Construct cost tensor
-    tik = time.time()
     cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
-    tok = time.time()
-    print(f"Time taken to construct cost tensor: {tok - tik} seconds")
 
-    print(f"idx_to_task_id: {idx_to_task_id}")
-    
-    tik = time.time()
     allocations, total_cost = randomized_greedy_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
-    tok = time.time()
-    print(f"Time taken to perform randomized greedy allocation: {tok - tik} seconds")
-    print(f"Allocations: {allocations}")
-    print(f"Total cost: {total_cost}")
     
     return Rs, allocations, total_cost
