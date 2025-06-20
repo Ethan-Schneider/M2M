@@ -13,7 +13,7 @@ from .task_allocation_algorithms.initial_solutions.randomized_greedy import rand
 from .task_allocation_algorithms.initial_solutions.random_allocation import random_call  
 from .task_allocation_algorithms.py_lns import py_lns_call
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str) -> AgentLoader:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, removal_operator : str = "worst", repair_operator : str = "greedy") -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -25,13 +25,16 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
         improvement_task_assignment_strategy (str): Chosen task_allocation algorithm to use
         map (str): Map name
         t (int): Current timestep
+        cost_calculation_method (str): Method for calculating cost ("manhattan" or "shortest_path")
+        removal_operator (str): Removal operator for LNS ("random" or "worst")
+        repair_operator (str): Repair operator for LNS ("greedy")
 
     Returns:
         AgentLoader: Returns updated AgentLoader object
     """
 
     if improvement_task_assignment_strategy == "py_lns":
-        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=3, cost_calculation_method=cost_calculation_method)
+        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=3, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator)
     elif improvement_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "c_p_lns":

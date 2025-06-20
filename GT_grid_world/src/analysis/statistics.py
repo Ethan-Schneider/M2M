@@ -11,7 +11,7 @@ class Stats:
                  initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
-                 num_skus: int = None, weight_init_method: str = None) -> None:
+                 num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -31,6 +31,8 @@ class Stats:
         self.__num_skus = num_skus
         self.__weight_init_method = weight_init_method
         self.__cost_calculation_method = cost_calculation_method
+        self.__removal_operator = removal_operator
+        self.__repair_operator = repair_operator
 
         self.__output_file = output_file
         
@@ -63,8 +65,6 @@ class Stats:
         self.__collisions = []
         
         self.__throughputs = []
-        
-        self.__task_assignments = []
         
         self.__unallocated_agents = []
         
@@ -99,9 +99,9 @@ class Stats:
         for _ in range(num_robots):
             self.__truncated_paths.append([])
             self.__paths.append([])
-            self.__task_assignments.append([])
             
         self.__completed_task_ids = []
+        self.__completed_task_details = {}  # task_id -> (start_location, goal_location)
         self.__completed_to_pickup_task_ids = []
         
         # Runtime Stastics: 
@@ -263,12 +263,6 @@ class Stats:
             if self.__truncated_paths[i][-1] != step:
                 self.__truncated_paths[i].append(step)
                 
-    def append_task_allocation(self, Rs : AgentLoader, J) -> None:
-        for agent in Rs.agents:
-            for task in agent.task_sequence:
-                # assignment = (get_task_start_location(J, task), get_task_goal_location(J, task), agent.state)
-                self.__task_assignments[agent.id].append(task)
-                
     def return_full_paths(self) -> list:
         return self.__paths
     
@@ -294,15 +288,19 @@ class Stats:
     
     # ====================== Completed Task Id Functions
     
-    def add_completed_task_id(self, task_id : int, timestep : int) -> None:
-        """Add a completed task with its completion timestep.
+    def add_completed_task_id(self, task_id : int, timestep : int, start_location : tuple = None, goal_location : tuple = None) -> None:
+        """Add a completed task with its completion timestep and locations.
         
         Args:
             task_id (int): The ID of the completed task
             timestep (int): The timestep when the task was completed
+            start_location (tuple): The start location of the task
+            goal_location (tuple): The goal location of the task
         """
         self.__completed_task_ids.append(task_id)
         self.__task_completion_timestamps[task_id] = timestep
+        if start_location is not None and goal_location is not None:
+            self.__completed_task_details[task_id] = (start_location, goal_location)
         
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
@@ -583,11 +581,14 @@ class Stats:
             "num_skus": self.__num_skus,
             "weight_init_method": self.__weight_init_method,
             "cost_calculation_method": self.__cost_calculation_method,
+            "removal_operator": self.__removal_operator,
+            "repair_operator": self.__repair_operator,
             
             # Simulation results
             "timesteps_completed": self.__T,
             "total_completed_tasks": int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
+            "completed_task_details": self.__completed_task_details,
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,
@@ -617,7 +618,6 @@ class Stats:
             "paths": self.__paths,
             "aisle_occupancy": self.__aisle_occupancy,
             "driveway_occupancy": self.__driveway_occupancy,
-            "allocation": self.__task_assignments,
             "velocity_timesteps": velocity_timesteps,
             "gaussian_weights": self.__gaussian_weights,
             "task_reallocations": self.__task_reallocations

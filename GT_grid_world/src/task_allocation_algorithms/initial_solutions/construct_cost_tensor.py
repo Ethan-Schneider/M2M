@@ -31,7 +31,6 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
         goal_locs: List of possible goal locations for each task
         idx_to_task_id: Dict mapping from tensor indices to task IDs
     """
-    tik = time.time()
     allocated_tasks = set()
     for agent in Rs.agents:
         for task in agent.task_sequence:
@@ -72,10 +71,7 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
         for task in agent.task_sequence:
             allocated_locs.update(task[1])
             allocated_locs.update(task[2])
-    tok = time.time()
-    print(f"Cost matrix initialization time: {tok - tik} seconds")
 
-    tik = time.time()
     # Calculate costs for agent-start allocation
     for m in range(M):
         for p in range(P):
@@ -87,10 +83,7 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p] = cost
-    tok = time.time()
-    print(f"Time taken to get agent-start costs: {tok - tik} seconds")
 
-    tik = time.time()
     # Calculate costs only for valid combinations
     for n, task in enumerate(unallocated_tasks):
         # Get valid start and goal locations for this task
@@ -113,7 +106,5 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
                     raise ValueError(f"Invalid cost calculation method: {method}")
                 
                 cost_tensor[:, n, i, j] = cost
-    tok = time.time()
-    print(f"Time taken to get task-start-goal costs: {tok - tik} seconds")
 
     return cost_tensor, agent_start_cost_tensor, start_locs, goal_locs, idx_to_task_id

@@ -24,12 +24,11 @@ def random_allocation(S : Stats, cost_tensor: np.ndarray, cost_tensor_agent_star
           - q is the goal location index
         - Total cost of all allocations
     """
-    M, __, P, __ = cost_tensor.shape
+    M, N, P, __ = cost_tensor.shape
     allocations = []
     total_cost = 0.0
 
     C = cost_tensor + cost_tensor_agent_start.reshape(M, 1, P, 1)
-    
     while True:
         # Get valid (non-infinite) entries
         valid_entries = np.where(C != np.inf)
@@ -45,7 +44,7 @@ def random_allocation(S : Stats, cost_tensor: np.ndarray, cost_tensor_agent_star
 
         total_cost += C[m, n, p, q]
         
-        allocations.append((int(m), int(n), int(p), int(q)))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])

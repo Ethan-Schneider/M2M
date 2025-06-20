@@ -26,9 +26,6 @@ def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str,
     sequences = []
     w = 1.2
     
-    print(f"Start Locations: {states}")
-    print(f"Goal Locations: {goal_locations}")
-    
     latch = False
     while not sequences:
         # Execute the path planning algorithm
@@ -38,7 +35,6 @@ def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str,
             sequences = eecbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
         if sequences == []:
             print("+++++++++++++++++++Execution Failed with w = ", w)
-            print(sequences)
             S.update_num_path_plan_fail()
             
         # If a solution cannot be found with a higher suboptimality bound, break

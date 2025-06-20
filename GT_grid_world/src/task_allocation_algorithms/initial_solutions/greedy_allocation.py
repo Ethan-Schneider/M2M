@@ -29,8 +29,6 @@ def greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor
     M, __, P, __ = cost_tensor.shape
     allocations = []
     total_cost = 0.0
-
-    print(f"Cost tensor shape: {cost_tensor.shape}")
     
     while True:
         # Add cost_tensor_agent_start to cost_tensor
@@ -42,7 +40,7 @@ def greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor
         if C[m, n, p, q] == np.inf:
             break
 
-        allocations.append((int(m), int(n), int(p), int(q)))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         total_cost += C[m, n, p, q]
 
@@ -116,8 +114,5 @@ def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str
     cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
 
     allocations, total_cost = greedy_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
-
-    print(f"Time taken to perform greedy allocation: {time.time() - tik} seconds")
-    print(f"Total cost: {total_cost}")
 
     return Rs, allocations, total_cost

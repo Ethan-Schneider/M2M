@@ -43,7 +43,7 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
         if C[m, p, q] == np.inf:
             break
 
-        allocations.append((int(m), int(n), int(p), int(q)))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
         print(f"Allocated task idx {n} with task id {idx_to_task_id[int(n)]}")
 
         total_cost += C[m, p, q]

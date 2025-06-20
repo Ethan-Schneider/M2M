@@ -10,20 +10,22 @@ parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
 seeds=(0)
-num_robots=(5)
-time_horizons=(1)
-max_tasks=(20)
-frequencies=(0.1)
+num_robots=(10)
+time_horizons=(3600)
+max_tasks=(40)
+frequencies=(1.0)
 inbound_outbound_ratio=(1.0)
-num_skus=(2)
+num_skus=(30)
 initial_inventory=(25.0)
-weight_init_method="random"
+weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
 initial_task_assign_strategy="greedy"
 improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"
+removal_operator="worst"
+repair_operator="greedy"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -46,6 +48,8 @@ for seed in "${seeds[@]}"; do
                         echo "  Improvement Task Assign Strategy: $improvement_task_assign_strategy"
                         echo "  Path Planning Strategy: $path_planning_strategy"
                         echo "  Map: $map"
+                        echo "  Removal Operator: $removal_operator"
+                        echo "  Repair Operator: $repair_operator"
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -64,7 +68,9 @@ for seed in "${seeds[@]}"; do
                             --num-skus "$num_sku" \
                             --weight-init-method "$weight_init_method" \
                             --map "$map" \
-                            --cost-calculation-method "$cost_calculation_method"
+                            --cost-calculation-method "$cost_calculation_method" \
+                            --removal-operator "$removal_operator" \
+                            --repair-operator "$repair_operator"
                         
                         # Optional: Add a small delay between runs
                         sleep 1

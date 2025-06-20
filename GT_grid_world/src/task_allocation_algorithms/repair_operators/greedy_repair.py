@@ -52,7 +52,7 @@ def greedy_repair(S: Stats, G: Graph, cost_tensor: np.ndarray, cost_tensor_agent
         
         # Add allocation to solution
         Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
-        allocations.append((m, n, p, q))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         total_cost += C[m, n, p, q]
         
@@ -63,7 +63,6 @@ def greedy_repair(S: Stats, G: Graph, cost_tensor: np.ndarray, cost_tensor_agent
         S.add_actual_duration(idx_to_task_id[int(n)])
         S.add_actual_pickup_duration(idx_to_task_id[int(n)])
         
-        tik = time.time()
         # Update tensor by setting inf for:
         # 1. All allocations for this task n
         cost_tensor[:, n, :, :] = np.inf

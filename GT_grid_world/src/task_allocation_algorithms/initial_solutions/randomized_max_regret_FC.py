@@ -90,7 +90,7 @@ def randomized_max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.nd
         if val == np.inf:
             break
 
-        allocations.append((int(m), int(n), int(p), int(q)))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])

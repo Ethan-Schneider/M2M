@@ -50,7 +50,7 @@ def randomized_greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, 
         if selected_cost == np.inf:
             break
         
-        allocations.append((int(m), int(n), int(p), int(q)))
+        allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])

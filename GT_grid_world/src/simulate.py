@@ -55,7 +55,9 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
         elif agent.status == 2:
             if agent.state == agent.task_sequence[0][2]:
                 task_id = agent.task_sequence[0][0]
-                S.add_completed_task_id(task_id, t)
+                start_location = agent.task_sequence[0][1]
+                goal_location = agent.task_sequence[0][2]
+                S.add_completed_task_id(task_id, t, start_location, goal_location)
                 S.update_service_time(task_id, t)
                 
                 for task in J:

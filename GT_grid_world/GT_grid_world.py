@@ -11,7 +11,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             initial_task_assignment_strategy : str = "lns",
             improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 99999,
-            cost_calculation_method : str = "manhattan"):
+            cost_calculation_method : str = "manhattan",
+            removal_operator : str = "worst", repair_operator : str = "greedy"):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -51,11 +52,10 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             total += len(agent.task_sequence)
             
         if total < max_task_number:
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
-        S.append_task_allocation(Rs, J)
 
         # Check if any agent is allocated the same tasks
         for agent in Rs.agents:
@@ -76,7 +76,6 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         tok = time.time()
         S.add_total_PF_time(tok-tik)
         
-        print(f"Agent path sequences: {[agent.path_sequence for agent in Rs.agents]}")
         soc = 0
         for agent in Rs.agents:
             soc += len(agent.path_sequence)
@@ -103,7 +102,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
          output_graphs: bool = False, num_skus: int = 10,
          weight_init_method: str = "random",
-         cost_calculation_method: str = "manhattan") -> None:
+         cost_calculation_method: str = "manhattan",
+         removal_operator: str = "worst", repair_operator: str = "greedy") -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -126,6 +126,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         num_skus: Number of unique SKUs in the warehouse
         weight_init_method: Method for initializing SKU weights ("random" or "uniform")
         cost_calculation_method: Method for calculating cost ("manhattan" or "shortest_path")
+        removal_operator: Removal operator for task allocation
+        repair_operator: Repair operator for task allocation
     """
     np.random.seed(seed)
     
@@ -152,7 +154,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         inbound_outbound_ratio=inbound_outbound_ratio,
         output_graphs=output_graphs,
         num_skus=num_skus,
-        weight_init_method=weight_init_method
+        weight_init_method=weight_init_method,
+        removal_operator=removal_operator,
+        repair_operator=repair_operator
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -175,7 +179,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             improvement_task_assignment_strategy=improvement_task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
             time_limit=time_limit,
-            cost_calculation_method=cost_calculation_method)
+            cost_calculation_method=cost_calculation_method,
+            removal_operator=removal_operator,
+            repair_operator=repair_operator)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -232,6 +238,12 @@ if __name__=="__main__":
     parser.add_argument('--cost-calculation-method', type=str, default='manhattan',
                        choices=['manhattan', 'shortest_path'],
                        help='Method for calculating cost')
+    parser.add_argument('--removal-operator', type=str, default='worst',
+                       choices=['worst', 'random', 'greedy'],
+                       help='Removal operator for task allocation')
+    parser.add_argument('--repair-operator', type=str, default='greedy',
+                       choices=['greedy', 'random', 'worst'],
+                       help='Repair operator for task allocation')
     args = parser.parse_args()
     
     main(
@@ -252,5 +264,7 @@ if __name__=="__main__":
         output_graphs=args.output_graphs,
         num_skus=args.num_skus,
         weight_init_method=args.weight_init_method,
-        cost_calculation_method=args.cost_calculation_method
+        cost_calculation_method=args.cost_calculation_method,
+        removal_operator=args.removal_operator,
+        repair_operator=args.repair_operator
     )

@@ -47,8 +47,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
         # For each task, add all possible start and goal locations to current_task_locations
         current_task_locations.update(task[1])  # start locations set
         current_task_locations.update(task[2])  # goal locations set
-    
-    print(strategy)
+
     if strategy == "uninformed_uniform":
         for task in tasks_to_generate:
             if task == 1:  # Inbound task
