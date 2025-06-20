@@ -36,7 +36,7 @@ def max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost
         
         for n in unallocated_tasks:
             C = cost_tensor[:, n, :, :] + cost_tensor_agent_start.reshape(M, P, 1)
-                
+
             # Find the first and second minimum values of C
             flat_costs = C.flatten()
             valid_costs = flat_costs[flat_costs != np.inf]
@@ -46,7 +46,7 @@ def max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost
             
             # Sort valid costs and get first and second minimum
             sorted_costs = np.sort(valid_costs)
-            first_min = sorted_costs[0]
+            first_min = sorted_costs[0]            
             second_min = sorted_costs[1]
             
             # Calculate regret (absolute difference between first and second min)
@@ -61,6 +61,9 @@ def max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost
                 q = min_idx_3d[2]
                 max_regret_indices = (m, n, p, q)
             
+        if max_regret_indices is None:
+            break
+        
         # Use the indices from the task with max regret
         m, n, p, q = max_regret_indices
 
