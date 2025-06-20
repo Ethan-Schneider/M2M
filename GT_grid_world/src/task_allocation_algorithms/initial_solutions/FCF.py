@@ -1,5 +1,4 @@
 import numpy as np
-import time
 from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
@@ -11,8 +10,8 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
     Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
     
     Args:
-        S: Statistics object
-        G: Graph object
+        S: Statistics object for tracking metrics
+        G: Graph representing the warehouse
         cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
         cost_tensor_agent_start: 2D numpy array of shape (M, P) containing costs for agent-start allocation
         Rs: AgentLoader containing all agents
@@ -44,7 +43,6 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
             break
 
         allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
-        print(f"Allocated task idx {n} with task id {idx_to_task_id[int(n)]}")
 
         total_cost += C[m, p, q]
 
@@ -94,9 +92,7 @@ def FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = 
         G: Graph representing the warehouse
         Rs: AgentLoader containing all agents
         J: Set of tasks to be assigned
-        strategy: Assignment strategy (currently only "lns" supported)
-        map_name: Name of the map being used
-        t: Current timestep
+        method: Method for calculating costs
         
     Returns:
         Updated AgentLoader with assigned tasks
@@ -112,16 +108,8 @@ def FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = 
             agent.task_sequence.pop(-1)
 
     # Construct cost tensor
-    tik = time.time()
     cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
-    tok = time.time()
-    print(f"Time taken to construct cost tensor: {tok - tik} seconds")
-    
-    tik = time.time()
+
     allocations, total_cost = FCF_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
-    tok = time.time()
-    print(f"Time taken to perform FCF allocation: {tok - tik} seconds")
-    print(f"Allocations: {allocations}")
-    print(f"Total cost: {total_cost}")
     
     return Rs, allocations, total_cost
