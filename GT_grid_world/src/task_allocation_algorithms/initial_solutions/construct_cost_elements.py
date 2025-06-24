@@ -1,7 +1,6 @@
 import numpy as np
-import time
 
-from typing import Set, Tuple, List, Dict
+from typing import Set, Tuple
 from ...graph import Graph
 from ...agent import AgentLoader
 
@@ -9,22 +8,16 @@ def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     """Calculate Manhattan distance between two locations."""
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
 
-def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
+def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> tuple:
     """
-    Construct a 4D cost tensor with Task-Start-Goal information and 2D cost matrix for Agent-Start allocation using efficient 2D arrays.
-    
-    Args:
-        J: Set of tasks, where each task is (task_id, start_locations_frozenset, goal_locations_frozenset)
-        Rs: AgentLoader containing all agents
-        G: Graph representing the warehouse
-        method: Cost calculation method ("manhattan" or "shortest_path")
-    
-    Returns:
-        cost_tensor: 4D numpy array of shape (M, N, P, Q) that does not contain agent-start cost
-        agent_start_cost_tensor: 2D numpy array of shape (M, P)
-        start_locs: List of possible start locations for each task
-        goal_locs: List of possible goal locations for each task
-        idx_to_task_id: Dict mapping from tensor indices to task IDs
+    Compute and return the cost elements needed for allocation:
+    - agent_start_cost_tensor
+    - start_goal_dist
+    - task_start_mask
+    - task_goal_mask
+    - start_locs
+    - goal_locs
+    - idx_to_task_id
     """
     allocated_tasks = set()
     for agent in Rs.agents:
@@ -63,7 +56,6 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
             allocated_locs.update(task[1])
             allocated_locs.update(task[2])
 
-    start_goal_dist = np.zeros((P, Q))
     # 1. Build (P, Q) distance matrix between all start and goal locations
     if method == "manhattan":
         start_goal_dist = np.array([[manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
@@ -91,34 +83,19 @@ def construct_cost_tensor(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str
     # 4. Build (M, P) agent-start cost matrix
     agent_start_cost_tensor = np.full((M, P), np.inf)
     for m in range(M):
+        # Determine agent's current position
+        if len(Rs.agents[m].task_sequence) == 0:
+            agent_pos = Rs.agents[m].state
+        else:
+            agent_pos = Rs.agents[m].task_sequence[-1][2]  # goal location of most recent task
+        
         for i, s in enumerate(start_locs):
             if method == "manhattan":
-                cost = manhattan_distance(Rs.agents[m].state, s)
+                cost = manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                cost = G.get_distance(Rs.agents[m].state, s)
+                cost = G.get_distance(agent_pos, s)
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, i] = cost
 
-    # 5. Build (N, P, Q) cost tensor by combining the above using broadcasting
-    # task_start_mask: (N, P)
-    # task_goal_mask: (N, Q)
-    # start_goal_dist: (P, Q)
-    # We want: cost_tensor[n, i, j] = start_goal_dist[i, j] if task_start_mask[n, i] == 1 and task_goal_mask[n, j] == 1 else np.inf
-    
-    # Testing computation time for adding agent-start cost to start_goal_dist
-    add_tik = time.time()
-    cost_tensor = start_goal_dist.reshape((1, 1, P, Q)) + agent_start_cost_tensor.reshape((M, 1, P, 1))
-    add_time = time.time() - add_tik
-    print(f"Add time: {add_time}")
-
-    # Expand masks for broadcasting
-    start_mask = task_start_mask[None, :, :, None]  # (1, N, P, 1)
-    goal_mask = task_goal_mask[None, :, None, :]    # (1, N, 1, Q)
-    valid_mask = (start_mask == 1) & (goal_mask == 1)  # (1, N, P, Q)
-    
-    # Broadcast start_goal_dist to (1, N, P, Q)
-    cost_tensor = np.full((1, N, P, Q), np.inf)
-    cost_tensor[valid_mask] = np.broadcast_to(start_goal_dist, (1, N, P, Q))[valid_mask]
-
-    return cost_tensor, agent_start_cost_tensor, start_locs, goal_locs, idx_to_task_id
+    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id

@@ -16,6 +16,8 @@ from .initial_solutions.randomized_greedy import randomized_greedy_call
 from .initial_solutions.FCF import FCF_call
 from .initial_solutions.max_regret_FC import max_regret_FC_call
 from .initial_solutions.randomized_max_regret_FC import randomized_max_regret_FC_call
+from .initial_solutions.fast_greedy import fast_greedy_call
+from .initial_solutions.fast_FCF import fast_FCF_call
 
 class LNS:
     def __init__(self, S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
@@ -86,6 +88,10 @@ class LNS:
             current_solution, allocations, _ = max_regret_FC_call(self.S, self.G, self.Rs, self.J, self.cost_calculation_method)
         elif self.initial_task_assignment_strategy == "randomized_max_regret_FC":
             current_solution, allocations, _ = randomized_max_regret_FC_call(self.S, self.G, self.Rs, self.J, self.cost_calculation_method)
+        elif self.initial_task_assignment_strategy == "fast_greedy":
+            current_solution, allocations, _ = fast_greedy_call(self.S, self.G, self.Rs, self.J, self.cost_calculation_method)
+        elif self.initial_task_assignment_strategy == "fast_FCF":
+            current_solution, allocations, _ = fast_FCF_call(self.S, self.G, self.Rs, self.J, self.cost_calculation_method)
         else:
             print("ERROR: Unknown initial task assignment strategy " + self.initial_task_assignment_strategy + ", please choose another one.")
             return self.Rs, [], float('inf')

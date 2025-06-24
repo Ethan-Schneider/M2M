@@ -10,17 +10,17 @@ parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
 seeds=(0)
-num_robots=(10)
-time_horizons=(3600)
+num_robots=(40)
+time_horizons=(1)
 max_tasks=(40)
-frequencies=(1.0)
+frequencies=(0.0125)
 inbound_outbound_ratio=(1.0)
-num_skus=(30)
+num_skus=(50)
 initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
-initial_task_assign_strategy="greedy"
-improvement_task_assign_strategy="py_lns"
+initial_task_assign_strategy="fast_greedy"
+improvement_task_assign_strategy="none"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"

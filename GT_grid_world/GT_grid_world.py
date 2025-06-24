@@ -208,7 +208,7 @@ if __name__=="__main__":
                        choices=['informed_uniform', 'uninformed_uniform'],
                        help='Task generation strategy')
     parser.add_argument('--initial-task-assign-strategy', type=str, required=True,
-                       choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC'],
+                       choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
                        choices=['py_lns', 'c_lns', 'c_p_lns', 'none'],

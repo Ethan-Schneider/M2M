@@ -113,6 +113,11 @@ def greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str
     # Construct cost tensor
     cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
 
+    print(f"Cost tensor size: {cost_tensor.shape}")
+
     allocations, total_cost = greedy_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
+
+    tok = time.time()
+    print(f"Greedy allocation time {tok-tik}s")
 
     return Rs, allocations, total_cost

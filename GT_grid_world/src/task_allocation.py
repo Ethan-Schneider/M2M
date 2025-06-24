@@ -12,6 +12,9 @@ from .task_allocation_algorithms.initial_solutions.greedy_allocation import gree
 from .task_allocation_algorithms.initial_solutions.randomized_greedy import randomized_greedy_call
 from .task_allocation_algorithms.initial_solutions.random_allocation import random_call  
 from .task_allocation_algorithms.py_lns import py_lns_call
+from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
+from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
+from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
 
 def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, removal_operator : str = "worst", repair_operator : str = "greedy") -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
@@ -61,6 +64,12 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
         return max_regret_FC_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "randomized_max_regret_FC":
         return randomized_max_regret_FC_call(S, G, Rs, J, method=cost_calculation_method)
+    elif initial_task_assignment_strategy == "fast_FCF":
+        return fast_FCF_call(S, G, Rs, J, method=cost_calculation_method)
+    elif initial_task_assignment_strategy == "fast_SCF":
+        return fast_SCF_call(S, G, Rs, J, method=cost_calculation_method)
+    elif initial_task_assignment_strategy == "fast_greedy":
+        return fast_greedy_call(S, G, Rs, J, method=cost_calculation_method)
     else:
         print("ERROR: Unknown task assignment strategy " + initial_task_assignment_strategy + ", please choose another one.")
         return Rs
