@@ -38,7 +38,12 @@ class LNS:
         """
         self.S = S
         self.G = G
-        self.Rs = Rs
+        self.Rs = self._copy_solution(Rs)
+        # # Remove all but the first task in each agent's task sequence
+        # for agent in self.Rs.agents:
+        #     while len(agent.task_sequence) > 1:
+        #         agent.task_sequence.pop(-1)
+
         self.J = J
         self.initial_task_assignment_strategy = initial_task_assignment_strategy
         self.time_limit = time_limit
@@ -58,7 +63,7 @@ class LNS:
         
         # Construct initial cost elements
         self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id = construct_cost_elements(
-            J, Rs, G, cost_calculation_method
+            self.J, self.Rs, self.G, self.cost_calculation_method
         )
         
     def run(self) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
@@ -92,11 +97,14 @@ class LNS:
             return self.Rs, [], float('inf')
         
         print(f"Initial cost sum: {sum(self.cost_lookup.values())}")
+        print(f"Initial agent task sequences:")
+        for agent in current_solution.agents:
+            print(f"Agent {agent.id}: {agent.task_sequence}")
         
         inital_task_assignment_time += time.time() - inital_task_assignment_tik
 
         # Initialize best solution and allocations
-        self.best_solution = current_solution
+        self.best_solution = self._copy_solution(current_solution)
 
         cost_tik = time.time()
         self.best_cost = self._calculate_total_cost(self.cost_lookup)
@@ -180,6 +188,10 @@ class LNS:
         print(f"Total cost computation time: {cost_computation_time}")
 
         print(f"Total time: {time.time() - start_time}")
+
+        print(f"Agent task sequences:")
+        for agent in self.best_solution.agents:
+            print(f"Agent {agent.id}: {agent.task_sequence}")
 
         for agent in self.best_solution.agents:
             if len(agent.task_sequence) == 0:

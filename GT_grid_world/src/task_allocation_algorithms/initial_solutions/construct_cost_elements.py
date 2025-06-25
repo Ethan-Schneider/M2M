@@ -65,8 +65,8 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
     allocated_locs = set()
     for agent in Rs.agents:
         for task in agent.task_sequence:
-            allocated_locs.update(task[1])
-            allocated_locs.update(task[2])
+            allocated_locs.add(task[1])
+            allocated_locs.add(task[2])
 
     # 1. Build (P, Q) distance matrix between all start and goal locations
     if method == "manhattan":
