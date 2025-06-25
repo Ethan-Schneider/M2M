@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(0)
+seeds=(1)
 num_robots=(40)
 time_horizons=(1)
 max_tasks=(40)
@@ -19,13 +19,13 @@ num_skus=(50)
 initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
-initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="none"
+initial_task_assign_strategy="fast_SCF"
+improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_small"
-removal_operator="worst"
-repair_operator="greedy"
+removal_operator="shaw"
+repair_operator="fast_SCF"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do

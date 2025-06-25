@@ -239,10 +239,10 @@ if __name__=="__main__":
                        choices=['manhattan', 'shortest_path'],
                        help='Method for calculating cost')
     parser.add_argument('--removal-operator', type=str, default='worst',
-                       choices=['worst', 'random', 'greedy'],
+                       choices=['worst', 'random', 'greedy', 'shaw'],
                        help='Removal operator for task allocation')
     parser.add_argument('--repair-operator', type=str, default='greedy',
-                       choices=['greedy', 'random', 'worst'],
+                       choices=['greedy', 'random', 'worst', 'fast_SCF'],
                        help='Repair operator for task allocation')
     args = parser.parse_args()
     

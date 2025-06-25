@@ -37,7 +37,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
     """
 
     if improvement_task_assignment_strategy == "py_lns":
-        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=3, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator)
+        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=5, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator)
     elif improvement_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "c_p_lns":

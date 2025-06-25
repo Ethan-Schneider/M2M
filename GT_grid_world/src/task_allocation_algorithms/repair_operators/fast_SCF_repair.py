@@ -1,18 +1,19 @@
 import numpy as np
+import time
 from typing import List, Tuple, Dict
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
 from ...utils import manhattan_distance
 
-import time
-
-def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
+def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
                  start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]],
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
                  method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
-    Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
+    Repair a solution using Second Coordinate Fixing (SCF) algorithm.
+    Iterates over tasks and assigns each task to the best available agent.
+    
     Args:
         S: Statistics object
         G: Graph object
@@ -26,6 +27,8 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         idx_to_task_id: Mapping from tensor indices to task IDs
         temp_allocations: List of current allocations (agent_idx, task_idx, start_idx, goal_idx)
         method: Cost calculation method ("manhattan" or "shortest_path")
+        cost_lookup: Dictionary to store allocation costs
+        
     Returns:
         Tuple containing:
         - AgentLoader with updated task sequences
@@ -43,40 +46,43 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
     task_goal_mask_ = task_goal_mask.copy()
     assigned_tasks = set()
 
-    while True:
-        # If all tasks are assigned, if no start or goal locations are left, break
-        if len(assigned_tasks) == N:
-            break
-        if np.all(task_start_mask_ == 0) or np.all(task_goal_mask_ == 0):
-            break
+    # Iterate over all tasks (SCF approach)
+    for n in range(N):
+        if n in assigned_tasks:
+            continue
+            
+        valid_p = np.where(task_start_mask_[n] == 1)[0]
+        valid_q = np.where(task_goal_mask_[n] == 1)[0]
+        if len(valid_p) == 0 or len(valid_q) == 0:
+            continue
 
+        # Find the best agent for this task (SCF: iterate over agents for each task)
         min_cost = np.inf
         best = None
-        # For each task, find the best (m, n, p, q)
-        for n in range(N):
-            if n in assigned_tasks:
-                continue
-            valid_p = np.where(task_start_mask_[n] == 1)[0]
-            valid_q = np.where(task_goal_mask_[n] == 1)[0]
-            if len(valid_p) == 0 or len(valid_q) == 0:
-                continue
-            agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
-            sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
-            total_costs = agent_costs[:, :, None] + sg_costs[None, :, :]
+        
+        for m in range(M):
+            # Vectorized cost computation for all valid (p, q) pairs
+            total_costs = agent_start_cost_tensor[m, valid_p][:, None] + start_goal_dist[np.ix_(valid_p, valid_q)]
+
             min_idx = np.argmin(total_costs)
-            min_cost_n = total_costs.flat[min_idx]
-            if min_cost_n < min_cost:
-                min_cost = min_cost_n
-                m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
-                best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+            min_cost_m = total_costs.flat[min_idx]
+            if min_cost_m < min_cost:
+                min_cost = min_cost_m
+                p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
+                best = (m, valid_p[p_idx], valid_q[q_idx])
+                
         if best is None or min_cost == np.inf:
-            break
-        m, n, p, q = best
+            continue
+
+        # Add the task to the allocation
+        m, p, q = best
         allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
-        if cost_lookup is not None:
-            cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(min_cost)
         total_cost += min_cost
         assigned_tasks.add(n)
+
+        # Store cost in lookup table if provided
+        if cost_lookup is not None:
+            cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(min_cost)
 
         # Update statistics
         S.append_early_task_ids(idx_to_task_id[int(n)])

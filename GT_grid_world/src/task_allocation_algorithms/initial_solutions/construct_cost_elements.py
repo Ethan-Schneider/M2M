@@ -1,6 +1,6 @@
 import numpy as np
 
-from typing import Set, Tuple
+from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 
@@ -8,16 +8,28 @@ def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     """Calculate Manhattan distance between two locations."""
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
 
-def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> tuple:
+def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
-    Compute and return the cost elements needed for allocation:
-    - agent_start_cost_tensor
-    - start_goal_dist
-    - task_start_mask
-    - task_goal_mask
-    - start_locs
-    - goal_locs
-    - idx_to_task_id
+    Compute the cost elements needed for allocation.
+    Args:
+        - J: Set[Tuple]
+        - Rs: AgentLoader
+        - G: Graph
+        - method: str
+        - agent_start_cost_tensor
+        - start_goal_dist
+        - task_start_mask
+        - task_goal_mask
+        - start_locs
+        - goal_locs
+        - idx_to_task_id
+    Returns:
+        - agent_start_cost_tensor: (M, P)
+        - start_goal_dist: (P, Q)
+        - task_start_mask: (N, P)
+        - task_goal_mask: (N, Q)
+        - start_locs: List[Tuple[int, int]]
+        - goal_locs: List[Tuple[int, int]]
     """
     allocated_tasks = set()
     for agent in Rs.agents:
