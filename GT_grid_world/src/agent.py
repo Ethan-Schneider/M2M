@@ -1,10 +1,13 @@
 class Agent:
-    def __init__(self, agent_id : int, state : tuple, task_sequence : list = None):
+    def __init__(self, agent_id : int, state : tuple, task_sequence : list = None, home : tuple = None):
         self.id = agent_id
         self.task_sequence = task_sequence if task_sequence is not None else []
         self.path_sequence = []
         self.state = state
-        self.home = state
+        if home is None:
+            self.home = (state[0], state[1])
+        else:
+            self.home = home
         # 0 == Free Agent
         # 1 == To_Pickup
         # 2 == To_Delivery

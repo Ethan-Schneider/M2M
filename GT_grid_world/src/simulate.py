@@ -44,19 +44,44 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
     S.add_aisle_occupancy(G.get_aisle_occupancy())
     S.add_driveway_occupancy(G.get_driveway_occupancy())
     
-          
     for agent in Rs.agents:
         if agent.status == 1:
             if agent.state == agent.task_sequence[0][1]:
-                task_id = agent.task_sequence[0][0]
+                task = agent.task_sequence[0]
+                task_id = task[0]
+                start_location = task[1]
+                goal_location = task[2]
+                # Outbound: picking up from warehouse
+                if start_location in G.warehouse.get_full_locations():
+                    try:
+                        G.warehouse.remove_sku_instance(start_location)
+                    except Exception as e:
+                        print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
+                # Inbound: picking up from driveway (now empty)
+                elif start_location in G.driveway.get_full_locations():
+                    try:
+                        G.driveway.remove_sku_instance(start_location)
+                    except Exception as e:
+                        print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
                 S.add_completed_to_pickup_task_id(task_id)
                 S.update_actual_pickup_duration(task_id, t - S.get_actual_pickup_duration(task_id))
                 agent.status = 2
         elif agent.status == 2:
             if agent.state == agent.task_sequence[0][2]:
-                task_id = agent.task_sequence[0][0]
-                start_location = agent.task_sequence[0][1]
-                goal_location = agent.task_sequence[0][2]
+                task = agent.task_sequence[0]
+                task_id = task[0]
+                start_location = task[1]
+                goal_location = task[2]
+                # Inbound: dropping off in warehouse
+                # Try to get SKU ID if present in task tuple
+                sku_id = None
+                if len(task) > 3:
+                    sku_id = task[3]
+                if sku_id is not None:
+                    try:
+                        G.warehouse.add_sku_instance(sku_id, goal_location)
+                    except Exception as e:
+                        print(f"[WARN] Could not add SKU {sku_id} to warehouse at {goal_location}: {e}")
                 S.add_completed_task_id(task_id, t, start_location, goal_location)
                 S.update_service_time(task_id, t)
                 

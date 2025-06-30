@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from typing import Set, Tuple
 from .graph import Graph
 from .inventory_manager.inventory import Inventory
@@ -84,33 +85,53 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, N: int, inbound_to_outbound: 
         weights = [w / total_weight for w in tasking_weights.values()]
         sku_ids = list(tasking_weights.keys())
         
+        # Track locations that have been assigned in this generation cycle
+        assigned_locations_in_cycle = set()
+        
         for task in tasks_to_generate:
             # Select SKU based on tasking weights
             sku_id = np.random.choice(sku_ids, p=weights)
             
             if task == 1:  # Inbound task
-                # Start locations are all driveway nodes
-                start_locations = frozenset(G.driveway.get_empty_locations())
+                # Start locations are all driveway nodes (excluding already assigned locations)
+                available_start_locations = set(G.driveway.get_empty_locations()) - current_task_locations - assigned_locations_in_cycle
                 
-                # Goal locations are all empty aisle locations
-                goal_locations = frozenset(G.warehouse.get_empty_locations())
+                # Goal locations are all empty aisle locations (excluding already assigned locations)
+                available_goal_locations = set(G.warehouse.get_empty_locations()) - current_task_locations - assigned_locations_in_cycle
                 
-                if not goal_locations:
+                if not available_goal_locations or not available_start_locations:
                     continue
                 
-                J_new.add((last_task_id + 1, start_locations, goal_locations))
+                # Randomly select one start and one goal location
+                start_location = random.choice(list(available_start_locations))
+                goal_location = random.choice(list(available_goal_locations))
+                
+                # Add selected locations to the assigned set for this cycle
+                assigned_locations_in_cycle.add(start_location)
+                assigned_locations_in_cycle.add(goal_location)
+                
+                J_new.add((last_task_id + 1, frozenset([start_location]), frozenset([goal_location])))
                 last_task_id += 1
                 
             elif task == 0:  # Outbound task
-                # Start locations are all locations containing the selected SKU
-                start_locations = frozenset(G.warehouse.get_sku_instances(sku_id))
+                # Start locations are all locations containing the selected SKU (excluding already assigned locations)
+                available_start_locations = set(G.warehouse.get_sku_instances(sku_id)) - current_task_locations - assigned_locations_in_cycle
                 
-                # Goal locations are all driveway nodes
-                goal_locations = frozenset(G.driveway.get_empty_locations())
-                if not start_locations:
+                # Goal locations are all driveway nodes (excluding already assigned locations)
+                available_goal_locations = set(G.driveway.get_empty_locations()) - current_task_locations - assigned_locations_in_cycle
+                
+                if not available_start_locations or not available_goal_locations:
                     continue
                 
-                J_new.add((last_task_id + 1, start_locations, goal_locations))
+                # Randomly select one start and one goal location
+                start_location = random.choice(list(available_start_locations))
+                goal_location = random.choice(list(available_goal_locations))
+                
+                # Add selected locations to the assigned set for this cycle
+                assigned_locations_in_cycle.add(start_location)
+                assigned_locations_in_cycle.add(goal_location)
+                
+                J_new.add((last_task_id + 1, frozenset([start_location]), frozenset([goal_location])))
                 last_task_id += 1
     
     else:

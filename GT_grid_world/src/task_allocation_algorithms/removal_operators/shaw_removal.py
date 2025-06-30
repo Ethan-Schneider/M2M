@@ -34,7 +34,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         - List of removed allocations
     """
     if len(allocations) == 0:
-        return Rs, allocations, []
+        return Rs, allocations
     
     # Randomly choose one task as the seed
     seed_allocation = random.choice(allocations)
@@ -51,7 +51,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
     
     if seed_s_j is None or seed_g_j is None:
         print(f"Warning: Could not find seed task {seed_task_id} in agent {seed_agent_idx}'s sequence")
-        return Rs, allocations, []
+        return Rs, allocations
     
     # Calculate relatedness scores for all other tasks
     relatedness_scores = []

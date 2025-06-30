@@ -39,10 +39,11 @@ class LNS:
         self.S = S
         self.G = G
         self.Rs = self._copy_solution(Rs)
-        # # Remove all but the first task in each agent's task sequence
-        # for agent in self.Rs.agents:
-        #     while len(agent.task_sequence) > 1:
-        #         agent.task_sequence.pop(-1)
+
+        # Remove all but the first task in each agent's task sequence
+        for agent in self.Rs.agents:
+            while len(agent.task_sequence) > 1:
+                agent.task_sequence.pop(-1)
 
         self.J = J
         self.initial_task_assignment_strategy = initial_task_assignment_strategy
@@ -203,7 +204,7 @@ class LNS:
         """Create a deep copy of the current solution."""
         new_solution = AgentLoader([])
         for agent in solution.agents:
-            new_agent = agent.__class__(agent.id, agent.state)
+            new_agent = agent.__class__(agent.id, agent.state, home=agent.home)
             new_agent.task_sequence = agent.task_sequence.copy()
             new_agent.status = agent.status
             new_solution.agents.append(new_agent)
@@ -261,6 +262,12 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         - List of allocations (agent_idx, task_idx, start_idx, goal_idx)
         - Best cost found
     """
+    num_allocated_tasks = 0
+    for agent in Rs.agents:
+        num_allocated_tasks += len(agent.task_sequence)
+    if len(J) == num_allocated_tasks:  # No tasks to assign
+        return Rs, [], 0.0
+    
     lns = LNS(S, G, Rs, J, initial_task_assignment_strategy, time_limit, removal_size, 
               cost_calculation_method, removal_operator, repair_operator)
     return lns.run()

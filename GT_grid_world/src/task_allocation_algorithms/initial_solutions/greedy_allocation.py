@@ -12,7 +12,7 @@ def greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor
     Args:
         S: Statistics object
         G: Graph object
-        cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
+        cost_tensor: 4D numpy array of shape (1, N, P, Q) containing costs
         cost_tensor_agent_start: 2D numpy array of shape (M, P) containing costs for agent-start allocation
         Rs: AgentLoader containing all agents
         start_locs: List of start locations
@@ -26,13 +26,19 @@ def greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor
           - q is the goal location index
         - Total cost of all allocations
     """
-    M, __, P, __ = cost_tensor.shape
+    # Get dimensions from the tensors
+    M = cost_tensor_agent_start.shape[0]  # Number of agents
+    _, N, P, Q = cost_tensor.shape  # Number of tasks, start locations, goal locations
+    
+    # Create a writable copy of the cost_tensor broadcasted to (M, N, P, Q)
+    cost_tensor_broadcasted = np.broadcast_to(cost_tensor, (M, N, P, Q)).copy()
+    
     allocations = []
     total_cost = 0.0
     
     while True:
         # Add cost_tensor_agent_start to cost_tensor
-        C = cost_tensor + cost_tensor_agent_start.reshape(M, 1, P, 1)
+        C = cost_tensor_broadcasted + cost_tensor_agent_start.reshape(M, 1, P, 1)
 
         # Get indices of minimum cost element
         m, n, p, q = np.unravel_index(np.argmin(C), C.shape)
@@ -61,11 +67,11 @@ def greedy_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor
         
         # Update tensor by setting inf for:
         # 1. All allocations for this task n
-        cost_tensor[:, n, :, :] = np.inf
+        cost_tensor_broadcasted[:, n, :, :] = np.inf
         # 2. All allocations using this start location p
-        cost_tensor[:, :, p, :] = np.inf
+        cost_tensor_broadcasted[:, :, p, :] = np.inf
         # 3. All allocations using this goal location q
-        cost_tensor[:, :, :, q] = np.inf
+        cost_tensor_broadcasted[:, :, :, q] = np.inf
         
         # 4. Update costs for agent-start allocation for agent m
         for p in range(P):

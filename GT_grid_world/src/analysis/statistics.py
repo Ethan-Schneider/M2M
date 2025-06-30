@@ -121,6 +121,10 @@ class Stats:
         # Track task reallocations
         self.__task_reallocations = {}  # task_id -> number of times allocated before being worked on
         
+        # Track agent statuses and goal locations per timestep
+        self.__agent_statuses_per_timestep = []  # List of lists: [timestep][agent_id] = status
+        self.__agent_goal_locations_per_timestep = []  # List of lists: [timestep][agent_id] = goal_location
+        
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
         for agent in Rs.agents:
@@ -620,7 +624,9 @@ class Stats:
             "driveway_occupancy": self.__driveway_occupancy,
             "velocity_timesteps": velocity_timesteps,
             "gaussian_weights": self.__gaussian_weights,
-            "task_reallocations": self.__task_reallocations
+            "task_reallocations": self.__task_reallocations,
+            "agent_statuses_per_timestep": self.__agent_statuses_per_timestep,
+            "agent_goal_locations_per_timestep": self.__agent_goal_locations_per_timestep
         }
         
         with open(self.__output_file, "w") as f:
@@ -706,3 +712,27 @@ class Stats:
             tuple: (average_task_cost, sum_of_costs)
         """
         return self.__average_task_cost, self.__sum_of_costs
+
+    def add_agent_statuses_and_goals(self, Rs: AgentLoader) -> None:
+        """Record agent statuses and goal locations for the current timestep.
+        
+        Args:
+            Rs: AgentLoader containing all agents
+        """
+        agent_statuses = []
+        agent_goal_locations = []
+        
+        for agent in Rs.agents:
+            agent_statuses.append(agent.status)
+            
+            if agent.status == 1:  # Going to pickup
+                goal_location = agent.task_sequence[0][1]  # First task's start location
+            elif agent.status == 2:  # Going to delivery
+                goal_location = agent.task_sequence[0][2]  # First task's goal location
+            else:  # status == 0, idle
+                goal_location = None
+                
+            agent_goal_locations.append(goal_location)
+        
+        self.__agent_statuses_per_timestep.append(agent_statuses)
+        self.__agent_goal_locations_per_timestep.append(agent_goal_locations)

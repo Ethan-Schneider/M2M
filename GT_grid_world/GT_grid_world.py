@@ -87,6 +87,9 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
+        # Record agent statuses and goal locations for this timestep
+        S.add_agent_statuses_and_goals(Rs)
+        
         S.compute_unallocated_agents(Rs)
 
         global_tok = time.time()

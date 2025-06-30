@@ -8,10 +8,11 @@ from .construct_cost_tensor import construct_cost_tensor
 
 def random_allocation(S : Stats, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
-    Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
+    Perform random allocation of tasks to agents based on cost elements in the tensor.
     
     Args:
-        cost_tensor: 4D numpy array of shape (M, N, P, Q) containing costs
+        cost_tensor: 4D numpy array of shape (1, N, P, Q) containing costs
+        cost_tensor_agent_start: 2D numpy array of shape (M, P) containing agent-start costs
         Rs: AgentLoader containing all agents
         start_locs: List of start locations
         goal_locs: List of goal locations
@@ -24,11 +25,13 @@ def random_allocation(S : Stats, cost_tensor: np.ndarray, cost_tensor_agent_star
           - q is the goal location index
         - Total cost of all allocations
     """
-    M, N, P, __ = cost_tensor.shape
+    M, N, P, Q = cost_tensor_agent_start.shape[0], cost_tensor.shape[1], cost_tensor.shape[2], cost_tensor.shape[3]
     allocations = []
     total_cost = 0.0
 
-    C = cost_tensor + cost_tensor_agent_start.reshape(M, 1, P, 1)
+    # Broadcast cost_tensor from (1, N, P, Q) to (M, N, P, Q) and add agent-start costs
+    C = np.broadcast_to(cost_tensor, (M, N, P, Q)) + cost_tensor_agent_start.reshape(M, 1, P, 1)
+    
     while True:
         # Get valid (non-infinite) entries
         valid_entries = np.where(C != np.inf)
@@ -91,7 +94,7 @@ def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str
     # Unassign tasks not currently being worked on by any agent
     for agent in Rs.agents:
         while len(agent.task_sequence) > 1:
-            agent.task_sequence.pop(0)
+            agent.task_sequence.pop(-1)
 
     # Construct cost tensor
     tik = time.time()
@@ -102,7 +105,7 @@ def random_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str
     tik = time.time()
     allocations, total_cost = random_allocation(S, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
     tok = time.time()
-    print(f"Time taken to perform greedy allocation: {tok - tik} seconds")
+    print(f"Time taken to perform random allocation: {tok - tik} seconds")
     print(f"Allocations: {allocations}")
     print(f"Total cost: {total_cost}")
     print(f"Robot Task Sequences")
