@@ -12,6 +12,13 @@ class Agent:
         # 1 == To_Pickup
         # 2 == To_Delivery
         self.status = 0
+        self.sku_id_carrying = None
+    
+    def set_sku_id_carrying(self, sku_id : int):
+        self.sku_id_carrying = sku_id
+    
+    def get_sku_id_carrying(self) -> int:
+        return self.sku_id_carrying
 
     def set_active_on_task(self, status : int):
         """Sets Status of the Agent

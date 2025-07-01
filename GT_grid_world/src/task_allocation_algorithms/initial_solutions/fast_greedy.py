@@ -34,7 +34,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     M = len(Rs.agents)
     N = len(idx_to_task_id)
     P = len(start_locs)
-
+    Q = len(goal_locs)
     allocations = []
     total_cost = 0.0
     total_argmin_time = 0.0
@@ -45,13 +45,19 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     task_goal_mask_ = task_goal_mask.copy()
     assigned_tasks = set()
 
+    iteration = 0
+
     while True:
+        # print(f"Iteration {iteration}")
+        iteration += 1
         # If all tasks are assigned, if no start or goal locations are left, break
         if len(assigned_tasks) == N:
+            print(f"All tasks assigned: {len(assigned_tasks)}")
             break
 
         # If all start or goal locations are used, break
         if np.all(task_start_mask_ == 0) or np.all(task_goal_mask_ == 0):
+            print(f"No start or goal locations left")
             break
 
         # Vectorized cost computation for all agents and all valid (p, q) pairs for each task
@@ -79,6 +85,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
                 best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
         total_argmin_time += time.time() - argmin_tik
         if best is None or min_cost == np.inf:
+            print(f"No best task found")
             break
 
         # Add the task to the allocation
@@ -135,6 +142,7 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method 
     for agent in Rs.agents:
         num_allocated_tasks += len(agent.task_sequence)
     if len(J) == num_allocated_tasks:  # No tasks to assign
+        print(f"No tasks to assign")
         return Rs, [], 0.0
     
     # Clear all but the first task in each agent's task sequence
@@ -148,6 +156,16 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method 
     construct_tik = time.time()
     agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id = construct_cost_elements(J, Rs, G, method)
     total_construct_time += time.time() - construct_tik
+
+    # print(f"Min cost agent-start cost: {np.min(agent_start_cost_tensor)}")
+    # print(f"Min cost start-goal cost: {np.min(start_goal_dist)}")
+    # print(f"Number of available start locations: {np.sum(task_start_mask)}")
+    # print(f"Number of available goal locations: {np.sum(task_goal_mask)}")
+    # print(f"Number of start locations: {len(start_locs)}")
+    # print(f"Number of goal locations: {len(goal_locs)}")
+    # print(f"Number of tasks: {len(J)}")
+    # for task in J:
+    #     print(f"Task {task[0]} has {len(task[1])} start locations and {len(task[2])} goal locations")
 
     allocation_tik = time.time()
     # Perform greedy allocation

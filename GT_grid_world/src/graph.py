@@ -31,6 +31,9 @@ class AStar:
         
         # Check if start or goal is an obstacle
         if self.G.get_if_obstacle(initial_state) or self.G.get_if_obstacle(self.goal):
+            print(f"Start or goal is an obstacle")
+            print(f"Start: {self.G.get_if_obstacle(initial_state)}")
+            print(f"Goal: {self.G.get_if_obstacle(self.goal)}")
             return False
         
         closed_set = set()
@@ -74,7 +77,9 @@ class AStar:
                 came_from[neighbor] = current
 
                 g_score[neighbor] = tentative_g_score
-                f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, current)
+                f_score[neighbor] = g_score[neighbor] + self.admissible_heuristic(neighbor, self.goal)
+        if self.start == (12, 30) and self.goal == (2, 38):
+            print(f"No path found")
         return False
 
 class Graph:
@@ -186,7 +191,7 @@ class Graph:
         self.driveway = Inventory(
             num_skus=num_skus,
             warehouse_locations=self.station_locations,
-            fill_percentage=initial_warehouse_capacity,
+            fill_percentage=0.0,
             weight_init=weight_init
         )
         
@@ -419,6 +424,14 @@ class Graph:
         # Get all non-obstacle locations
         valid_locations = self.get_all_non_obstacles()
         
+        # Create a temporary graph without robot positions for distance computation
+        temp_occupancy = self.__occupancy_graph.copy()
+        # Clear all robot positions
+        for row in range(self.__occupancy_graph.shape[0]):
+            for col in range(self.__occupancy_graph.shape[1]):
+                if not self.__occupancy_graph[row, col].get_obstacle():
+                    temp_occupancy[row, col].set_occupied(False)
+        
         # Compute distances between all pairs
         for i, start in enumerate(valid_locations):
             if i % 10 == 0:
@@ -437,10 +450,74 @@ class Graph:
                     self.__distance_matrix[start_idx, goal_idx] = self.__distance_matrix[goal_idx, start_idx]
                     continue
                 
+                # Create a temporary graph for A* search without robot positions
+                class TempGraph:
+                    def __init__(self, occupancy_graph, obstacle_graph, height, width):
+                        self.__occupancy_graph = occupancy_graph
+                        self.__obstacle_graph = obstacle_graph
+                        self.height = height
+                        self.width = width
+                    
+                    def get_if_obstacle(self, node):
+                        return self.__occupancy_graph[node[0], node[1]].get_obstacle()
+                    
+                    def get_neighbors(self, node, ignore_robots=False):
+                        if node[0] >= self.__occupancy_graph.shape[0] or node[1] >= self.__occupancy_graph.shape[1] or node[0] < 0 or node[1] < 0:
+                            raise Exception("Node %s is out of range of graph with shape %s" % (node, self.__occupancy_graph.shape))
+                        
+                        north = (node[0]-1, node[1])
+                        east = (node[0], node[1]+1)
+                        south = (node[0]+1, node[1])
+                        west = (node[0], node[1]-1)
+                        
+                        if ignore_robots: 
+                            if north[0] < 0  or self.get_if_obstacle(north):
+                                north = None
+                                
+                            if east[1] == self.__occupancy_graph.shape[1] or self.get_if_obstacle(east):
+                                east = None
+                                
+                            if south[0] == self.__occupancy_graph.shape[0] or self.get_if_obstacle(south):
+                                south = None   
+                            
+                            if west[1] < 0 or self.get_if_obstacle(west):
+                                west = None            
+                        else:
+                            if north[0] < 0  or self.__get_if_occupied(north) or self.get_if_obstacle(north):
+                                north = None
+                                
+                            if east[1] == self.__occupancy_graph.shape[1] or self.__get_if_occupied(east) or self.get_if_obstacle(east):
+                                east = None
+                                
+                            if south[0] == self.__occupancy_graph.shape[0] or self.__get_if_occupied(south) or self.get_if_obstacle(south):
+                                south = None   
+                            
+                            if west[1] < 0 or self.__get_if_occupied(west) or self.get_if_obstacle(west):
+                                west = None
+                        
+                        neighbors = [north, east, south, west]
+                        neighbors = [x for x in neighbors if x is not None]
+                        return neighbors
+                    
+                    def __get_if_occupied(self, node):
+                        return self.__occupancy_graph[node[0], node[1]].get_occupied()
+                
+                temp_graph = TempGraph(temp_occupancy, self.__obstacle_graph, self.height, self.width)
+                
                 # Compute path using A*
-                path = AStar(self, start, goal).search()
+                if start == (12, 30) and goal == (2, 38):
+                    print(f"Computing path from {start} to {goal}")
+                path = AStar(temp_graph, start, goal).search()
+                if start == (12, 30) and goal == (2, 38):
+                    print(f"Path: {path}")
                 if path:
                     self.__distance_matrix[start_idx, goal_idx] = len(path) - 1  # -1 because path includes start node
+                else:
+                    # Check if either location is an obstacle
+                    if self.get_if_obstacle(start):
+                        print(f"  Start location {start} is an obstacle")
+                    if self.get_if_obstacle(goal):
+                        print(f"  Goal location {goal} is an obstacle")
                     
         # Save the matrix
         np.save(matrix_file, self.__distance_matrix)

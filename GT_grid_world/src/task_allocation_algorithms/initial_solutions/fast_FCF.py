@@ -7,7 +7,7 @@ from ...analysis.statistics import Stats
 from .construct_cost_elements import construct_cost_elements, manhattan_distance
 
 def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan",
-                         agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                         agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
     This is a batched greedy algorithm that allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -94,6 +94,11 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
             # Add the task to the allocation
             n, p, q = best
             allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
+
+            if cost_lookup is not None:
+                # Store the cost in the lookup table
+                cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(min_cost)
+
             total_cost += min_cost
             assigned_tasks.add(n)
 

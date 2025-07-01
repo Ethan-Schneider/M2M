@@ -41,6 +41,9 @@ class Stats:
         # Temp SOC
         self.__soc = 0
 
+        # Track number of tasks in the system per timestep
+        self.__tasks_in_system = []
+
         # Task completion timestamps
         self.__task_completion_timestamps = {}  # task_id -> timestep
         self.__task_release_timestamps = {}     # task_id -> timestep
@@ -113,17 +116,20 @@ class Stats:
         
         self.__num_path_plan_fails = 0
         
-        self.__gaussian_weights = {
-            "warehouse": [],
-            "method": []
-        }
-        
         # Track task reallocations
         self.__task_reallocations = {}  # task_id -> number of times allocated before being worked on
         
         # Track agent statuses and goal locations per timestep
         self.__agent_statuses_per_timestep = []  # List of lists: [timestep][agent_id] = status
         self.__agent_goal_locations_per_timestep = []  # List of lists: [timestep][agent_id] = goal_location
+        
+        self.__warehouse_full_locations_per_timestep = []
+        self.__warehouse_row_counts_per_timestep = []
+        self.__warehouse_col_counts_per_timestep = []
+        
+        self.__driveway_full_locations_per_timestep = []
+        self.__warehouse_sku_counts_per_timestep = []
+        self.__driveway_sku_counts_per_timestep = []
         
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
@@ -557,9 +563,15 @@ class Stats:
     def save_data(self):
         velocity_timesteps = self.compute_velocity_timesteps()
         
-        print(self.__actual_duration)
+        # print(self.__actual_duration)
         self.remove_uncompleted_task_durations()
-        print(self.__actual_duration)
+        # print(self.__actual_duration)
+        
+        # Ensure all completed tasks have service times
+        for task_id in self.__completed_task_ids:
+            if task_id in self.__task_completion_timestamps and task_id in self.__task_release_timestamps:
+                if task_id not in self.__service_times:
+                    self.update_service_time(task_id, self.__task_completion_timestamps[task_id])
         
         # Calculate final statistics
         avg_service_time, total_service_time = self.get_service_time_stats()
@@ -623,24 +635,20 @@ class Stats:
             "aisle_occupancy": self.__aisle_occupancy,
             "driveway_occupancy": self.__driveway_occupancy,
             "velocity_timesteps": velocity_timesteps,
-            "gaussian_weights": self.__gaussian_weights,
             "task_reallocations": self.__task_reallocations,
             "agent_statuses_per_timestep": self.__agent_statuses_per_timestep,
-            "agent_goal_locations_per_timestep": self.__agent_goal_locations_per_timestep
+            "agent_goal_locations_per_timestep": self.__agent_goal_locations_per_timestep,
+            "tasks_in_system": self.__tasks_in_system,
+            "warehouse_full_locations_per_timestep": self.__warehouse_full_locations_per_timestep,
+            "warehouse_row_counts_per_timestep": self.__warehouse_row_counts_per_timestep,
+            "warehouse_col_counts_per_timestep": self.__warehouse_col_counts_per_timestep,
+            "driveway_full_locations_per_timestep": self.__driveway_full_locations_per_timestep,
+            "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
+            "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep
         }
         
         with open(self.__output_file, "w") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
-
-    def add_gaussian_weights(self, warehouse_weight: float, method_weight: float) -> None:
-        """Add both Gaussian weights to the statistics.
-        
-        Args:
-            warehouse_weight (float): Weight computed using all warehouse locations
-            method_weight (float): Weight computed using the chosen method (unallocated tasks or warehouse items)
-        """
-        self.__gaussian_weights["warehouse"].append(warehouse_weight)
-        self.__gaussian_weights["method"].append(method_weight)
 
     def add_task_reallocation(self, task_id: int) -> None:
         """Increment the reallocation count for a task."""
@@ -736,3 +744,50 @@ class Stats:
         
         self.__agent_statuses_per_timestep.append(agent_statuses)
         self.__agent_goal_locations_per_timestep.append(agent_goal_locations)
+
+    def append_tasks_in_system(self, num_tasks: int) -> None:
+        self.__tasks_in_system.append(num_tasks)
+
+    def append_warehouse_inventory_state(self, warehouse, aisle_locations):
+        # Get all full locations
+        full_locations = warehouse.get_full_locations()
+        self.__warehouse_full_locations_per_timestep.append(len(full_locations))
+
+        # Get row/col counts
+        if not aisle_locations:
+            self.__warehouse_row_counts_per_timestep.append([])
+            self.__warehouse_col_counts_per_timestep.append([])
+            return
+
+        # Find bounds
+        rows = [loc[0] for loc in aisle_locations]
+        cols = [loc[1] for loc in aisle_locations]
+        min_row, max_row = min(rows), max(rows)
+        min_col, max_col = min(cols), max(cols)
+
+        # Build sets for fast lookup
+        full_set = set(full_locations)
+
+        # Row counts
+        row_counts = []
+        for r in range(min_row, max_row + 1):
+            count = sum((r, c) in full_set for c in range(min_col, max_col + 1) if (r, c) in aisle_locations)
+            row_counts.append(count)
+        self.__warehouse_row_counts_per_timestep.append(row_counts)
+
+        # Col counts
+        col_counts = []
+        for c in range(min_col, max_col + 1):
+            count = sum((r, c) in full_set for r in range(min_row, max_row + 1) if (r, c) in aisle_locations)
+            col_counts.append(count)
+        self.__warehouse_col_counts_per_timestep.append(col_counts)
+
+    def append_driveway_inventory_state(self, driveway):
+        full_locations = driveway.get_full_locations()
+        self.__driveway_full_locations_per_timestep.append(len(full_locations))
+
+    def append_sku_inventory_state(self, warehouse, driveway, num_skus):
+        warehouse_counts = [len(warehouse.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
+        driveway_counts = [len(driveway.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
+        self.__warehouse_sku_counts_per_timestep.append(warehouse_counts)
+        self.__driveway_sku_counts_per_timestep.append(driveway_counts)

@@ -6,9 +6,6 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
-from .task_allocation_algorithms.external_algorithms.lns import dc
-
-
 def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_name : str, t : int) -> Tuple[AgentLoader, set]:
     map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     # Update state of robots
@@ -26,11 +23,11 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
             G.set_occupied(agent.state, True)
             
             if agent.status == 1:
-                S.update_actual_pickup_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
+                # S.update_actual_pickup_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
                 S.update_actual_pickup_duration(agent.task_sequence[0][0], S.get_actual_pickup_duration(agent.task_sequence[0][0]) + 1)
                 
             elif agent.status == 2:
-                S.update_actual_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
+                # S.update_actual_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
                 S.update_actual_duration(agent.task_sequence[0][0], S.get_actual_duration(agent.task_sequence[0][0]) + 1)
             else:
                 pass
@@ -54,17 +51,21 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 # Outbound: picking up from warehouse
                 if start_location in G.warehouse.get_full_locations():
                     try:
+                        agent.set_sku_id_carrying(G.warehouse.get_sku_at_location(start_location).sku_id)
                         G.warehouse.remove_sku_instance(start_location)
                     except Exception as e:
                         print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
+                        exit()
                 # Inbound: picking up from driveway (now empty)
                 elif start_location in G.driveway.get_full_locations():
                     try:
+                        # Only save sku id
+                        agent.set_sku_id_carrying(G.driveway.get_sku_at_location(start_location).sku_id)
                         G.driveway.remove_sku_instance(start_location)
                     except Exception as e:
                         print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
+
                 S.add_completed_to_pickup_task_id(task_id)
-                S.update_actual_pickup_duration(task_id, t - S.get_actual_pickup_duration(task_id))
                 agent.status = 2
         elif agent.status == 2:
             if agent.state == agent.task_sequence[0][2]:
@@ -72,16 +73,13 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 task_id = task[0]
                 start_location = task[1]
                 goal_location = task[2]
-                # Inbound: dropping off in warehouse
-                # Try to get SKU ID if present in task tuple
-                sku_id = None
-                if len(task) > 3:
-                    sku_id = task[3]
-                if sku_id is not None:
-                    try:
-                        G.warehouse.add_sku_instance(sku_id, goal_location)
-                    except Exception as e:
-                        print(f"[WARN] Could not add SKU {sku_id} to warehouse at {goal_location}: {e}")
+
+                if goal_location in G.warehouse.get_empty_locations():
+                    G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
+                elif goal_location in G.driveway.get_empty_locations():
+                    pass
+                agent.set_sku_id_carrying(None)
+
                 S.add_completed_task_id(task_id, t, start_location, goal_location)
                 S.update_service_time(task_id, t)
                 
@@ -102,9 +100,9 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                     # Initialize durations for new task 
                     S.add_actual_duration(new_task_id)
                     S.add_actual_pickup_duration(new_task_id)
-                    
-                    estimated_to_pickup_path = dc.distance(map_name, agent.state, agent.task_sequence[0][1])
-                    estimated_task_path = dc.distance(map_name, agent.task_sequence[0][1], agent.task_sequence[0][2])
+
+                    estimated_to_pickup_path = G.get_distance(agent.state, agent.task_sequence[0][1])
+                    estimated_task_path = G.get_distance(agent.task_sequence[0][1], agent.task_sequence[0][2])
 
                     S.add_estimated_pickup_duration(new_task_id, estimated_to_pickup_path)
                     S.add_estimated_pickup_distance(new_task_id, estimated_to_pickup_path)

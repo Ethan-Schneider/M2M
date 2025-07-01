@@ -79,6 +79,7 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
                 cost = G.get_distance(Rs.agents[m].state, start_locs[p])
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
+
             cost_tensor_agent_start[m, p] = cost
 
     return allocations, total_cost

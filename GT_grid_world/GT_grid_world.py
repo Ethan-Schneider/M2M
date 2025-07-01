@@ -19,7 +19,6 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
     last_task_id = 0
     
     global_tik = time.time()
-    
     for t in range(T):
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -37,7 +36,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                     N = 0
                 # Generate new tasks
                 tik = time.time()
-                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
+
+                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, Rs, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -52,6 +52,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             total += len(agent.task_sequence)
             
         if total < max_task_number:
+            print(f"Attempting to allocate tasks")
             Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator)
 
         tok = time.time()
@@ -87,6 +88,18 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
+        # Log the number of tasks in the system
+        S.append_tasks_in_system(len(J))
+        
+        # Log warehouse inventory state
+        S.append_warehouse_inventory_state(G.warehouse, G.get_aisle_locations())
+        
+        # Log driveway inventory state
+        S.append_driveway_inventory_state(G.driveway)
+        
+        # Log SKU inventory state
+        S.append_sku_inventory_state(G.warehouse, G.driveway, G.warehouse.get_all_skus().__len__())
+        
         # Record agent statuses and goal locations for this timestep
         S.add_agent_statuses_and_goals(Rs)
         
@@ -96,6 +109,15 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         
         if (global_tok - global_tik) >= time_limit:
             return
+
+        # If all agents have no tasks, break
+        if all(len(agent.task_sequence) == 0 for agent in Rs.agents):
+            print(f"Number of tasks: {len(J)}")
+            print(f"Number of warehouse full locations: {len(G.warehouse.get_full_locations())}")
+            print(f"Number of driveway full locations: {len(G.driveway.get_full_locations())}")
+            print(f"Number of warehouse empty locations: {len(G.warehouse.get_empty_locations())}")
+            print(f"Number of driveway empty locations: {len(G.driveway.get_empty_locations())}")
+            break
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 

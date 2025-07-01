@@ -56,6 +56,11 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
     goal_locs = sorted(list(all_goal_locs))
     P = len(start_locs)
     Q = len(goal_locs)
+
+    # print(f"Number of start locations: {P}")
+    # print(f"Number of goal locations: {Q}")
+    # print(f"Number of tasks: {N}")
+    # print(f"Number of agents: {M}")
     
     # Create location to index mappings
     start_loc_to_idx = {loc: idx for idx, loc in enumerate(start_locs)}
@@ -68,6 +73,13 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
             allocated_locs.add(task[1])
             allocated_locs.add(task[2])
 
+    # Get all locations occupied by items in warehouse and driveway
+    warehouse_occupied_locs = set(G.warehouse.get_full_locations())
+    driveway_occupied_locs = set(G.driveway.get_full_locations())
+
+    # Combine all unusable locations
+    unusable_locs = allocated_locs | warehouse_occupied_locs | driveway_occupied_locs
+
     # 1. Build (P, Q) distance matrix between all start and goal locations
     if method == "manhattan":
         start_goal_dist = np.array([[manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
@@ -76,7 +88,7 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
     else:
         raise ValueError(f"Invalid cost calculation method: {method}")
 
-    # 2. Build (N, P) task-start membership matrix (1 if task n has start_loc p and p not allocated, else 0)
+    # 2. Build (N, P) task-start membership matrix (1 if task n has start_loc p and p not unusable, else 0)
     task_start_mask = np.zeros((N, P), dtype=np.float32)
     for n, task in enumerate(unallocated_tasks):
         for s in task[1]:
@@ -84,11 +96,11 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
                 i = start_loc_to_idx[s]
                 task_start_mask[n, i] = 1.0
 
-    # 3. Build (N, Q) task-goal membership matrix (1 if task n has goal_loc q and q not allocated, else 0)
+    # 3. Build (N, Q) task-goal membership matrix (1 if task n has goal_loc q and q not unusable, else 0)
     task_goal_mask = np.zeros((N, Q), dtype=np.float32)
     for n, task in enumerate(unallocated_tasks):
         for g in task[2]:
-            if g not in allocated_locs:
+            if g not in unusable_locs:
                 j = goal_loc_to_idx[g]
                 task_goal_mask[n, j] = 1.0
 
@@ -108,6 +120,8 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
                 cost = G.get_distance(agent_pos, s)
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
+            # print(f"Cost: {cost} of agent {m} state {Rs.agents[m].state} to location {s}")
             agent_start_cost_tensor[m, i] = cost
-
+    # print(f"Agent start cost tensor: {agent_start_cost_tensor}")
+    # print(f"Created tensors")
     return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id
