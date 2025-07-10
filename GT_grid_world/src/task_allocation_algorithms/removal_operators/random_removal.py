@@ -28,6 +28,8 @@ def random_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]]
     selected_indices = np.random.choice(len(allocations), num_to_remove, replace=False)
     selected_allocations = [allocations[i] for i in selected_indices]
 
+    # print(f"Selected allocations: {selected_allocations}")
+
     # Track all allocations that need to be removed
     all_removed_allocations = []
     

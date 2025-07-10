@@ -12,7 +12,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 99999,
             cost_calculation_method : str = "manhattan",
-            removal_operator : str = "worst", repair_operator : str = "greedy"):
+            removal_operator : str = "worst", repair_operator : str = "greedy",
+            acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -53,7 +54,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             
         if total < max_task_number:
             print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -109,15 +110,6 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         
         if (global_tok - global_tik) >= time_limit:
             return
-
-        # If all agents have no tasks, break
-        if all(len(agent.task_sequence) == 0 for agent in Rs.agents):
-            print(f"Number of tasks: {len(J)}")
-            print(f"Number of warehouse full locations: {len(G.warehouse.get_full_locations())}")
-            print(f"Number of driveway full locations: {len(G.driveway.get_full_locations())}")
-            print(f"Number of warehouse empty locations: {len(G.warehouse.get_empty_locations())}")
-            print(f"Number of driveway empty locations: {len(G.driveway.get_empty_locations())}")
-            break
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
@@ -128,7 +120,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          output_graphs: bool = False, num_skus: int = 10,
          weight_init_method: str = "random",
          cost_calculation_method: str = "manhattan",
-         removal_operator: str = "worst", repair_operator: str = "greedy") -> None:
+         removal_operator: str = "worst", repair_operator: str = "greedy",
+         acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -153,6 +146,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         cost_calculation_method: Method for calculating cost ("manhattan" or "shortest_path")
         removal_operator: Removal operator for task allocation
         repair_operator: Repair operator for task allocation
+        acceptance_function: Acceptance function for LNS (greedy or simulated_annealing)
+        T_0: Initial temperature for simulated annealing
+        alpha: Temperature decay rate for simulated annealing
     """
     np.random.seed(seed)
     
@@ -181,7 +177,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         num_skus=num_skus,
         weight_init_method=weight_init_method,
         removal_operator=removal_operator,
-        repair_operator=repair_operator
+        repair_operator=repair_operator,
+        acceptance_function=acceptance_function,
+        T_0=T_0,
+        alpha=alpha
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -206,7 +205,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             time_limit=time_limit,
             cost_calculation_method=cost_calculation_method,
             removal_operator=removal_operator,
-            repair_operator=repair_operator)
+            repair_operator=repair_operator,
+            acceptance_function=acceptance_function,
+            T_0=T_0,
+            alpha=alpha)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -269,6 +271,9 @@ if __name__=="__main__":
     parser.add_argument('--repair-operator', type=str, default='greedy',
                        choices=['greedy', 'random', 'worst', 'fast_SCF'],
                        help='Repair operator for task allocation')
+    parser.add_argument('--acceptance-function', type=str, default='greedy', choices=['greedy', 'simulated_annealing'], help='Acceptance function for LNS (greedy or simulated_annealing)')
+    parser.add_argument('--T-0', type=float, default=1.0, help='Initial temperature for simulated annealing')
+    parser.add_argument('--alpha', type=float, default=0.99, help='Temperature decay rate for simulated annealing')
     args = parser.parse_args()
     
     main(
@@ -291,5 +296,8 @@ if __name__=="__main__":
         weight_init_method=args.weight_init_method,
         cost_calculation_method=args.cost_calculation_method,
         removal_operator=args.removal_operator,
-        repair_operator=args.repair_operator
+        repair_operator=args.repair_operator,
+        acceptance_function=args.acceptance_function,
+        T_0=args.T_0,
+        alpha=args.alpha
     )

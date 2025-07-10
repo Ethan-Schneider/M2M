@@ -9,23 +9,26 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(1)
+seeds=(19 20)
 num_robots=(40)
-time_horizons=(1)
-max_tasks=(40)
-frequencies=(0.0125)
-inbound_outbound_ratio=(1.0)
-num_skus=(50)
-initial_inventory=(25.0)
+time_horizons=(7200)
+max_tasks=(120)
+frequencies=(0.25)
+inbound_outbound_ratio=(0.85)
+num_skus=(30)
+initial_inventory=(20.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
-initial_task_assign_strategy="fast_SCF"
+initial_task_assign_strategy="fast_greedy"
 improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
-map="data/maps/symbotic_small"
+map="data/maps/symbotic_medium"
 removal_operator="shaw"
-repair_operator="fast_SCF"
+repair_operator="greedy"
+acceptance_function="simulated_annealing"
+T_0=1.0
+alpha=0.99
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -50,6 +53,9 @@ for seed in "${seeds[@]}"; do
                         echo "  Map: $map"
                         echo "  Removal Operator: $removal_operator"
                         echo "  Repair Operator: $repair_operator"
+                        echo "  Acceptance Function: $acceptance_function"
+                        echo "  T_0: $T_0"
+                        echo "  Alpha: $alpha"
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -70,7 +76,10 @@ for seed in "${seeds[@]}"; do
                             --map "$map" \
                             --cost-calculation-method "$cost_calculation_method" \
                             --removal-operator "$removal_operator" \
-                            --repair-operator "$repair_operator"
+                            --repair-operator "$repair_operator" \
+                            --acceptance-function "$acceptance_function" \
+                            --T-0 "$T_0" \
+                            --alpha "$alpha"
                         
                         # Optional: Add a small delay between runs
                         sleep 1

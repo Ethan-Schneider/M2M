@@ -33,7 +33,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         - Total cost of all allocations
     """
     total_cost = 0.0
-    allocations = []
+    allocations = temp_allocations.copy()
     M = len(Rs.agents)
     N = len(idx_to_task_id)
     P = len(start_locs)

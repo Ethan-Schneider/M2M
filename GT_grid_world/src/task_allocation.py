@@ -16,7 +16,7 @@ from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
 from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
 from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, removal_operator : str = "worst", repair_operator : str = "greedy") -> AgentLoader:
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, removal_operator : str = "worst", repair_operator : str = "greedy", acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -31,13 +31,16 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
         cost_calculation_method (str): Method for calculating cost ("manhattan" or "shortest_path")
         removal_operator (str): Removal operator for LNS ("random" or "worst")
         repair_operator (str): Repair operator for LNS ("greedy")
+        acceptance_function (str): Acceptance function for py_lns
+        T_0 (float): Initial temperature for py_lns
+        alpha (float): Cooling rate for py_lns
 
     Returns:
         AgentLoader: Returns updated AgentLoader object
     """
 
     if improvement_task_assignment_strategy == "py_lns":
-        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator)
+        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha)
     elif improvement_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "c_p_lns":

@@ -25,6 +25,17 @@ def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str,
 
     sequences = []
     w = 1.2
+
+    # If two agents have the same goal location, set the goal location of the agnet with no task to its home location
+    # Check if any goal location is found more than once
+    if len(goal_locations) != len(set(goal_locations)):
+        for i, agent in enumerate(Rs.agents):
+            if goal_locations.count(goal_locations[i]) > 1 and agent.status == 0:
+                goal_locations[i] = agent.home
+
+    print(f"Goal locations: {goal_locations}")
+    # print(f"Number of goal locations: {len(goal_locations)}")
+    # print(f"Number of unique goal locations: {len(set(goal_locations))}")
     
     latch = False
     while not sequences:

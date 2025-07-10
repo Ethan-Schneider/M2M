@@ -11,7 +11,8 @@ class Stats:
                  initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
-                 num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None) -> None:
+                 num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
+                 acceptance_function: str = None, T_0: float = None, alpha: float = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -33,6 +34,9 @@ class Stats:
         self.__cost_calculation_method = cost_calculation_method
         self.__removal_operator = removal_operator
         self.__repair_operator = repair_operator
+        self.__acceptance_function = acceptance_function
+        self.__T_0 = T_0
+        self.__alpha = alpha
 
         self.__output_file = output_file
         
@@ -130,6 +134,8 @@ class Stats:
         self.__driveway_full_locations_per_timestep = []
         self.__warehouse_sku_counts_per_timestep = []
         self.__driveway_sku_counts_per_timestep = []
+        
+        self.__py_lns_logs = []
         
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
@@ -599,6 +605,9 @@ class Stats:
             "cost_calculation_method": self.__cost_calculation_method,
             "removal_operator": self.__removal_operator,
             "repair_operator": self.__repair_operator,
+            "acceptance_function": self.__acceptance_function,
+            "T_0": self.__T_0,
+            "alpha": self.__alpha,
             
             # Simulation results
             "timesteps_completed": self.__T,
@@ -644,7 +653,8 @@ class Stats:
             "warehouse_col_counts_per_timestep": self.__warehouse_col_counts_per_timestep,
             "driveway_full_locations_per_timestep": self.__driveway_full_locations_per_timestep,
             "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
-            "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep
+            "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
+            "py_lns_logs": self.__py_lns_logs
         }
         
         with open(self.__output_file, "w") as f:
@@ -791,3 +801,6 @@ class Stats:
         driveway_counts = [len(driveway.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
         self.__warehouse_sku_counts_per_timestep.append(warehouse_counts)
         self.__driveway_sku_counts_per_timestep.append(driveway_counts)
+
+    def append_py_lns_log(self, log: dict):
+        self.__py_lns_logs.append(log)

@@ -1,4 +1,6 @@
 import numpy as np
+import math
+import random
 import time
 from typing import Set, Tuple, List, Dict
 from ..utils import manhattan_distance
@@ -20,7 +22,8 @@ class LNS:
     def __init__(self, S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
                  initial_task_assignment_strategy : str, time_limit: float = 1.0,
                  removal_size: int = 3, cost_calculation_method: str = "manhattan",
-                 removal_operator: str = "worst", repair_operator: str = "greedy"):
+                 removal_operator: str = "worst", repair_operator: str = "greedy",
+                 acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99):
         """
         Initialize Large Neighborhood Search algorithm.
         
@@ -35,23 +38,38 @@ class LNS:
             cost_calculation_method: Method to use for cost calculation ("manhattan" or "shortest_path")
             removal_operator: Removal operator to use ("random" or "worst" or "shaw")
             repair_operator: Repair operator to use ("greedy" or "fast_SCF")
+            acceptance_function: Acceptance function to use ("greedy" or "simulated_annealing" etc.)
+            T_0: Initial temperature for simulated annealing
+            alpha: Cooling factor for simulated annealing
         """
         self.S = S
         self.G = G
         self.Rs = self._copy_solution(Rs)
+
+        # print(f"Initial task assignment:")
+        # for agent in self.Rs.agents:
+        #     print(f"Agent {agent.id}: {agent.task_sequence}")
 
         # Remove all but the first task in each agent's task sequence
         for agent in self.Rs.agents:
             while len(agent.task_sequence) > 1:
                 agent.task_sequence.pop(-1)
 
+        # print(f"After removing all but the first task in each agent's task sequence:")
+        # for agent in self.Rs.agents:
+        #     print(f"Agent {agent.id}: {agent.task_sequence}")
+
         self.J = J
+        print(f"Number of tasks: {len(self.J)}")
         self.initial_task_assignment_strategy = initial_task_assignment_strategy
         self.time_limit = time_limit
         self.removal_size = removal_size
         self.cost_calculation_method = cost_calculation_method
         self.removal_operator = removal_operator
         self.repair_operator = repair_operator
+        self.acceptance_function = acceptance_function
+        self.T_0 = T_0
+        self.alpha = alpha
         
         # Store best solution found
         self.best_solution = None
@@ -67,7 +85,7 @@ class LNS:
             self.J, self.Rs, self.G, self.cost_calculation_method
         )
         
-    def run(self) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+    def run(self, t: int = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
         """
         Run the LNS algorithm.
         
@@ -88,7 +106,7 @@ class LNS:
 
         # Initial task assignment
         if self.initial_task_assignment_strategy == "fast_greedy":
-            current_solution, allocations, __ = fast_greedy_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask)
+            current_solution, allocations, __ = fast_greedy_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         elif self.initial_task_assignment_strategy == "fast_FCF":
             current_solution, allocations, __ = fast_FCF_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         elif self.initial_task_assignment_strategy == "fast_SCF":
@@ -97,29 +115,52 @@ class LNS:
             print("ERROR: Unknown initial task assignment strategy " + self.initial_task_assignment_strategy + ", please choose another one.")
             return self.Rs, [], float('inf')
         
-        print(f"Initial cost sum: {sum(self.cost_lookup.values())}")
-        print(f"Initial agent task sequences:")
-        for agent in current_solution.agents:
-            print(f"Agent {agent.id}: {agent.task_sequence}")
+        # print(f"Initial cost sum: {sum(self.cost_lookup.values())}")
+        # print(f"Initial Algorithm agent task sequences:")
+        # for agent in current_solution.agents:
+        #     print(f"Agent {agent.id}: {agent.task_sequence}")
         
         inital_task_assignment_time += time.time() - inital_task_assignment_tik
 
-        # Initialize best solution and allocations
+        # Initialize best and current solution and allocations
         self.best_solution = self._copy_solution(current_solution)
-
-        cost_tik = time.time()
         self.best_cost = self._calculate_total_cost(self.cost_lookup)
-        cost_computation_time += time.time() - cost_tik
-
         self.initial_cost = self.best_cost
         best_allocations = allocations.copy()
+        best_cost_lookup = self.cost_lookup.copy()
         
+        current_solution = self._copy_solution(current_solution)
+        current_allocations = allocations.copy()
+        current_cost_lookup = self.cost_lookup.copy()
+        current_cost = self.best_cost
+        
+        # LNS logging
+        lns_log = {
+            "timestep": t,
+            "initial_cost": self.initial_cost,
+            "acceptance_function": self.acceptance_function,
+            "T_0": self.T_0,
+            "alpha": self.alpha,
+            "improvements": [
+                {
+                    "iteration": 0,
+                    "wall_time": 0.0,
+                    "cost": self.initial_cost
+                }
+            ],
+            "final_best_cost": None,
+            "total_iterations": None
+        }
+        
+        T = self.T_0
         iteration = 0
         while time.time() - start_time < self.time_limit:
-            # Create a copy of the current best solution to modify
-            temp_solution = self._copy_solution(self.best_solution)
-            temp_cost_lookup = self.cost_lookup.copy()
-            temp_allocations = best_allocations.copy()
+            # Create a copy of the current solution to modify
+            temp_solution = self._copy_solution(current_solution)
+            temp_cost_lookup = current_cost_lookup.copy()
+            temp_allocations = current_allocations.copy()
+
+            self._update_cost_tensor(temp_solution)
 
             # Remove allocations
             removal_tik = time.time()
@@ -141,7 +182,7 @@ class LNS:
             update_tik = time.time()
             self._update_cost_tensor(temp_solution)
             update_cost_tensor_time += time.time() - update_tik
-
+            
             # Repair solution
             tik = time.time()
             if self.repair_operator == "greedy":
@@ -168,13 +209,39 @@ class LNS:
             new_cost = self._calculate_total_cost(temp_cost_lookup)
             cost_computation_time += time.time() - cost_tik
             
-            # Update if better
+            # Acceptance function
+            if self.acceptance_function == "greedy":
+                if new_cost < current_cost:
+                    current_solution = self._copy_solution(new_solution)
+                    current_allocations = temp_allocations.copy()
+                    current_cost_lookup = temp_cost_lookup.copy()
+                    current_cost = new_cost
+            elif self.acceptance_function == "simulated_annealing":
+                if new_cost < current_cost:
+                    current_solution = self._copy_solution(new_solution)
+                    current_allocations = temp_allocations.copy()
+                    current_cost_lookup = temp_cost_lookup.copy()
+                    current_cost = new_cost
+                else:
+                    prob = math.exp(-(new_cost - current_cost) / T) if T > 0 else 0
+                    if random.random() < prob:
+                        current_solution = self._copy_solution(new_solution)
+                        current_allocations = temp_allocations.copy()
+                        current_cost_lookup = temp_cost_lookup.copy()
+                        current_cost = new_cost
+                T = self.alpha * T
+
+            # Update best if better
             if new_cost < self.best_cost:
-                print(f"New best cost found: {new_cost}")
-                self.best_solution = new_solution
+                self.best_solution = self._copy_solution(new_solution)
                 self.best_cost = new_cost
                 best_allocations = temp_allocations.copy()
-                self.cost_lookup = temp_cost_lookup.copy()
+                best_cost_lookup = temp_cost_lookup.copy()
+                lns_log["improvements"].append({
+                    "iteration": iteration + 1,
+                    "wall_time": np.abs(time.time() - start_time),
+                    "cost": new_cost
+                })
             
             iteration += 1
             
@@ -198,15 +265,20 @@ class LNS:
             if len(agent.task_sequence) == 0:
                 agent.status = 0 # Set agent status to idle
         
+        lns_log["final_best_cost"] = self.best_cost
+        lns_log["total_iterations"] = iteration
+        self.S.append_py_lns_log(lns_log)
+
         return self.best_solution, best_allocations, self.best_cost
     
     def _copy_solution(self, solution: AgentLoader) -> AgentLoader:
         """Create a deep copy of the current solution."""
         new_solution = AgentLoader([])
         for agent in solution.agents:
-            new_agent = agent.__class__(agent.id, agent.state, home=agent.home)
-            new_agent.task_sequence = agent.task_sequence.copy()
+            new_agent = agent.__class__(agent.id, agent.state, task_sequence=agent.task_sequence.copy(), home=agent.home)
             new_agent.status = agent.status
+            new_agent.path_sequence = agent.path_sequence.copy()
+            new_agent.sku_id_carrying = agent.sku_id_carrying
             new_solution.agents.append(new_agent)
         return new_solution
     
@@ -240,7 +312,8 @@ class LNS:
 def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], 
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",
-                removal_operator: str = "worst", repair_operator: str = "greedy") -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                removal_operator: str = "worst", repair_operator: str = "greedy", t: int = None,
+                acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Call the LNS algorithm with given parameters.
     
@@ -269,5 +342,5 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         return Rs, [], 0.0
     
     lns = LNS(S, G, Rs, J, initial_task_assignment_strategy, time_limit, removal_size, 
-              cost_calculation_method, removal_operator, repair_operator)
-    return lns.run()
+              cost_calculation_method, removal_operator, repair_operator, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha)
+    return lns.run(t=t)
