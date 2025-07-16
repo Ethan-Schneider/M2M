@@ -13,7 +13,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             path_planning_strategy : str = "ecbs", time_limit : int = 99999,
             cost_calculation_method : str = "manhattan",
             removal_operator : str = "worst", repair_operator : str = "greedy",
-            acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99):
+            acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
+            deadline_generation_method: str = "constant"):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -38,7 +39,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                 # Generate new tasks
                 tik = time.time()
 
-                J_new, last_task_id = case_request_generator.CRG(S, t, J, G, Rs, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy)
+                J_new, last_task_id, outbound_tasks, inbound_tasks = case_request_generator.CRG(S, t, J, G, Rs, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy, deadline_generation_method)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -66,6 +67,27 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                 if task_id in task_ids:
                     raise ValueError(f"Task {task_id} is allocated to multiple agents.")
                 task_ids.add(task_id)
+
+        # # Count the number of outbound and inbound tasks allocated to each agent
+        # outbound_tasks_allocated = 0
+        # inbound_tasks_allocated = 0
+        # initial_outbound_tasks = 0
+        # initial_inbound_tasks = 0
+        # for agent in Rs.agents:
+        #     for n, task in enumerate(agent.task_sequence):
+        #         task_id = task[0]
+        #         if task_id in outbound_tasks:
+        #             outbound_tasks_allocated += 1
+        #         elif task_id in inbound_tasks:
+        #             inbound_tasks_allocated += 1
+        #         if task_id in outbound_tasks and n == 0:
+        #             initial_outbound_tasks += 1
+        #         elif task_id in inbound_tasks and n == 0:
+        #             initial_inbound_tasks += 1
+        # print(f"Outbound tasks allocated: {outbound_tasks_allocated}")
+        # print(f"Inbound tasks allocated: {inbound_tasks_allocated}")
+        # print(f"Initial outbound tasks: {initial_outbound_tasks}")
+        # print(f"Initial inbound tasks: {initial_inbound_tasks}")
         
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
@@ -121,7 +143,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          weight_init_method: str = "random",
          cost_calculation_method: str = "manhattan",
          removal_operator: str = "worst", repair_operator: str = "greedy",
-         acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99) -> None:
+         acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
+         deadline_generation_method: str = "constant") -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -180,7 +203,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         repair_operator=repair_operator,
         acceptance_function=acceptance_function,
         T_0=T_0,
-        alpha=alpha
+        alpha=alpha,
+        deadline_generation_method=deadline_generation_method
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -208,13 +232,14 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             repair_operator=repair_operator,
             acceptance_function=acceptance_function,
             T_0=T_0,
-            alpha=alpha)
+            alpha=alpha,
+            deadline_generation_method=deadline_generation_method)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
     S.save_data()
     
-    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_full"
+    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{seed}"
     if output_graphs:
         S.output_graphs(folder_name)
     
@@ -274,6 +299,8 @@ if __name__=="__main__":
     parser.add_argument('--acceptance-function', type=str, default='greedy', choices=['greedy', 'simulated_annealing'], help='Acceptance function for LNS (greedy or simulated_annealing)')
     parser.add_argument('--T-0', type=float, default=1.0, help='Initial temperature for simulated annealing')
     parser.add_argument('--alpha', type=float, default=0.99, help='Temperature decay rate for simulated annealing')
+    parser.add_argument('--deadline-generation-method', type=str, default='constant',
+                       help='Method for generating task deadlines (e.g., constant, normal, bimodal, etc.)', choices=['constant', 'normal', 'bimodal', 'none'])
     args = parser.parse_args()
     
     main(
@@ -299,5 +326,6 @@ if __name__=="__main__":
         repair_operator=args.repair_operator,
         acceptance_function=args.acceptance_function,
         T_0=args.T_0,
-        alpha=args.alpha
+        alpha=args.alpha,
+        deadline_generation_method=args.deadline_generation_method
     )

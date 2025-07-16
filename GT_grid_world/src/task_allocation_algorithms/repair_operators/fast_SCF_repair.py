@@ -92,7 +92,7 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
         S.add_actual_pickup_duration(idx_to_task_id[int(n)])
 
         # Update agent's task sequence
-        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
+        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q], J[idx_to_task_id[int(n)]][3]))
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
 

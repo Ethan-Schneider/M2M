@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
@@ -10,7 +10,7 @@ import time
 def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
                  start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]],
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
-                 method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 method: str = "manhattan", J: Set[Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -50,7 +50,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         if np.all(task_start_mask_ == 0) or np.all(task_goal_mask_ == 0):
             break
 
-        min_cost = np.inf
+        min_cost = -np.inf
         best = None
         # For each task, find the best (m, n, p, q)
         for n in range(N):
@@ -63,13 +63,13 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
             total_costs = agent_costs[:, :, None] + sg_costs[None, :, :]
-            min_idx = np.argmin(total_costs)
+            min_idx = np.argmax(total_costs)
             min_cost_n = total_costs.flat[min_idx]
-            if min_cost_n < min_cost:
+            if min_cost_n > min_cost:
                 min_cost = min_cost_n
                 m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
                 best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
-        if best is None or min_cost == np.inf:
+        if best is None or min_cost == -np.inf:
             break
         m, n, p, q = best
         allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
@@ -86,7 +86,8 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         S.add_actual_pickup_duration(idx_to_task_id[int(n)])
 
         # Update agent's task sequence
-        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
+        deadline = next(task[3] for task in J if task[0] == idx_to_task_id[int(n)])
+        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q], deadline))
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
 
@@ -99,9 +100,9 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         # Update costs for agent-start allocation for agent m
         for p_ in range(P):
             if method == "manhattan":
-                cost = manhattan_distance(goal_locs[q], start_locs[p_])
+                cost = -1.0 * manhattan_distance(goal_locs[q], start_locs[p_])
             elif method == "shortest_path":
-                cost = G.get_distance(goal_locs[q], start_locs[p_])
+                cost = -1.0 * G.get_distance(goal_locs[q], start_locs[p_])
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost

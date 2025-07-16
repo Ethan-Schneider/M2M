@@ -6,7 +6,7 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_elements import construct_cost_elements, manhattan_distance
 
-def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan",
+def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
                          agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
@@ -20,6 +20,7 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
         start_locs: List of start locations
         goal_locs: List of goal locations
         idx_to_task_id: Dict mapping task indices to task IDs
+        J: Set of tasks
         method: Cost calculation method
         agent_start_cost_tensor: (M, P) array
         start_goal_dist: (P, Q) array
@@ -65,7 +66,7 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
                 break
             
             argmin_tik = time.time()
-            min_cost = np.inf
+            min_cost = -np.inf
 
             # Find the task with the minimum cost for this agent
             best = None
@@ -81,14 +82,14 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
                 total_costs = agent_start_cost_tensor[m, valid_p][:, None] + start_goal_dist[np.ix_(valid_p, valid_q)]  
                 # print(f"Total costs size: {total_costs.shape}")                
 
-                min_idx = np.argmin(total_costs)
+                min_idx = np.argmax(total_costs)
                 min_cost_n = total_costs.flat[min_idx]
-                if min_cost_n < min_cost:
+                if min_cost_n > min_cost:
                     min_cost = min_cost_n
                     p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
                     best = (n, valid_p[p_idx], valid_q[q_idx])
             total_argmin_time += time.time() - argmin_tik
-            if best is None or min_cost == np.inf:
+            if best is None or min_cost == -np.inf:
                 break
 
             # Add the task to the allocation
@@ -110,7 +111,8 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
             S.add_actual_pickup_duration(idx_to_task_id[int(n)])
 
             # Update agent's task sequence
-            Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
+            deadline = next(task[3] for task in J if task[0] == idx_to_task_id[int(n)])
+            Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q], deadline))
             if Rs.agents[m].status == 0:
                 Rs.agents[m].status = 1
             update_tik = time.time()
@@ -125,9 +127,9 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
             # 4. Update costs for agent-start allocation for agent m
             for p in range(P):
                 if method == "manhattan":
-                    cost = manhattan_distance(goal_locs[q], start_locs[p])
+                    cost = -1.0 * manhattan_distance(goal_locs[q], start_locs[p])
                 elif method == "shortest_path":
-                    cost = G.get_distance(goal_locs[q], start_locs[p])
+                    cost = -1.0 * G.get_distance(goal_locs[q], start_locs[p])
                 else:
                     raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p] = cost
@@ -139,11 +141,19 @@ def fast_FCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
     return Rs, allocations, total_cost
 
 
-def fast_FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = "manhattan") -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+def fast_FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], current_time: int, method : str = "manhattan") -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm (batched greedy version).
     Allocates one task per agent per batch, repeating until all tasks are allocated.
     Ensures that no location is used as a start or goal more than once in the entire allocation process.
+    
+    Args:
+        S: Statistics object
+        G: Graph object
+        Rs: AgentLoader containing all agents
+        J: Set of tasks
+        current_time: Current timestep for deadline calculations
+        method: Cost calculation method
     """
     tik = time.time()
     num_allocated_tasks = 0
@@ -161,13 +171,13 @@ def fast_FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : s
     total_allocation_time = 0.0
 
     construct_tik = time.time()
-    agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id = construct_cost_elements(J, Rs, G, method)
+    agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id = construct_cost_elements(J, Rs, G, current_time, method)
     total_construct_time += time.time() - construct_tik
 
     allocation_tik = time.time()
     # Perform greedy allocation
     Rs, allocations, cost = fast_FCF_allocation(
-        S, G, Rs, start_locs, goal_locs, idx_to_task_id, method,
+        S, G, Rs, start_locs, goal_locs, idx_to_task_id, J, method,
         agent_start_cost_tensor=agent_start_cost_tensor,
         start_goal_dist=start_goal_dist,
         task_start_mask=task_start_mask,

@@ -5,7 +5,7 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from .construct_cost_tensor import construct_cost_tensor, manhattan_distance
 
-def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
+def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_agent_start: np.ndarray, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan") -> Tuple[List[Tuple[int, int, int, int]], float]:
     """
     Perform greedy allocation of tasks to agents based on minimum cost elements in the tensor.
     
@@ -18,6 +18,7 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
         start_locs: List of start locations
         goal_locs: List of goal locations
         idx_to_task_id: Dictionary mapping task indices to task IDs
+        J: Set of tasks
         method: Method for calculating costs (either "manhattan" or "shortest_path")
     Returns:
         Tuple containing:
@@ -46,8 +47,9 @@ def FCF_allocation(S : Stats, G : Graph, cost_tensor: np.ndarray, cost_tensor_ag
 
         total_cost += C[m, p, q]
 
-        # Update agent's task sequence with (task_id, start_location_tuple, goal_location_tuple)
-        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
+        # Update agent's task sequence with (task_id, start_location_tuple, goal_location_tuple, deadline)
+        deadline = next(task[3] for task in J if task[0] == idx_to_task_id[int(n)])
+        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q], deadline))
 
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
@@ -111,6 +113,6 @@ def FCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], method : str = 
     # Construct cost tensor
     cost_tensor, cost_tensor_agent_start, start_locs, goal_locs, idx_to_task_id = construct_cost_tensor(J, Rs, G, method)
 
-    allocations, total_cost = FCF_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, method)
+    allocations, total_cost = FCF_allocation(S, G, cost_tensor, cost_tensor_agent_start, Rs, start_locs, goal_locs, idx_to_task_id, J, method)
     
     return Rs, allocations, total_cost

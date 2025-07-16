@@ -68,11 +68,11 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
     elif initial_task_assignment_strategy == "randomized_max_regret_FC":
         return randomized_max_regret_FC_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "fast_FCF":
-        return fast_FCF_call(S, G, Rs, J, method=cost_calculation_method)
+        return fast_FCF_call(S, G, Rs, J, t, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "fast_SCF":
-        return fast_SCF_call(S, G, Rs, J, method=cost_calculation_method)
+        return fast_SCF_call(S, G, Rs, J, t, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "fast_greedy":
-        return fast_greedy_call(S, G, Rs, J, method=cost_calculation_method)
+        return fast_greedy_call(S, G, Rs, J, t, method=cost_calculation_method)
     else:
         print("ERROR: Unknown task assignment strategy " + initial_task_assignment_strategy + ", please choose another one.")
         return Rs

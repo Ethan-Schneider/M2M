@@ -48,6 +48,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 task_id = task[0]
                 start_location = task[1]
                 goal_location = task[2]
+                deadline = task[3]
                 # Outbound: picking up from warehouse
                 if start_location in G.warehouse.get_full_locations():
                     try:
@@ -73,6 +74,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 task_id = task[0]
                 start_location = task[1]
                 goal_location = task[2]
+                deadline = task[3]
 
                 if goal_location in G.warehouse.get_empty_locations():
                     G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)

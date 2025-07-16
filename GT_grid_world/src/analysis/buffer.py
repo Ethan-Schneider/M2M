@@ -28,6 +28,7 @@ class Buffer(object):
             "task" : task_id,
             "task start location" : get_task_start_location(J, task_id),
             "task goal location" : get_task_goal_location(J, task_id),
+            "deadline" : next((task[3] for task in J if task[0] == task_id), None),
             "estimated task duration" : S.get_estimated_duration(task_id),
             "estimated to-pickup duration" : S.get_estimated_pickup_duration(task_id),
             "estimated total duration" : S.get_estimated_duration(task_id) + S.get_estimated_pickup_duration(task_id),
@@ -57,7 +58,8 @@ class Buffer(object):
         for agent in Rs.agents:
             temp_agent_task_sequence = []
             temp_agent_task_sequence_cost = []
-            for seq_num, task_id in enumerate(agent.task_sequence):
+            for seq_num, task in enumerate(agent.task_sequence):
+                task_id = task[0]
                 if seq_num == 0:
                     temp_agent_task_sequence.append(task_id)
                     cost = dc.distance(map_name, agent.state, get_task_start_location(J, task_id)) + dc.distance(map_name, get_task_start_location(J, task_id), get_task_goal_location(J, task_id))

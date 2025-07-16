@@ -100,8 +100,8 @@ def randomized_max_regret_FC_allocation(S : Stats, G : Graph, cost_tensor: np.nd
         S.add_actual_duration(idx_to_task_id[int(n)])
         S.add_actual_pickup_duration(idx_to_task_id[int(n)])
 
-        # Update agent's task sequence with (task_id, start_location_tuple, goal_location_tuple)
-        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q]))
+        # Update agent's task sequence with (task_id, start_location_tuple, goal_location_tuple, deadline)
+        Rs.agents[m].task_sequence.append((idx_to_task_id[int(n)], start_locs[p], goal_locs[q], J[idx_to_task_id[int(n)]][3]))
 
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1

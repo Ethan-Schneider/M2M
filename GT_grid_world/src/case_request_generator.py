@@ -9,12 +9,13 @@ from .analysis.statistics import Stats
     
 def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
         last_task_id: int, max_task_number: int, inventory: Inventory,
-        strategy: str = "uninformed_uniform") -> Tuple[Set[Tuple], int]:
+        strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant") -> Tuple[Set[Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
-    Each task is defined as (task_id, S_n, D_n) where:
+    Each task is defined as (task_id, S_n, D_n, deadline) where:
     - S_n is the frozenset of possible start locations
     - D_n is the frozenset of possible destination locations
+    - deadline is an integer (time by which the task should be completed)
     
     Args:
         S: Statistics object for tracking metrics
@@ -27,6 +28,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
         max_task_number: Maximum number of tasks allowed
         inventory: Inventory system
         strategy: Task generation strategy ("uninformed_uniform" or "informed_uniform")
+        deadline_generation_method: Method for generating deadlines ("constant" or other)
     
     Returns:
         Tuple containing:
@@ -43,6 +45,28 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
     tasks_to_generate = np.random.choice([0, 1], size=int(N), p=[outbound_probability, inbound_probability])
     J_new = set()
 
+    # Deadline generation
+    def get_deadline(current_time: int) -> int:
+        if deadline_generation_method == "constant":
+            return current_time + 30
+        elif deadline_generation_method == "normal":
+            # Normal distribution, mean 30, stddev 5
+            deadline_offset = np.random.normal(loc=30, scale=3)
+            return current_time + int(round(deadline_offset))
+        elif deadline_generation_method == "bimodal":
+            # Bimodal: 10% chance of N(20, 3), 90% chance of N(50, 3)
+            if np.random.rand() < 0.1:
+                deadline_offset = np.random.normal(loc=20, scale=3)
+            else:
+                deadline_offset = np.random.normal(loc=40, scale=3)
+            return current_time + int(round(deadline_offset))
+        elif deadline_generation_method == "none":
+            # Generate tasks with an effective deadline of inf
+            return 9999999
+        else:
+            # Default fallback
+            return current_time + 30
+
     if strategy == "uninformed_uniform":
         for task in tasks_to_generate:
             if task == 1:  # Inbound task
@@ -55,8 +79,10 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                 if not goal_locations:
                     continue
                 
-                J_new.add((last_task_id + 1, start_locations, goal_locations))
+                deadline = get_deadline(t)
+                J_new.add((last_task_id + 1, start_locations, goal_locations, deadline))
                 S.add_task_release(last_task_id + 1, t)
+                S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
                 
             elif task == 0:  # Outbound task
@@ -69,11 +95,15 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                 if not start_locations:
                     continue
                 
-                J_new.add((last_task_id + 1, start_locations, goal_locations))
+                deadline = get_deadline(t)
+                J_new.add((last_task_id + 1, start_locations, goal_locations, deadline))
                 S.add_task_release(last_task_id + 1, t)
+                S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
     
     elif strategy == "informed_uniform":
+        outbound_tasks = []
+        inbound_tasks = []
         # Get tasking weights for all SKUs
         tasking_weights = inventory.get_tasking_weights()
         total_weight = sum(tasking_weights.values())
@@ -97,9 +127,12 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                 if not available_goal_locations:
                     continue
                 
-                J_new.add((last_task_id + 1, frozenset([chosen_start_location]), frozenset(available_goal_locations)))
+                deadline = get_deadline(t)
+                J_new.add((last_task_id + 1, frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline))
                 S.add_task_release(last_task_id + 1, t)
+                S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
+                inbound_tasks.append(last_task_id)
                 
             elif task == 0:  # Outbound task
                 # Start locations are all locations containing the selected SKU (excluding already assigned locations)
@@ -114,12 +147,18 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     print(f"Number of available goal locations: {len(available_goal_locations)}")
                     continue
                 
-                J_new.add((last_task_id + 1, frozenset(available_start_locations), frozenset(available_goal_locations)))
+                deadline = get_deadline(t)
+                J_new.add((last_task_id + 1, frozenset(available_start_locations), frozenset(available_goal_locations), deadline))
                 S.add_task_release(last_task_id + 1, t)
+                S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
-    
+                outbound_tasks.append(last_task_id)
     else:
         raise ValueError(f"Unknown strategy: {strategy}. Use 'uninformed_uniform' or 'informed_uniform'")
     
-    return J_new, last_task_id
+    # print(f"Outbound tasks: {outbound_tasks}")
+    # print(f"Inbound tasks: {inbound_tasks}")
+    # print(f"Number of outbound tasks: {len(outbound_tasks)}")
+    # print(f"Number of inbound tasks: {len(inbound_tasks)}")
+    return J_new, last_task_id, outbound_tasks, inbound_tasks
     

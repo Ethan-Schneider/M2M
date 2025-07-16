@@ -12,7 +12,7 @@ class Stats:
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
-                 acceptance_function: str = None, T_0: float = None, alpha: float = None) -> None:
+                 acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -37,6 +37,7 @@ class Stats:
         self.__acceptance_function = acceptance_function
         self.__T_0 = T_0
         self.__alpha = alpha
+        self.__deadline_generation_method = deadline_generation_method
 
         self.__output_file = output_file
         
@@ -136,6 +137,10 @@ class Stats:
         self.__driveway_sku_counts_per_timestep = []
         
         self.__py_lns_logs = []
+        
+        # Deadline tracking
+        self.__task_deadlines = {}  # task_id -> deadline
+        self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
         
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
@@ -317,6 +322,12 @@ class Stats:
         self.__task_completion_timestamps[task_id] = timestep
         if start_location is not None and goal_location is not None:
             self.__completed_task_details[task_id] = (start_location, goal_location)
+        
+        # Check if task was completed after its deadline
+        if task_id in self.__task_deadlines:
+            deadline = self.__task_deadlines[task_id]
+            if timestep > deadline:
+                self.__overdue_task_completions += 1
         
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
@@ -608,6 +619,7 @@ class Stats:
             "acceptance_function": self.__acceptance_function,
             "T_0": self.__T_0,
             "alpha": self.__alpha,
+            "deadline_generation_method": self.__deadline_generation_method,
             
             # Simulation results
             "timesteps_completed": self.__T,
@@ -654,7 +666,8 @@ class Stats:
             "driveway_full_locations_per_timestep": self.__driveway_full_locations_per_timestep,
             "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
             "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
-            "py_lns_logs": self.__py_lns_logs
+            "py_lns_logs": self.__py_lns_logs,
+            "overdue_task_completions": self.__overdue_task_completions
         }
         
         with open(self.__output_file, "w") as f:
@@ -804,3 +817,28 @@ class Stats:
 
     def append_py_lns_log(self, log: dict):
         self.__py_lns_logs.append(log)
+
+    def add_task_deadline(self, task_id: int, deadline: int) -> None:
+        """Record the deadline for a task.
+        
+        Args:
+            task_id (int): The ID of the task
+            deadline (int): The deadline timestep for the task
+        """
+        self.__task_deadlines[task_id] = deadline
+    
+    def get_overdue_task_completions(self) -> int:
+        """Get the number of tasks completed after their deadline.
+        
+        Returns:
+            int: Number of overdue task completions
+        """
+        return self.__overdue_task_completions
+    
+    def get_deadline_generation_method(self) -> str:
+        """Get the deadline generation method used in the simulation.
+        
+        Returns:
+            str: The deadline generation method
+        """
+        return self.__deadline_generation_method

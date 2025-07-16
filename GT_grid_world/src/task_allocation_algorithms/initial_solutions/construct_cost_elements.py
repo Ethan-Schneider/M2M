@@ -8,21 +8,39 @@ def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     """Calculate Manhattan distance between two locations."""
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
 
-def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
+def calculate_deadline_cost(deadline: int, current_time: int) -> int:
+    """
+    Calculate deadline-based urgency cost using piecewise function.
+    
+    Args:
+        deadline: Task deadline (integer timestep)
+        current_time: Current timestep
+    
+    Returns:
+        Positive integer cost based on deadline urgency
+    """
+    time_until_deadline = deadline - current_time
+    
+    if time_until_deadline > 30:
+        # Deadline is far in the future, no urgency cost
+        return 0
+    elif time_until_deadline > 0:
+        # Deadline is approaching within 10 seconds, linear cost
+        return int(30 - time_until_deadline)  # Linear increase as deadline approaches
+    else:
+        # Deadline has passed, quadratic cost
+        overdue_time = abs(time_until_deadline)
+        return int(30 + overdue_time**2)  # Quadratic penalty for overdue tasks
+
+def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
     Compute the cost elements needed for allocation.
     Args:
         - J: Set[Tuple]
         - Rs: AgentLoader
         - G: Graph
+        - current_time: Current timestep for deadline calculations
         - method: str
-        - agent_start_cost_tensor
-        - start_goal_dist
-        - task_start_mask
-        - task_goal_mask
-        - start_locs
-        - goal_locs
-        - idx_to_task_id
     Returns:
         - agent_start_cost_tensor: (M, P)
         - start_goal_dist: (P, Q)
@@ -82,9 +100,9 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
 
     # 1. Build (P, Q) distance matrix between all start and goal locations
     if method == "manhattan":
-        start_goal_dist = np.array([[manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
+        start_goal_dist = np.array([[-1.0 * manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
     elif method == "shortest_path":
-        start_goal_dist = np.array([[G.get_distance(s, g) for g in goal_locs] for s in start_locs])
+        start_goal_dist = np.array([[-1.0 * G.get_distance(s, g) for g in goal_locs] for s in start_locs])
     else:
         raise ValueError(f"Invalid cost calculation method: {method}")
 
@@ -104,7 +122,7 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
                 j = goal_loc_to_idx[g]
                 task_goal_mask[n, j] = 1.0
 
-    # 4. Build (M, P) agent-start cost matrix
+    # 4. Build (M, P) agent-start cost matrix with deadline urgency costs
     agent_start_cost_tensor = np.full((M, P), np.inf)
     for m in range(M):
         # Determine agent's current position
@@ -114,14 +132,26 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, method : s
             agent_pos = Rs.agents[m].task_sequence[-1][2]  # goal location of most recent task
         
         for i, s in enumerate(start_locs):
+            # Base cost (negative for argmax logic)
             if method == "manhattan":
-                cost = manhattan_distance(agent_pos, s)
+                base_cost = -1.0 * manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                cost = G.get_distance(agent_pos, s)
+                base_cost = -1.0 * G.get_distance(agent_pos, s)
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
-            # print(f"Cost: {cost} of agent {m} state {Rs.agents[m].state} to location {s}")
-            agent_start_cost_tensor[m, i] = cost
+            
+            # Find tasks that can use this start location and calculate deadline urgency
+            deadline_urgency_cost = 0
+            # for n, task in enumerate(unallocated_tasks):
+            #     if s in task[1] and task_start_mask[n, i] == 1.0:
+            #         # This task can use this start location, add its deadline urgency
+            #         task_deadline = task[3]
+            #         urgency_cost = calculate_deadline_cost(task_deadline, current_time)
+            #         deadline_urgency_cost = max(deadline_urgency_cost, urgency_cost)
+            
+            # Combine base cost with deadline urgency (positive urgency cost increases the negative base cost)
+            agent_start_cost_tensor[m, i] = base_cost + 0.1*deadline_urgency_cost
+            
     # print(f"Agent start cost tensor: {agent_start_cost_tensor}")
     # print(f"Created tensors")
     return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id
