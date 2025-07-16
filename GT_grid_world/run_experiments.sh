@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(0)
+seeds=(2 3)
 num_robots=(40)
 time_horizons=(7200)
 max_tasks=(120)
@@ -20,7 +20,7 @@ initial_inventory=(20.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="py_lns"
+improvement_task_assign_strategy="none"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_medium_wide_deck"
@@ -30,6 +30,7 @@ acceptance_function="simulated_annealing"
 T_0=1.0
 alpha=0.99
 deadline_generation_method="none"
+deadline_offset=30
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -81,7 +82,8 @@ for seed in "${seeds[@]}"; do
                             --acceptance-function "$acceptance_function" \
                             --T-0 "$T_0" \
                             --alpha "$alpha" \
-                            --deadline-generation-method "$deadline_generation_method"
+                            --deadline-generation-method "$deadline_generation_method" \
+                            --deadline-offset "$deadline_offset"
                         
                         # Optional: Add a small delay between runs
                         sleep 1

@@ -9,7 +9,8 @@ from .analysis.statistics import Stats
     
 def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
         last_task_id: int, max_task_number: int, inventory: Inventory,
-        strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant") -> Tuple[Set[Tuple], int]:
+        strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant",
+        deadline_offset: float = 30) -> Tuple[Set[Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
     Each task is defined as (task_id, S_n, D_n, deadline) where:
@@ -48,17 +49,17 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
     # Deadline generation
     def get_deadline(current_time: int) -> int:
         if deadline_generation_method == "constant":
-            return current_time + 30
+            return current_time + deadline_offset
         elif deadline_generation_method == "normal":
             # Normal distribution, mean 30, stddev 5
-            deadline_offset = np.random.normal(loc=30, scale=3)
+            deadline_offset = np.random.normal(loc=deadline_offset, scale=3)
             return current_time + int(round(deadline_offset))
         elif deadline_generation_method == "bimodal":
             # Bimodal: 10% chance of N(20, 3), 90% chance of N(50, 3)
             if np.random.rand() < 0.1:
-                deadline_offset = np.random.normal(loc=20, scale=3)
+                deadline_offset = np.random.normal(loc=deadline_offset - 10, scale=3)
             else:
-                deadline_offset = np.random.normal(loc=40, scale=3)
+                deadline_offset = np.random.normal(loc=deadline_offset + 10, scale=3)
             return current_time + int(round(deadline_offset))
         elif deadline_generation_method == "none":
             # Generate tasks with an effective deadline of inf

@@ -12,7 +12,8 @@ class Stats:
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
-                 acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None) -> None:
+                 acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
+                 deadline_offset: float = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -38,7 +39,8 @@ class Stats:
         self.__T_0 = T_0
         self.__alpha = alpha
         self.__deadline_generation_method = deadline_generation_method
-
+        self.__deadline_offset = deadline_offset
+        
         self.__output_file = output_file
         
         self.__early_task_ids = []
@@ -620,7 +622,8 @@ class Stats:
             "T_0": self.__T_0,
             "alpha": self.__alpha,
             "deadline_generation_method": self.__deadline_generation_method,
-            
+            "deadline_offset": self.__deadline_offset,
+
             # Simulation results
             "timesteps_completed": self.__T,
             "total_completed_tasks": int(len(self.__completed_task_ids)),

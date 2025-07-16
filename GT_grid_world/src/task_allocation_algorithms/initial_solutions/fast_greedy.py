@@ -49,7 +49,6 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     iteration = 0
 
     while True:
-        # print(f"Iteration {iteration}")
         iteration += 1
         # If all tasks are assigned, if no start or goal locations are left, break
         if len(assigned_tasks) == N:
@@ -61,28 +60,38 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             print(f"No start or goal locations left")
             break
 
-        # Vectorized cost computation for all agents and all valid (p, q) pairs for each task
+        # Iterate over each task and find the best allocation
         argmin_tik = time.time()
         min_cost = -1 * np.inf
         best = None
 
+        # Iterate over each task
         for n in range(N):
+
+            # If the task is already assigned, skip
             if n in assigned_tasks:
                 continue
+
+            # Find all valid start and goal locations for the task
             valid_p = np.where(task_start_mask_[n] == 1)[0]
             valid_q = np.where(task_goal_mask_[n] == 1)[0]
+
+            # If there are no valid start or goal locations, skip
             if len(valid_p) == 0 or len(valid_q) == 0:
                 continue
 
+            # Mask out all invalid start and goal locations
             agent_costs = agent_start_cost_tensor[:, valid_p]
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
+
+            # Compute the total cost for all valid (p, q) pairs for the task
             total_costs = agent_costs[:, :, None] + sg_costs[None, :, :]
 
             # Find argmax of total_costs, if there are multiple max values, choose one randomly
             min_idx = np.argmax(total_costs)
             min_cost_n = total_costs.flat[min_idx]
 
-
+            # If new best cost is found, update the best allocation
             if min_cost_n > min_cost:
                 # If there are multiple min costs, choose one randomly
                 if np.sum(total_costs == min_cost_n) > 1:
@@ -99,30 +108,28 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
                         min_cost = min_cost_n
                         m_idx, p_idx, q_idx = m_idx, p_idx, q_idx
                         best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
-            
+                # If there is only one min cost, update the best allocation
                 else:
                     min_cost = min_cost_n
                     m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
                     best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
 
-            else:
-                min_cost = min_cost_n
-                m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
-                best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
-
+        # If no best task is found, break
         total_argmin_time += time.time() - argmin_tik
         if best is None or min_cost == -1 * np.inf:
             print(f"No best task found")
             break
 
-        # Add the task to the allocation
+        # Add the best task to the allocation
         m, n, p, q = best
         allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
 
+        # If cost lookup is provided, store the cost in the lookup table
         if cost_lookup is not None:
             # Store the cost in the lookup table
             cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(min_cost)
         
+        # Update the total cost
         total_cost += min_cost
         assigned_tasks.add(n)
 

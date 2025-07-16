@@ -66,9 +66,23 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             min_idx = np.argmax(total_costs)
             min_cost_n = total_costs.flat[min_idx]
             if min_cost_n > min_cost:
-                min_cost = min_cost_n
-                m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
-                best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+                if np.sum(total_costs == min_cost_n) > 1:
+                    min_locations = np.where(total_costs == min_cost_n)
+                    min_locations_list = []
+                    for i in range(len(min_locations[0])):
+                        min_locations_list.append((int(min_locations[0][i]), int(min_locations[1][i]), int(min_locations[2][i])))
+
+                    min_idx = np.random.choice(range(len(min_locations_list)), 1)[0]
+                    m_idx, p_idx, q_idx = min_locations_list[min_idx]
+                    if min_cost_n > min_cost:
+                        min_cost = min_cost_n
+                        m_idx, p_idx, q_idx = m_idx, p_idx, q_idx
+                        best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+                else:
+                    min_cost = min_cost_n
+                    m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
+                    best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+                    
         if best is None or min_cost == -np.inf:
             break
         m, n, p, q = best

@@ -14,7 +14,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             cost_calculation_method : str = "manhattan",
             removal_operator : str = "worst", repair_operator : str = "greedy",
             acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
-            deadline_generation_method: str = "constant"):
+            deadline_generation_method: str = "constant",
+            deadline_offset: float = 30):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -39,7 +40,10 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                 # Generate new tasks
                 tik = time.time()
 
-                J_new, last_task_id, outbound_tasks, inbound_tasks = case_request_generator.CRG(S, t, J, G, Rs, N, inbound_to_outbound_ratio, last_task_id, max_task_number, G.warehouse, case_request_strategy, deadline_generation_method)
+                J_new, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
+                                                                                                inbound_to_outbound_ratio, last_task_id, max_task_number,
+                                                                                                  G.warehouse, case_request_strategy, 
+                                                                                                  deadline_generation_method, deadline_offset)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
                 # Append the new tasks to the list of tasks
@@ -144,7 +148,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          cost_calculation_method: str = "manhattan",
          removal_operator: str = "worst", repair_operator: str = "greedy",
          acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
-         deadline_generation_method: str = "constant") -> None:
+         deadline_generation_method: str = "constant",
+         deadline_offset: float = 30) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -172,6 +177,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         acceptance_function: Acceptance function for LNS (greedy or simulated_annealing)
         T_0: Initial temperature for simulated annealing
         alpha: Temperature decay rate for simulated annealing
+        deadline_generation_method: Method for generating task deadlines (e.g., constant, normal, bimodal, etc.)
+        deadline_offset: Offset for task deadlines
     """
     np.random.seed(seed)
     
@@ -204,7 +211,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         acceptance_function=acceptance_function,
         T_0=T_0,
         alpha=alpha,
-        deadline_generation_method=deadline_generation_method
+        deadline_generation_method=deadline_generation_method,
+        deadline_offset=deadline_offset
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -233,7 +241,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             acceptance_function=acceptance_function,
             T_0=T_0,
             alpha=alpha,
-            deadline_generation_method=deadline_generation_method)
+            deadline_generation_method=deadline_generation_method,
+            deadline_offset=deadline_offset)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -301,6 +310,7 @@ if __name__=="__main__":
     parser.add_argument('--alpha', type=float, default=0.99, help='Temperature decay rate for simulated annealing')
     parser.add_argument('--deadline-generation-method', type=str, default='constant',
                        help='Method for generating task deadlines (e.g., constant, normal, bimodal, etc.)', choices=['constant', 'normal', 'bimodal', 'none'])
+    parser.add_argument('--deadline-offset', type=float, default=30, help='Offset for task deadlines')
     args = parser.parse_args()
     
     main(
@@ -327,5 +337,6 @@ if __name__=="__main__":
         acceptance_function=args.acceptance_function,
         T_0=args.T_0,
         alpha=args.alpha,
-        deadline_generation_method=args.deadline_generation_method
+        deadline_generation_method=args.deadline_generation_method,
+        deadline_offset=args.deadline_offset
     )
