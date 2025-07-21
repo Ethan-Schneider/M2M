@@ -7,7 +7,7 @@ from ...analysis.statistics import Stats
 from .construct_cost_elements import construct_cost_elements, manhattan_distance
 
 def fast_SCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
-                         agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                         agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
     """
     Perform second coordinate fixing (SCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
     This is a batched greedy algorithm that allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -31,6 +31,7 @@ def fast_SCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
         - AgentLoader object with updated task sequences
         - List of tuples (m, n, p, q) representing allocations
         - Total cost of all allocations
+        - Updated cost_lookup dictionary
     """
     M = len(Rs.agents)
     N = len(idx_to_task_id)
@@ -118,7 +119,7 @@ def fast_SCF_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List
 
     print(f"Total argmin time: {total_argmin_time}")
     print(f"Total update time: {total_update_time}")
-    return Rs, allocations, total_cost
+    return Rs, allocations, total_cost, cost_lookup
 
 
 def fast_SCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], current_time: int, method : str = "manhattan") -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
@@ -156,12 +157,13 @@ def fast_SCF_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple], current_ti
 
     allocation_tik = time.time()
     # Perform greedy allocation
-    Rs, allocations, cost = fast_SCF_allocation(
+    Rs, allocations, cost, cost_lookup = fast_SCF_allocation(
         S, G, Rs, start_locs, goal_locs, idx_to_task_id, J, method,
         agent_start_cost_tensor=agent_start_cost_tensor,
         start_goal_dist=start_goal_dist,
         task_start_mask=task_start_mask,
-        task_goal_mask=task_goal_mask
+        task_goal_mask=task_goal_mask,
+        cost_lookup={}
     )
     total_allocation_time += time.time() - allocation_tik
     tok = time.time()

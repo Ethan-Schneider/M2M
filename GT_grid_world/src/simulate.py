@@ -53,8 +53,12 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 if start_location in G.warehouse.get_full_locations():
                     try:
                         agent.set_sku_id_carrying(G.warehouse.get_sku_at_location(start_location).sku_id)
+                        print(f"What is at {start_location}? {G.warehouse.get_sku_at_location(start_location)}")
                         G.warehouse.remove_sku_instance(start_location)
+                        print(f"Agent is carrying {agent.get_sku_id_carrying()}")
+                        G.update_sku_KD_trees(agent.get_sku_id_carrying())
                     except Exception as e:
+                        print(f"What is at {start_location}? {G.warehouse.get_sku_at_location(start_location)}")
                         print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
                         exit()
                 # Inbound: picking up from driveway (now empty)
@@ -78,6 +82,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
 
                 if goal_location in G.warehouse.get_empty_locations():
                     G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
+                    G.update_sku_KD_trees(agent.get_sku_id_carrying())
                 elif goal_location in G.driveway.get_empty_locations():
                     pass
                 agent.set_sku_id_carrying(None)

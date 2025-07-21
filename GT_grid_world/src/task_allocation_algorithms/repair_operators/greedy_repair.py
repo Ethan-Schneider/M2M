@@ -50,46 +50,59 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         if np.all(task_start_mask_ == 0) or np.all(task_goal_mask_ == 0):
             break
 
-        min_cost = -np.inf
+        best_cost = -np.inf
         best = None
         # For each task, find the best (m, n, p, q)
         for n in range(N):
+            # If the task is already assigned, skip
             if n in assigned_tasks:
                 continue
+
+            # Find all valid start and goal locations for the task
             valid_p = np.where(task_start_mask_[n] == 1)[0]
             valid_q = np.where(task_goal_mask_[n] == 1)[0]
+
+            # If there are no valid start or goal locations, skip
             if len(valid_p) == 0 or len(valid_q) == 0:
                 continue
+
+            # Compute the total cost for all valid (p, q) pairs for the task
             agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
             total_costs = agent_costs[:, :, None] + sg_costs[None, :, :]
-            min_idx = np.argmax(total_costs)
-            min_cost_n = total_costs.flat[min_idx]
-            if min_cost_n > min_cost:
-                if np.sum(total_costs == min_cost_n) > 1:
-                    min_locations = np.where(total_costs == min_cost_n)
-                    min_locations_list = []
-                    for i in range(len(min_locations[0])):
-                        min_locations_list.append((int(min_locations[0][i]), int(min_locations[1][i]), int(min_locations[2][i])))
 
-                    min_idx = np.random.choice(range(len(min_locations_list)), 1)[0]
-                    m_idx, p_idx, q_idx = min_locations_list[min_idx]
-                    if min_cost_n > min_cost:
-                        min_cost = min_cost_n
-                        m_idx, p_idx, q_idx = m_idx, p_idx, q_idx
-                        best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+            # Find the index of the maximum cost (since costs are negative, this minimizes distance)
+            min_idx = np.argmax(total_costs)
+            new_cost = total_costs.flat[min_idx]
+
+            # If the new cost is greater than the current best cost, update the best allocation
+            if new_cost > best_cost:
+                # If there are multiple maximum costs, choose one randomly
+                if np.sum(total_costs == new_cost) > 1:
+                    max_locations = np.where(total_costs == new_cost)
+                    max_locations_list = [(int(max_locations[0][i]), int(max_locations[1][i]), int(max_locations[2][i])) for i in range(len(max_locations[0]))]
+
+                    random_idx = np.random.choice(range(len(max_locations_list)), 1)[0]
+                    m_idx, p_idx, q_idx = max_locations_list[random_idx]
+
+                    best_cost = new_cost
+                    best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
                 else:
-                    min_cost = min_cost_n
+                    best_cost = new_cost
                     m_idx, p_idx, q_idx = np.unravel_index(min_idx, total_costs.shape)
                     best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
-                    
-        if best is None or min_cost == -np.inf:
+
+        if best is None or best_cost == -np.inf:
             break
+
+        # Add the best task to the allocation
         m, n, p, q = best
         allocations.append((int(m), idx_to_task_id[int(n)], int(p), int(q)))
+
+        # If cost lookup is provided, store the cost in the lookup table
         if cost_lookup is not None:
-            cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(min_cost)
-        total_cost += min_cost
+            cost_lookup[(int(m), idx_to_task_id[int(n)], int(p), int(q))] = int(best_cost)
+        total_cost += best_cost
         assigned_tasks.add(n)
 
         # Update statistics
@@ -121,4 +134,4 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
 
-    return Rs, allocations, total_cost
+    return Rs, allocations, total_cost, cost_lookup

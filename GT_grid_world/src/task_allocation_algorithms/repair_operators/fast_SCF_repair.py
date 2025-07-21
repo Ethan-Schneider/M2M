@@ -112,4 +112,4 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
 
-    return Rs, allocations, total_cost
+    return Rs, allocations, total_cost, cost_lookup

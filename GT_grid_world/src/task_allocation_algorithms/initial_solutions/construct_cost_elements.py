@@ -30,7 +30,7 @@ def calculate_deadline_cost(deadline: int, current_time: int) -> int:
     else:
         # Deadline has passed, quadratic cost
         overdue_time = abs(time_until_deadline)
-        return int(30 + overdue_time**2)  # Quadratic penalty for overdue tasks
+        return int(30 + overdue_time)  # Quadratic penalty for overdue tasks
 
 def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
@@ -134,14 +134,14 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
         for i, s in enumerate(start_locs):
             # Base cost (negative for argmax logic)
             if method == "manhattan":
-                base_cost = -1.0 * manhattan_distance(agent_pos, s)
+                agent_start_cost_tensor[m, i] = -1.0 * manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                base_cost = -1.0 * G.get_distance(agent_pos, s)
+                agent_start_cost_tensor[m, i] = -1.0 * G.get_distance(agent_pos, s)
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             
             # Find tasks that can use this start location and calculate deadline urgency
-            deadline_urgency_cost = 0
+            # deadline_urgency_cost = 0
             # for n, task in enumerate(unallocated_tasks):
             #     if s in task[1] and task_start_mask[n, i] == 1.0:
             #         # This task can use this start location, add its deadline urgency
@@ -150,8 +150,30 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
             #         deadline_urgency_cost = max(deadline_urgency_cost, urgency_cost)
             
             # Combine base cost with deadline urgency (positive urgency cost increases the negative base cost)
-            agent_start_cost_tensor[m, i] = base_cost + 0.1*deadline_urgency_cost
-            
-    # print(f"Agent start cost tensor: {agent_start_cost_tensor}")
-    # print(f"Created tensors")
-    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id
+            # agent_start_cost_tensor[m, i] = 0.3*base_cost + 0.7*deadline_urgency_cost
+    # 5. Build (N) vector of task deadline costs
+    task_deadline_costs = np.zeros(N)
+    for n, task in enumerate(unallocated_tasks):
+        task_deadline_costs[n] = calculate_deadline_cost(task[3], current_time)
+
+    # 6. Build (N, Q) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
+    inbound_sku_distribution_costs = np.full((N, Q), -1*np.inf)
+    for n, task in enumerate(unallocated_tasks):
+        if task[5] == 1: # inbound task
+            # if inbound task, iterate over all goal locations and calculate distance to each goal location in the task's goal locations
+            for q in range(Q):
+                if goal_locs[q] in task[2]:
+                    inbound_sku_distribution_costs[n, q] = G.query_sku_KD_trees(task[4], goal_locs[q], 1)[0]
+        # else do nothing
+
+    # 7. Build (N, P) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
+    outbound_sku_distribution_costs = np.full((N, P), -1*np.inf)
+    for n, task in enumerate(unallocated_tasks):
+        if task[5] == 0: # outbound task
+            # if outbound task, iterate over all start locations and calculate distance to each start location in the task's start locations
+            for p in range(P):
+                if start_locs[p] in task[1]:
+                    #get the second closest location
+                    outbound_sku_distribution_costs[n, p] = -1*G.query_sku_KD_trees(task[4], start_locs[p], 2)[0][1]
+
+    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs

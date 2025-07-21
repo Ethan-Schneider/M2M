@@ -33,7 +33,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
     
     Returns:
         Tuple containing:
-        - Set of new tasks (task_id, start_locations_frozenset, goal_locations_frozenset)
+        - Set of new tasks (task_id, start_locations_frozenset, goal_locations_frozenset, deadline, sku_id, inbound/outbound)
         - Updated last_task_id
     """
     
@@ -52,15 +52,15 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
             return current_time + deadline_offset
         elif deadline_generation_method == "normal":
             # Normal distribution, mean 30, stddev 5
-            deadline_offset = np.random.normal(loc=deadline_offset, scale=3)
-            return current_time + int(round(deadline_offset))
+            deadline = np.random.normal(loc=deadline_offset, scale=3)
+            return current_time + int(round(deadline))
         elif deadline_generation_method == "bimodal":
             # Bimodal: 10% chance of N(20, 3), 90% chance of N(50, 3)
             if np.random.rand() < 0.1:
-                deadline_offset = np.random.normal(loc=deadline_offset - 10, scale=3)
+                deadline = np.random.normal(loc=deadline_offset - 10, scale=3)
             else:
-                deadline_offset = np.random.normal(loc=deadline_offset + 10, scale=3)
-            return current_time + int(round(deadline_offset))
+                deadline = np.random.normal(loc=deadline_offset + 10, scale=3)
+            return current_time + int(round(deadline))
         elif deadline_generation_method == "none":
             # Generate tasks with an effective deadline of inf
             return 9999999
@@ -129,7 +129,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline))
+                J_new.add((last_task_id + 1, frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1))
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -149,7 +149,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, frozenset(available_start_locations), frozenset(available_goal_locations), deadline))
+                J_new.add((last_task_id + 1, frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0))
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1

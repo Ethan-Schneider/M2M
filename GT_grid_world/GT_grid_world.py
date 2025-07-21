@@ -15,7 +15,9 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             removal_operator : str = "worst", repair_operator : str = "greedy",
             acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
             deadline_generation_method: str = "constant",
-            deadline_offset: float = 30):
+            deadline_offset: float = 30,
+            output_intermediate_data: bool = False,
+            intermediate_data_interval: int = 1800):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -127,6 +129,12 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         # Log SKU inventory state
         S.append_sku_inventory_state(G.warehouse, G.driveway, G.warehouse.get_all_skus().__len__())
         
+        # Log SKU centroids per timestep
+        S.append_sku_centroids(G.warehouse, G.warehouse.get_all_skus().__len__())
+        
+        # Log SKU locations per timestep
+        S.append_sku_locations(G.warehouse, G.warehouse.get_all_skus().__len__())
+        
         # Record agent statuses and goal locations for this timestep
         S.add_agent_statuses_and_goals(Rs)
         
@@ -136,6 +144,12 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         
         if (global_tok - global_tik) >= time_limit:
             return
+        
+        # Output intermediate data if enabled
+        if output_intermediate_data and t % intermediate_data_interval == 0:
+            intermediate_output_file = S.get_output_file().replace(".json", f"_{t}.json")
+            S.save_data(intermediate_output_file)
+        
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
@@ -149,7 +163,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          removal_operator: str = "worst", repair_operator: str = "greedy",
          acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
          deadline_generation_method: str = "constant",
-         deadline_offset: float = 30) -> None:
+         deadline_offset: float = 30,
+         output_intermediate_data: bool = False,
+         intermediate_data_interval: int = 1800) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -179,6 +195,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         alpha: Temperature decay rate for simulated annealing
         deadline_generation_method: Method for generating task deadlines (e.g., constant, normal, bimodal, etc.)
         deadline_offset: Offset for task deadlines
+        output_intermediate_data: Whether to output intermediate data
+        intermediate_data_interval: Interval for outputting intermediate data
     """
     np.random.seed(seed)
     
@@ -212,7 +230,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         T_0=T_0,
         alpha=alpha,
         deadline_generation_method=deadline_generation_method,
-        deadline_offset=deadline_offset
+        deadline_offset=deadline_offset,
+        output_intermediate_data=output_intermediate_data,
+        intermediate_data_interval=intermediate_data_interval
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -242,7 +262,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             T_0=T_0,
             alpha=alpha,
             deadline_generation_method=deadline_generation_method,
-            deadline_offset=deadline_offset)
+            deadline_offset=deadline_offset,
+            output_intermediate_data=output_intermediate_data,
+            intermediate_data_interval=intermediate_data_interval)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -311,6 +333,9 @@ if __name__=="__main__":
     parser.add_argument('--deadline-generation-method', type=str, default='constant',
                        help='Method for generating task deadlines (e.g., constant, normal, bimodal, etc.)', choices=['constant', 'normal', 'bimodal', 'none'])
     parser.add_argument('--deadline-offset', type=float, default=30, help='Offset for task deadlines')
+    parser.add_argument('--output-intermediate-data', action='store_true',
+                       help='Output intermediate data')
+    parser.add_argument('--intermediate-data-interval', type=int, default=1800, help='Interval for outputting intermediate data')
     args = parser.parse_args()
     
     main(
@@ -338,5 +363,7 @@ if __name__=="__main__":
         T_0=args.T_0,
         alpha=args.alpha,
         deadline_generation_method=args.deadline_generation_method,
-        deadline_offset=args.deadline_offset
+        deadline_offset=args.deadline_offset,
+        output_intermediate_data=args.output_intermediate_data,
+        intermediate_data_interval=args.intermediate_data_interval
     )

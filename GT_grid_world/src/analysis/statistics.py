@@ -13,7 +13,7 @@ class Stats:
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
-                 deadline_offset: float = None) -> None:
+                 deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -40,7 +40,9 @@ class Stats:
         self.__alpha = alpha
         self.__deadline_generation_method = deadline_generation_method
         self.__deadline_offset = deadline_offset
-        
+        self.__output_intermediate_data = output_intermediate_data
+        self.__intermediate_data_interval = intermediate_data_interval
+
         self.__output_file = output_file
         
         self.__early_task_ids = []
@@ -140,10 +142,18 @@ class Stats:
         
         self.__py_lns_logs = []
         
+        # Centroids of each SKU per timestep
+        self.__sku_centroids_per_timestep = []
+        # Locations of each SKU per timestep
+        self.__sku_locations_per_timestep = []
+        
         # Deadline tracking
         self.__task_deadlines = {}  # task_id -> deadline
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
-        
+
+    def get_output_file(self) -> str:   
+        return self.__output_file
+
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
         for agent in Rs.agents:
@@ -579,7 +589,7 @@ class Stats:
         plot_task_reallocations_histogram(self.__task_reallocations, folder, self.__completed_task_ids)
         
         
-    def save_data(self):
+    def save_data(self, intermediate_output_file = None):
         velocity_timesteps = self.compute_velocity_timesteps()
         
         # print(self.__actual_duration)
@@ -623,6 +633,8 @@ class Stats:
             "alpha": self.__alpha,
             "deadline_generation_method": self.__deadline_generation_method,
             "deadline_offset": self.__deadline_offset,
+            "output_intermediate_data": self.__output_intermediate_data,
+            "intermediate_data_interval": self.__intermediate_data_interval,
 
             # Simulation results
             "timesteps_completed": self.__T,
@@ -670,11 +682,17 @@ class Stats:
             "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
             "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
             "py_lns_logs": self.__py_lns_logs,
-            "overdue_task_completions": self.__overdue_task_completions
+            "overdue_task_completions": self.__overdue_task_completions,
+            "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
+            "sku_locations_per_timestep": self.__sku_locations_per_timestep
         }
         
-        with open(self.__output_file, "w") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        if intermediate_output_file is not None:
+            with open(intermediate_output_file, "w") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+        else:
+            with open(self.__output_file, "w") as f:
+                json.dump(data, f, ensure_ascii=False, indent=4)
 
     def add_task_reallocation(self, task_id: int) -> None:
         """Increment the reallocation count for a task."""
@@ -817,6 +835,28 @@ class Stats:
         driveway_counts = [len(driveway.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
         self.__warehouse_sku_counts_per_timestep.append(warehouse_counts)
         self.__driveway_sku_counts_per_timestep.append(driveway_counts)
+
+    def append_sku_centroids(self, warehouse, num_skus):
+        """Compute and log the centroid of each SKU (warehouse+driveway) for this timestep."""
+        centroids = []
+        for sku_id in range(1, num_skus + 1):
+            locations = warehouse.get_sku_instances(sku_id)
+            if locations:
+                arr = np.array(locations)
+                centroid = tuple(np.mean(arr, axis=0))
+                centroid = tuple(map(float, centroid))
+            else:
+                centroid = None
+            centroids.append(centroid)
+        self.__sku_centroids_per_timestep.append(centroids)
+
+    def append_sku_locations(self, warehouse, num_skus):
+        """Log the locations of each SKU for this timestep."""
+        locations_per_sku = []
+        for sku_id in range(1, num_skus + 1):
+            locations = warehouse.get_sku_instances(sku_id)
+            locations_per_sku.append([tuple(loc) for loc in locations])
+        self.__sku_locations_per_timestep.append(locations_per_sku)
 
     def append_py_lns_log(self, log: dict):
         self.__py_lns_logs.append(log)

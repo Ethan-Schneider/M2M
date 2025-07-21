@@ -4,7 +4,7 @@ from ...agent import AgentLoader
 
 def random_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], num_to_remove: int, 
                    idx_to_task_id: Dict[int, int], start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], 
-                   cost_lookup: Dict[Tuple[int, int, int, int], int]) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], List[Tuple[int, int, int, int]]]:
+                   cost_lookup: Dict[Tuple[int, int, int, int], int]) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], Dict[Tuple[int, int, int, int], int]]:
     """
     Randomly remove a specified number of allocations from the solution.
     Removes all allocations up to and including the chosen task from each agent's sequence.
@@ -21,7 +21,7 @@ def random_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]]
         Tuple containing:
         - Updated AgentLoader with removed allocations
         - Updated allocations list
-        - List of removed allocations
+        - Updated cost_lookup dictionary
     """
     # Randomly select allocations to remove
     num_to_remove = min(num_to_remove, len(allocations))
@@ -60,4 +60,4 @@ def random_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]]
                         cost_lookup.pop(allocation, None)  # Use allocation directly, with None as default
                         break
     
-    return Rs, allocations
+    return Rs, allocations, cost_lookup

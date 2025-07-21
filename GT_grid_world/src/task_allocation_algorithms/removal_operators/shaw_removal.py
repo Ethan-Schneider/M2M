@@ -8,7 +8,7 @@ from ...utils import manhattan_distance
 def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], num_to_remove: int, 
                  G: Graph, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], 
                  method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
-                 omega_1: float = 9.0, omega_2: float = 3.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], List[Tuple[int, int, int, int]]]:
+                 omega_1: float = 9.0, omega_2: float = 3.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], Dict[Tuple[int, int, int, int], int]]:
     """
     Shaw removal operator: randomly choose one task, then remove N-1 tasks in decreasing order of relatedness.
     
@@ -31,10 +31,10 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         Tuple containing:
         - Updated AgentLoader with removed allocations
         - Updated allocations list
-        - List of removed allocations
+        - Updated cost_lookup dictionary
     """
     if len(allocations) == 0:
-        return Rs, allocations
+        return Rs, allocations, cost_lookup
     
     # Randomly choose one task as the seed
     seed_allocation = random.choice(allocations)
@@ -51,7 +51,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
     
     if seed_s_j is None or seed_g_j is None:
         print(f"Warning: Could not find seed task {seed_task_id} in agent {seed_agent_idx}'s sequence")
-        return Rs, allocations
+        return Rs, allocations, cost_lookup
     
     # Calculate relatedness scores for all other tasks
     relatedness_scores = []
@@ -134,7 +134,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
                         if cost_lookup is not None:
                             cost_lookup.pop(allocation, None)
                         break
-    return Rs, allocations
+    return Rs, allocations, cost_lookup
 
 def _calculate_time_at_location(Rs: AgentLoader, agent_idx: int, task_id: int, start_idx: int, goal_idx: int, 
                                cost_lookup: Dict[Tuple[int, int, int, int], int], is_start: bool) -> float:

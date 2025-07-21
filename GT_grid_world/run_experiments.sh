@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(2 3)
+seeds=(13)
 num_robots=(40)
 time_horizons=(7200)
 max_tasks=(120)
@@ -29,8 +29,10 @@ repair_operator="greedy"
 acceptance_function="simulated_annealing"
 T_0=1.0
 alpha=0.99
-deadline_generation_method="none"
+deadline_generation_method="normal"
 deadline_offset=30
+output_intermediate_data=False
+intermediate_data_interval=3600
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -83,7 +85,9 @@ for seed in "${seeds[@]}"; do
                             --T-0 "$T_0" \
                             --alpha "$alpha" \
                             --deadline-generation-method "$deadline_generation_method" \
-                            --deadline-offset "$deadline_offset"
+                            --deadline-offset "$deadline_offset" \
+                            $( [ "$output_intermediate_data" = "True" ] && echo --output-intermediate-data ) \
+                            --intermediate-data-interval "$intermediate_data_interval"
                         
                         # Optional: Add a small delay between runs
                         sleep 1

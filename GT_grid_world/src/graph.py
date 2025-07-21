@@ -1,5 +1,7 @@
 import numpy as np
 import os
+import time
+from scipy.spatial import KDTree
 
 from .node import Node
 from .inventory_manager.inventory import Inventory, WeightInitialization
@@ -92,7 +94,34 @@ class Graph:
         self.__distance_matrix = None
         if file_name:
             self.__load_or_compute_distance_matrix(file_name)
-        
+
+        self.__sku_KD_trees = {}
+        self.__build_sku_KD_trees(num_skus)
+
+    def query_sku_KD_trees(self, sku_id: int, location: tuple, num_neighbors: int) -> list:
+        if self.__sku_KD_trees[sku_id] is None:
+            if num_neighbors == 1:
+                return [0]
+            else:
+                return [(0, 0)]
+        else:
+            return self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)
+
+    def update_sku_KD_trees(self, sku_id: int) -> None:
+        sku_locations = self.warehouse.get_sku_instances(sku_id)
+        if sku_locations == []:
+            self.__sku_KD_trees[sku_id] = None
+        else:
+            self.__sku_KD_trees[sku_id] = KDTree(sku_locations)
+
+    def __build_sku_KD_trees(self, num_skus: int) -> None:
+        for sku_id in range(1, num_skus + 1):
+            sku_locations = self.warehouse.get_sku_instances(sku_id)
+            if sku_locations == []:
+                self.__sku_KD_trees[sku_id] = None
+            else:
+                self.__sku_KD_trees[sku_id] = KDTree(sku_locations)
+
     def __load_graph(self, filename : str, initial_warehouse_capacity : float, num_skus : int, weight_init_method : str):
         """This method takes in a map file, parses the metadata and map data, 
         then saves a map representation, warehouse and driveway item representation, 
