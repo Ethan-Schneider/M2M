@@ -10,7 +10,10 @@ import time
 def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
                  start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]],
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
-                 method: str = "manhattan", J: Set[Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 method: str = "manhattan", J: Set[Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
+                 inbound_sku_distribution_costs: np.ndarray = None, outbound_sku_distribution_costs: np.ndarray = None,
+                 base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
+                 agent_task_sequence_time: np.ndarray = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -69,7 +72,16 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             # Compute the total cost for all valid (p, q) pairs for the task
             agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
-            total_costs = agent_costs[:, :, None] + sg_costs[None, :, :]
+
+            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
+
+            task = list(J)[n]
+            if task[5] == 1:
+                inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
+                total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+            else:
+                outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
+                total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
 
             # Find the index of the maximum cost (since costs are negative, this minimizes distance)
             min_idx = np.argmax(total_costs)

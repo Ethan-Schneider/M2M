@@ -17,7 +17,10 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             deadline_generation_method: str = "constant",
             deadline_offset: float = 30,
             output_intermediate_data: bool = False,
-            intermediate_data_interval: int = 1800):
+            intermediate_data_interval: int = 1800,
+            base_cost_weight: float = 1.0,
+            deadline_weight: float = 0.0,
+            sku_distribution_weight: float = 0.0):
     # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
     J = set()
 
@@ -61,7 +64,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             
         if total < max_task_number:
             print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -165,7 +168,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          deadline_generation_method: str = "constant",
          deadline_offset: float = 30,
          output_intermediate_data: bool = False,
-         intermediate_data_interval: int = 1800) -> None:
+         intermediate_data_interval: int = 1800,
+         base_cost_weight: float = 1.0,
+         deadline_weight: float = 0.0,
+         sku_distribution_weight: float = 0.0) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -197,11 +203,14 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         deadline_offset: Offset for task deadlines
         output_intermediate_data: Whether to output intermediate data
         intermediate_data_interval: Interval for outputting intermediate data
+        base_cost_weight: Weight for base cost
+        deadline_weight: Weight for deadline
+        sku_distribution_weight: Weight for sku distribution
     """
     np.random.seed(seed)
     
-    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}_no_seq_full.json"
-    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{seed}"
+    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}.json"
+    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
@@ -232,7 +241,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         deadline_generation_method=deadline_generation_method,
         deadline_offset=deadline_offset,
         output_intermediate_data=output_intermediate_data,
-        intermediate_data_interval=intermediate_data_interval
+        intermediate_data_interval=intermediate_data_interval,
+        base_cost_weight=base_cost_weight,
+        deadline_weight=deadline_weight,
+        sku_distribution_weight=sku_distribution_weight
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -264,13 +276,16 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             deadline_generation_method=deadline_generation_method,
             deadline_offset=deadline_offset,
             output_intermediate_data=output_intermediate_data,
-            intermediate_data_interval=intermediate_data_interval)
+            intermediate_data_interval=intermediate_data_interval,
+            base_cost_weight=base_cost_weight,
+            deadline_weight=deadline_weight,
+            sku_distribution_weight=sku_distribution_weight)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
     S.save_data()
     
-    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{seed}"
+    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     if output_graphs:
         S.output_graphs(folder_name)
     
@@ -336,6 +351,9 @@ if __name__=="__main__":
     parser.add_argument('--output-intermediate-data', action='store_true',
                        help='Output intermediate data')
     parser.add_argument('--intermediate-data-interval', type=int, default=1800, help='Interval for outputting intermediate data')
+    parser.add_argument('--base-cost-weight', type=float, default=1.0, help='Weight for base cost')
+    parser.add_argument('--deadline-weight', type=float, default=0.0, help='Weight for deadline')
+    parser.add_argument('--sku-distribution-weight', type=float, default=0.0, help='Weight for sku distribution')
     args = parser.parse_args()
     
     main(
@@ -365,5 +383,8 @@ if __name__=="__main__":
         deadline_generation_method=args.deadline_generation_method,
         deadline_offset=args.deadline_offset,
         output_intermediate_data=args.output_intermediate_data,
-        intermediate_data_interval=args.intermediate_data_interval
+        intermediate_data_interval=args.intermediate_data_interval,
+        base_cost_weight=args.base_cost_weight,
+        deadline_weight=args.deadline_weight,
+        sku_distribution_weight=args.sku_distribution_weight
     )

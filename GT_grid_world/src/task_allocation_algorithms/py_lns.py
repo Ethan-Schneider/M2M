@@ -24,7 +24,10 @@ class LNS:
                  removal_size: int = 3, cost_calculation_method: str = "manhattan",
                  removal_operator: str = "worst", repair_operator: str = "greedy",
                  acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
-                 current_time: int = 0):
+                 current_time: int = 0,
+                 base_cost_weight: float = 1.0,
+                 deadline_weight: float = 0.0,
+                 sku_distribution_weight: float = 0.0):
         """
         Initialize Large Neighborhood Search algorithm.
         
@@ -73,6 +76,9 @@ class LNS:
         self.T_0 = T_0
         self.alpha = alpha
         self.current_time = current_time
+        self.base_cost_weight = base_cost_weight
+        self.deadline_weight = deadline_weight
+        self.sku_distribution_weight = sku_distribution_weight
         
         # Store best solution found
         self.best_solution = None
@@ -84,9 +90,7 @@ class LNS:
         self.cost_lookup = {}
         
         # Construct initial cost elements
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_deadline_costs = construct_cost_elements(
-            self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method
-        )
+        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method)
         
     def run(self, t: int = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
         """
@@ -109,7 +113,18 @@ class LNS:
 
         # Initial task assignment
         if self.initial_task_assignment_strategy == "fast_greedy":
-            current_solution, allocations, __, = fast_greedy_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.J, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup, task_deadline_costs=self.task_deadline_costs)
+            current_solution, allocations, __, = fast_greedy_allocation(self.S, self.G, self.Rs, self.start_locs, 
+                                                                        self.goal_locs, self.idx_to_task_id, self.J, 
+                                                                        self.cost_calculation_method, 
+                                                                        self.agent_start_cost_tensor, 
+                                                                        self.start_goal_dist, self.task_start_mask, 
+                                                                        self.task_goal_mask, cost_lookup=self.cost_lookup, task_deadline_costs=self.task_deadline_costs,
+                                                                        inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
+                                                                        outbound_sku_distribution_costs=self.outbound_sku_distribution_costs,
+                                                                        base_cost_weight=self.base_cost_weight,
+                                                                        deadline_weight=self.deadline_weight,
+                                                                        sku_distribution_weight=self.sku_distribution_weight,
+                                                                        agent_task_sequence_time=self.agent_task_sequence_time)
         elif self.initial_task_assignment_strategy == "fast_FCF":
             current_solution, allocations, __ = fast_FCF_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         elif self.initial_task_assignment_strategy == "fast_SCF":
@@ -117,11 +132,6 @@ class LNS:
         else:
             print("ERROR: Unknown initial task assignment strategy " + self.initial_task_assignment_strategy + ", please choose another one.")
             return self.Rs, [], -np.inf
-        
-        # print(f"Initial cost sum: {sum(self.cost_lookup.values())}")
-        # print(f"Initial Algorithm agent task sequences:")
-        # for agent in current_solution.agents:
-        #     print(f"Agent {agent.id}: {agent.task_sequence}")
         
         inital_task_assignment_time += time.time() - inital_task_assignment_tik
 
@@ -191,7 +201,13 @@ class LNS:
                 new_solution, temp_allocations, __, temp_cost_lookup = greedy_repair(self.S, self.G, self.agent_start_cost_tensor, 
                                                                          self.start_goal_dist, self.task_start_mask, self.task_goal_mask, 
                                                                          temp_solution, self.start_locs, self.goal_locs, 
-                                                                         self.idx_to_task_id, temp_allocations, self.cost_calculation_method, self.J, temp_cost_lookup)
+                                                                         self.idx_to_task_id, temp_allocations, self.cost_calculation_method, self.J, temp_cost_lookup,
+                                                                         inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
+                                                                         outbound_sku_distribution_costs=self.outbound_sku_distribution_costs,
+                                                                         base_cost_weight=self.base_cost_weight,
+                                                                         deadline_weight=self.deadline_weight,
+                                                                         sku_distribution_weight=self.sku_distribution_weight,
+                                                                         agent_task_sequence_time=self.agent_task_sequence_time)
             elif self.repair_operator == "fast_SCF":
                 new_solution, temp_allocations, __, temp_cost_lookup = fast_SCF_repair(self.S, self.G, self.agent_start_cost_tensor, 
                                                                          self.start_goal_dist, self.task_start_mask, self.task_goal_mask, 
@@ -307,7 +323,7 @@ class LNS:
             - goal_locs: List[Tuple[int, int]]
             - idx_to_task_id: Dict[int, int]
         """
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_deadline_costs = construct_cost_elements(
+        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(
             self.J, current_solution, self.G, self.current_time, self.cost_calculation_method
         )
 
@@ -315,7 +331,10 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",
                 removal_operator: str = "worst", repair_operator: str = "greedy", t: int = None,
-                acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
+                base_cost_weight: float = 1.0,
+                deadline_weight: float = 0.0,
+                sku_distribution_weight: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Call the LNS algorithm with given parameters.
     
@@ -345,5 +364,6 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Set[Tuple],
         return Rs, [], 0.0
     
     lns = LNS(S, G, Rs, J, initial_task_assignment_strategy, time_limit, removal_size, 
-              cost_calculation_method, removal_operator, repair_operator, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, current_time=t if t is not None else 0)
+              cost_calculation_method, removal_operator, repair_operator, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, current_time=t if t is not None else 0,
+              base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight)
     return lns.run(t=t)

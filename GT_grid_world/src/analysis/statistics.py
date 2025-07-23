@@ -13,7 +13,8 @@ class Stats:
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
-                 deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None) -> None:
+                 deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
+                 base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -42,6 +43,9 @@ class Stats:
         self.__deadline_offset = deadline_offset
         self.__output_intermediate_data = output_intermediate_data
         self.__intermediate_data_interval = intermediate_data_interval
+        self.__base_cost_weight = base_cost_weight
+        self.__deadline_weight = deadline_weight
+        self.__sku_distribution_weight = sku_distribution_weight
 
         self.__output_file = output_file
         
@@ -321,7 +325,7 @@ class Stats:
     
     # ====================== Completed Task Id Functions
     
-    def add_completed_task_id(self, task_id : int, timestep : int, start_location : tuple = None, goal_location : tuple = None) -> None:
+    def add_completed_task_id(self, task_id : int, timestep : int, start_location : tuple = None, goal_location : tuple = None, deadline : int = None, sku_id : int = None, inbound_task : bool = None) -> None:
         """Add a completed task with its completion timestep and locations.
         
         Args:
@@ -333,7 +337,7 @@ class Stats:
         self.__completed_task_ids.append(task_id)
         self.__task_completion_timestamps[task_id] = timestep
         if start_location is not None and goal_location is not None:
-            self.__completed_task_details[task_id] = (start_location, goal_location)
+            self.__completed_task_details[task_id] = (start_location, goal_location, deadline, sku_id, inbound_task)
         
         # Check if task was completed after its deadline
         if task_id in self.__task_deadlines:
@@ -635,6 +639,9 @@ class Stats:
             "deadline_offset": self.__deadline_offset,
             "output_intermediate_data": self.__output_intermediate_data,
             "intermediate_data_interval": self.__intermediate_data_interval,
+            "base_cost_weight": self.__base_cost_weight,
+            "deadline_weight": self.__deadline_weight,
+            "sku_distribution_weight": self.__sku_distribution_weight,
 
             # Simulation results
             "timesteps_completed": self.__T,

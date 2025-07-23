@@ -21,16 +21,16 @@ def calculate_deadline_cost(deadline: int, current_time: int) -> int:
     """
     time_until_deadline = deadline - current_time
     
-    if time_until_deadline > 30:
+    if time_until_deadline > 60:
         # Deadline is far in the future, no urgency cost
         return 0
     elif time_until_deadline > 0:
-        # Deadline is approaching within 10 seconds, linear cost
-        return int(30 - time_until_deadline)  # Linear increase as deadline approaches
+        # Deadline is approaching, linear cost
+        return int(60 - time_until_deadline)  # Linear increase as deadline approaches
     else:
         # Deadline has passed, quadratic cost
         overdue_time = abs(time_until_deadline)
-        return int(30 + overdue_time)  # Quadratic penalty for overdue tasks
+        return int(60 + overdue_time)  # Quadratic penalty for overdue tasks
 
 def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
@@ -176,4 +176,16 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
                     #get the second closest location
                     outbound_sku_distribution_costs[n, p] = -1*G.query_sku_KD_trees(task[4], start_locs[p], 2)[0][1]
 
-    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs
+    # 8. Build vector of size (M) which includes the estimated time for the agent to complete the task sequence
+    agent_task_sequence_time = np.zeros(M)
+    for m in range(M):
+        if len(Rs.agents[m].task_sequence) == 0:
+            continue
+        agent_task_sequence_time[m] = -1*G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
+        for i in range(1, len(Rs.agents[m].task_sequence)):
+            #add the distance between the goal of the previous task and the start of the current task
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[i-1][2], Rs.agents[m].task_sequence[i][1])
+            #add the distance between the start of the current task to the goal of the current task
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[i][1], Rs.agents[m].task_sequence[i][2])
+
+    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time

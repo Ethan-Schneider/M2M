@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(13)
+seeds=(0)
 num_robots=(40)
 time_horizons=(7200)
 max_tasks=(120)
@@ -20,7 +20,7 @@ initial_inventory=(20.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="none"
+improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
 map="data/maps/symbotic_medium_wide_deck"
@@ -30,9 +30,12 @@ acceptance_function="simulated_annealing"
 T_0=1.0
 alpha=0.99
 deadline_generation_method="normal"
-deadline_offset=30
+deadline_offset=180
 output_intermediate_data=False
 intermediate_data_interval=3600
+base_cost_weight=1.0
+deadline_weight=0.0
+sku_distribution_weight=0.25
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -60,6 +63,9 @@ for seed in "${seeds[@]}"; do
                         echo "  Acceptance Function: $acceptance_function"
                         echo "  T_0: $T_0"
                         echo "  Alpha: $alpha"
+                        echo "  Base Cost Weight: $base_cost_weight"
+                        echo "  Deadline Weight: $deadline_weight"
+                        echo "  Sku Distribution Weight: $sku_distribution_weight"
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -87,7 +93,10 @@ for seed in "${seeds[@]}"; do
                             --deadline-generation-method "$deadline_generation_method" \
                             --deadline-offset "$deadline_offset" \
                             $( [ "$output_intermediate_data" = "True" ] && echo --output-intermediate-data ) \
-                            --intermediate-data-interval "$intermediate_data_interval"
+                            --intermediate-data-interval "$intermediate_data_interval" \
+                            --base-cost-weight "$base_cost_weight" \
+                            --deadline-weight "$deadline_weight" \
+                            --sku-distribution-weight "$sku_distribution_weight"
                         
                         # Optional: Add a small delay between runs
                         sleep 1

@@ -53,12 +53,9 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 if start_location in G.warehouse.get_full_locations():
                     try:
                         agent.set_sku_id_carrying(G.warehouse.get_sku_at_location(start_location).sku_id)
-                        print(f"What is at {start_location}? {G.warehouse.get_sku_at_location(start_location)}")
                         G.warehouse.remove_sku_instance(start_location)
-                        print(f"Agent is carrying {agent.get_sku_id_carrying()}")
                         G.update_sku_KD_trees(agent.get_sku_id_carrying())
                     except Exception as e:
-                        print(f"What is at {start_location}? {G.warehouse.get_sku_at_location(start_location)}")
                         print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
                         exit()
                 # Inbound: picking up from driveway (now empty)
@@ -78,8 +75,14 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 task_id = task[0]
                 start_location = task[1]
                 goal_location = task[2]
-                deadline = task[3]
 
+                for task in J:
+                    if task[0] == task_id:
+                        deadline = task[3]
+                        sku_id = task[4]
+                        inbound_task = task[5]
+                        break
+                    
                 if goal_location in G.warehouse.get_empty_locations():
                     G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
                     G.update_sku_KD_trees(agent.get_sku_id_carrying())
@@ -87,7 +90,7 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                     pass
                 agent.set_sku_id_carrying(None)
 
-                S.add_completed_task_id(task_id, t, start_location, goal_location)
+                S.add_completed_task_id(task_id, t, start_location, goal_location, deadline, sku_id, inbound_task)
                 S.update_service_time(task_id, t)
                 
                 for task in J:
