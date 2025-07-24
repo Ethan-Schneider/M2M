@@ -51,18 +51,12 @@ class LNS:
         self.G = G
         self.Rs = self._copy_solution(Rs)
 
-        # print(f"Initial task assignment:")
-        # for agent in self.Rs.agents:
-        #     print(f"Agent {agent.id}: {agent.task_sequence}")
-
         # Remove all but the first task in each agent's task sequence
         for agent in self.Rs.agents:
+            if agent.task_sequence == []:
+                continue
             while len(agent.task_sequence) > 1:
                 agent.task_sequence.pop(-1)
-
-        # print(f"After removing all but the first task in each agent's task sequence:")
-        # for agent in self.Rs.agents:
-        #     print(f"Agent {agent.id}: {agent.task_sequence}")
 
         self.J = J
         self.initial_task_assignment_strategy = initial_task_assignment_strategy
@@ -89,7 +83,8 @@ class LNS:
         self.cost_lookup = {}
         
         # Construct initial cost elements
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx,  self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method)
+        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx, self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method)
+        print(f"original start_locs: {self.start_locs}")
         
     def run(self, t: int = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
         """
@@ -104,7 +99,6 @@ class LNS:
         start_time = time.time()
         inital_task_assignment_time = 0.0
         removal_time = 0.0
-        update_cost_tensor_time = 0.0
         repair_time = 0.0
         cost_computation_time = 0.0
 
@@ -133,6 +127,14 @@ class LNS:
             return self.Rs, [], -np.inf
         
         inital_task_assignment_time += time.time() - inital_task_assignment_tik
+        #Iterate over task assignment, if duplicate tasks are found, exit
+        task_ids = []
+        for agent in current_solution.agents:
+            for task in agent.task_sequence:
+                if task[0] in task_ids:
+                    print(f"Duplicate task found: {task}")
+                    exit(0)
+                task_ids.append(task[0])
 
         # Initialize best and current solution and allocations
         self.best_solution = self._copy_solution(current_solution)
@@ -144,6 +146,13 @@ class LNS:
         current_allocations = allocations.copy()
         current_cost_lookup = self.cost_lookup.copy()
         current_cost = self.best_cost
+
+        current_agent_start_cost_tensor = self.agent_start_cost_tensor.copy()
+        current_start_goal_dist = self.start_goal_dist.copy()
+        current_task_start_mask = self.task_start_mask.copy()
+        current_task_goal_mask = self.task_goal_mask.copy()
+        current_task_deadline_costs = self.task_deadline_costs.copy()
+        current_agent_task_sequence_time = self.agent_task_sequence_time.copy()
         
         # LNS logging
         lns_log = {
@@ -165,13 +174,19 @@ class LNS:
         
         T = self.T_0
         iteration = 0
+
         while time.time() - start_time < self.time_limit:
             # Create a copy of the current solution to modify
             temp_solution = self._copy_solution(current_solution)
             temp_cost_lookup = current_cost_lookup.copy()
             temp_allocations = current_allocations.copy()
 
-            self._update_cost_tensor(temp_solution)
+            temp_agent_start_cost_tensor = current_agent_start_cost_tensor.copy()
+            temp_start_goal_dist = current_start_goal_dist.copy()
+            temp_task_start_mask = current_task_start_mask.copy()
+            temp_task_goal_mask = current_task_goal_mask.copy()
+            temp_task_deadline_costs = current_task_deadline_costs.copy()
+            temp_agent_task_sequence_time = current_agent_task_sequence_time.copy()
 
             # Remove allocations
             removal_tik = time.time()
@@ -182,23 +197,24 @@ class LNS:
                                                                                    self.G, self.start_locs, self.goal_locs, self.cost_calculation_method, temp_cost_lookup)
             elif self.removal_operator == "shaw":
                 temp_solution, temp_allocations, temp_cost_lookup = shaw_removal(temp_solution, temp_allocations, self.removal_size, 
-                                                                                   self.G, self.start_locs, self.goal_locs, self.cost_calculation_method, temp_cost_lookup)
+                                                                                   self.G, self.start_locs, self.goal_locs, self.cost_calculation_method, temp_cost_lookup, self.task_id_to_idx,
+                                                                                   agent_start_cost_tensor=temp_agent_start_cost_tensor,
+                                                                                   start_goal_dist=temp_start_goal_dist,
+                                                                                   task_start_mask=temp_task_start_mask,
+                                                                                   task_goal_mask=temp_task_goal_mask,
+                                                                                   original_task_start_mask=self.task_start_mask,
+                                                                                   original_task_goal_mask=self.task_goal_mask)
             else:
                 print(f"ERROR: Unknown removal operator {self.removal_operator}, using worst removal")
                 temp_solution, temp_allocations, temp_cost_lookup = worst_removal(temp_solution, temp_allocations, self.removal_size, 
                                                                                    self.G, self.start_locs, self.goal_locs, self.cost_calculation_method, temp_cost_lookup)
             removal_time += time.time() - removal_tik
-
-            # Update cost tensor based on removed allocations
-            update_tik = time.time()
-            self._update_cost_tensor(temp_solution)
-            update_cost_tensor_time += time.time() - update_tik
             
             # Repair solution
             tik = time.time()
             if self.repair_operator == "greedy":
-                new_solution, temp_allocations, __, temp_cost_lookup = greedy_repair(self.S, self.G, self.agent_start_cost_tensor, 
-                                                                         self.start_goal_dist, self.task_start_mask, self.task_goal_mask, 
+                new_solution, __, temp_cost_lookup = greedy_repair(self.S, self.G, temp_agent_start_cost_tensor, 
+                                                                         temp_start_goal_dist, temp_task_start_mask, temp_task_goal_mask, 
                                                                          temp_solution, self.start_locs, self.goal_locs, 
                                                                          self.idx_to_task_id, temp_allocations, self.cost_calculation_method, self.J, temp_cost_lookup,
                                                                          inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
@@ -206,7 +222,7 @@ class LNS:
                                                                          base_cost_weight=self.base_cost_weight,
                                                                          deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
-                                                                         agent_task_sequence_time=self.agent_task_sequence_time)
+                                                                         agent_task_sequence_time=temp_agent_task_sequence_time)
             elif self.repair_operator == "fast_SCF":
                 new_solution, temp_allocations, __, temp_cost_lookup = fast_SCF_repair(self.S, self.G, self.agent_start_cost_tensor, 
                                                                          self.start_goal_dist, self.task_start_mask, self.task_goal_mask, 
@@ -232,12 +248,24 @@ class LNS:
                     current_solution = self._copy_solution(new_solution)
                     current_allocations = temp_allocations.copy()
                     current_cost_lookup = temp_cost_lookup.copy()
+                    current_agent_start_cost_tensor = temp_agent_start_cost_tensor.copy()
+                    current_start_goal_dist = temp_start_goal_dist.copy()
+                    current_task_start_mask = temp_task_start_mask.copy()
+                    current_task_goal_mask = temp_task_goal_mask.copy()
+                    current_task_deadline_costs = temp_task_deadline_costs.copy()
+                    current_agent_task_sequence_time = temp_agent_task_sequence_time.copy()
                     current_cost = new_cost
             elif self.acceptance_function == "simulated_annealing":
                 if new_cost > current_cost:
                     current_solution = self._copy_solution(new_solution)
                     current_allocations = temp_allocations.copy()
                     current_cost_lookup = temp_cost_lookup.copy()
+                    current_agent_start_cost_tensor = temp_agent_start_cost_tensor.copy()
+                    current_start_goal_dist = temp_start_goal_dist.copy()
+                    current_task_start_mask = temp_task_start_mask.copy()
+                    current_task_goal_mask = temp_task_goal_mask.copy()
+                    current_task_deadline_costs = temp_task_deadline_costs.copy()
+                    current_agent_task_sequence_time = temp_agent_task_sequence_time.copy()
                     current_cost = new_cost
                 else:
                     prob = math.exp((new_cost - current_cost) / T) if T > 0 else 0
@@ -245,6 +273,12 @@ class LNS:
                         current_solution = self._copy_solution(new_solution)
                         current_allocations = temp_allocations.copy()
                         current_cost_lookup = temp_cost_lookup.copy()
+                        current_agent_start_cost_tensor = temp_agent_start_cost_tensor.copy()
+                        current_start_goal_dist = temp_start_goal_dist.copy()
+                        current_task_start_mask = temp_task_start_mask.copy()
+                        current_task_goal_mask = temp_task_goal_mask.copy()
+                        current_task_deadline_costs = temp_task_deadline_costs.copy()
+                        current_agent_task_sequence_time = temp_agent_task_sequence_time.copy()
                         current_cost = new_cost
                 T = self.alpha * T
 
@@ -268,15 +302,12 @@ class LNS:
 
         print(f"Initial task assignment time: {inital_task_assignment_time}")
         print(f"Total removal time: {removal_time}")
-        print(f"Total update cost tensor time: {update_cost_tensor_time}")
         print(f"Total repair time: {repair_time}")
         print(f"Total cost computation time: {cost_computation_time}")
 
         print(f"Total time: {time.time() - start_time}")
 
-        print(f"Agent task sequences:")
-        for agent in self.best_solution.agents:
-            print(f"Agent {agent.id}: {agent.task_sequence}")
+        print(f"best solution: {[agent.task_sequence for agent in self.best_solution.agents]}")
 
         for agent in self.best_solution.agents:
             if len(agent.task_sequence) == 0:
@@ -301,31 +332,8 @@ class LNS:
     
     def _calculate_total_cost(self, cost_lookup: Dict[Tuple[int, int, int, int], int]) -> float:
         """Calculate total cost of a solution."""
-        total_cost = 0.0
-        for value in cost_lookup.values():
-            total_cost += value
-        return total_cost
+        return sum(cost_lookup.values())
     
-    def _update_cost_tensor(self, current_solution: AgentLoader) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
-        """
-        Reconstruct cost elements to include removed tasks as available for re-allocation.
-        Args:
-            removed_allocations: List of (agent_idx, task_idx, start_idx, goal_idx) tuples
-            current_solution: Current solution state after removal
-        Returns:
-            Tuple containing:
-            - agent_start_cost_tensor: (M, P)
-            - start_goal_dist: (P, Q)
-            - task_start_mask: (N, P)
-            - task_goal_mask: (N, Q)
-            - start_locs: List[Tuple[int, int]]
-            - goal_locs: List[Tuple[int, int]]
-            - idx_to_task_id: Dict[int, int]
-        """
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx, self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(
-            self.J, current_solution, self.G, self.current_time, self.cost_calculation_method
-        )
-
 def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",

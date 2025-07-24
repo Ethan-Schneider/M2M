@@ -2,7 +2,7 @@ from .analysis.statistics import Stats
 from .graph import Graph
 from .agent import *
 from .utils import *
-
+from typing import Dict, Tuple
 from .task_allocation_algorithms.c_lns import lns_call
 from .task_allocation_algorithms.c_p_lns import p_lns_call
 from .task_allocation_algorithms.initial_solutions.max_regret_FC import max_regret_FC_call
@@ -16,7 +16,7 @@ from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
 from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
 from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
 
-def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task_assignment_strategy : str, 
+def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], initial_task_assignment_strategy : str, 
                    improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, 
                    removal_operator : str = "worst", repair_operator : str = "greedy", 
                    acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
@@ -29,7 +29,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : set, initial_task
         S (Stats): Statistics object
         G (Graph): Map data object
         Rs (list): Agent Loader Object
-        J (set): Set of tasks in the form {(task_id, start_loc, goal_loc)}
+        J (dict): Dict of tasks in the form {task_id: (start_loc, goal_loc, deadline, sku_id, inbound)}
         initial_task_assignment_strategy (str): Chosen task_allocation algorithm to use
         improvement_task_assignment_strategy (str): Chosen task_allocation algorithm to use
         map (str): Map name

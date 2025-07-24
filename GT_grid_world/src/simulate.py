@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Dict
 
 from .analysis.statistics import Stats
 from .analysis.buffer import Buffer
@@ -6,18 +6,31 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
-def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_name : str, t : int) -> Tuple[AgentLoader, set]:
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
+def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
+    """
+    Simulate the system for one timestep.
+
+    Args:
+        S (Stats): Statistics object
+        B (Buffer): Buffer object
+        G (Graph): Graph object
+        Rs (AgentLoader): AgentLoader object
+        J (Dict[int, Tuple]): Dictionary of tasks
+        map_name (str): Name of the map
+        t (int): Current timestep
+
+    Returns:
+        Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks
+    """
+
     # Update state of robots
     for agent in Rs.agents:
         # If robot sequence is stationary, leave the robot in place (wait action)
-        # BUG: crashes when router fails to find a solution 
         if len(agent.path_sequence) == 0:
             continue
         # If robot does have a sequence of actions, pop next state and update
         else:
             # Update Agent State and Graph Occupied States
-            old_state = agent.state
             G.set_occupied(agent.state, False)
             agent.state = agent.path_sequence.pop(0)
             G.set_occupied(agent.state, True)
@@ -76,13 +89,10 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                 start_location = task[1]
                 goal_location = task[2]
 
-                for task in J:
-                    if task[0] == task_id:
-                        deadline = task[3]
-                        sku_id = task[4]
-                        inbound_task = task[5]
-                        break
-                    
+                deadline = J[task_id][2]
+                sku_id = J[task_id][3]
+                inbound_task = J[task_id][4]
+
                 if goal_location in G.warehouse.get_empty_locations():
                     G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
                     G.update_sku_KD_trees(agent.get_sku_id_carrying())
@@ -90,13 +100,10 @@ def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : set, map_na
                     pass
                 agent.set_sku_id_carrying(None)
 
-                S.add_completed_task_id(task_id, t, start_location, goal_location, deadline, sku_id, inbound_task)
+                S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
                 S.update_service_time(task_id, t)
                 
-                for task in J:
-                    if task[0] == task_id:
-                        J.remove(task)
-                        break
+                J.pop(task_id)
                     
                 agent.task_sequence.pop(0)
                 if agent.task_sequence == []:

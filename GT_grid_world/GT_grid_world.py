@@ -21,8 +21,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             base_cost_weight: float = 1.0,
             deadline_weight: float = 0.0,
             sku_distribution_weight: float = 0.0):
-    # Initilize empty set of tasks, task is defined as (id, start_loc, goal_loc)
-    J = set()
+    # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
+    J = {}
 
     last_task_id = 0
     
@@ -45,14 +45,12 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
                 # Generate new tasks
                 tik = time.time()
 
-                J_new, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
+                J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
                                                                                                 inbound_to_outbound_ratio, last_task_id, max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
-                # Append the new tasks to the list of tasks
-                J |= J_new
             
         tik = time.time()
 
@@ -103,7 +101,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
 
         for agent in Rs.agents:
             if agent.path_sequence == []:
-                Rs = router.pathPlan(map, Rs, J, path_planning_strategy, S)
+                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
                 break
             
         tok = time.time()

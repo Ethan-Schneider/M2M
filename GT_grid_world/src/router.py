@@ -4,8 +4,9 @@ from src.path_finding_algorithms.external_algorithms.PBS import pbs
 from .agent import *
 from .utils import *
 from .analysis.statistics import *
+from typing import Dict, Tuple
 
-def pathPlan(map : str, Rs : AgentLoader, J : set, path_planning_strategy : str, S : Stats) -> AgentLoader:
+def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
     states = [agent.state for agent in Rs.agents]
 
     goal_locations = []

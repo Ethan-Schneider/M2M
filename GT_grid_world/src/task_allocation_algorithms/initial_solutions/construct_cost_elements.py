@@ -32,11 +32,11 @@ def calculate_deadline_cost(deadline: int, current_time: int) -> int:
         overdue_time = abs(time_until_deadline)
         return int(60 + overdue_time)  # Quadratic penalty for overdue tasks
 
-def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
+def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
     Compute the cost elements needed for allocation.
     Args:
-        - J: Set[Tuple]
+        - J: Dict[task_id, (start_loc, goal_loc, deadline, sku_id, inbound)]
         - Rs: AgentLoader
         - G: Graph
         - current_time: Current timestep for deadline calculations
@@ -49,25 +49,26 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
         - start_locs: List[Tuple[int, int]]
         - goal_locs: List[Tuple[int, int]]
     """
-    allocated_tasks = set()
+    allocated_task_ids = set()
     for agent in Rs.agents:
         for task in agent.task_sequence:
-            allocated_tasks.add(task[0])
+            allocated_task_ids.add(task[0])
 
-    unallocated_tasks = [task for task in J if task[0] not in allocated_tasks]
+    unallocated_task_ids = [task_id for task_id in J.keys() if task_id not in allocated_task_ids]
 
     M = len(Rs.agents)  # Number of agents
-    N = len(unallocated_tasks) # Number of tasks
+    N = len(unallocated_task_ids) # Number of tasks
 
     # Get all possible start and goal locations from unallocated tasks
     all_start_locs = set()
     all_goal_locs = set()
-    for task in unallocated_tasks:
-        all_start_locs.update(task[1])  # start_locations_frozenset
-        all_goal_locs.update(task[2])  # goal_locations_frozenset
+    for task_id in unallocated_task_ids:
+        all_start_locs.update(J[task_id][0])  # start_locations_frozenset
+        all_goal_locs.update(J[task_id][1])  # goal_locations_frozenset
 
     # idx to task_id mapping
-    idx_to_task_id = {idx: task[0] for idx, task in enumerate(unallocated_tasks)}
+    idx_to_task_id = {idx: task_id for idx, task_id in enumerate(unallocated_task_ids)}
+    task_id_to_idx = {task_id: idx for idx, task_id in enumerate(unallocated_task_ids)}
     
     # Convert to sorted lists for consistent indexing
     start_locs = sorted(list(all_start_locs))
@@ -108,16 +109,16 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
 
     # 2. Build (N, P) task-start membership matrix (1 if task n has start_loc p and p not unusable, else 0)
     task_start_mask = np.zeros((N, P), dtype=np.float32)
-    for n, task in enumerate(unallocated_tasks):
-        for s in task[1]:
+    for n, task_id in enumerate(unallocated_task_ids):
+        for s in J[task_id][0]:
             if s not in allocated_locs:
                 i = start_loc_to_idx[s]
                 task_start_mask[n, i] = 1.0
 
     # 3. Build (N, Q) task-goal membership matrix (1 if task n has goal_loc q and q not unusable, else 0)
     task_goal_mask = np.zeros((N, Q), dtype=np.float32)
-    for n, task in enumerate(unallocated_tasks):
-        for g in task[2]:
+    for n, task_id in enumerate(unallocated_task_ids):
+        for g in J[task_id][1]:
             if g not in unusable_locs:
                 j = goal_loc_to_idx[g]
                 task_goal_mask[n, j] = 1.0
@@ -153,28 +154,28 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
             # agent_start_cost_tensor[m, i] = 0.3*base_cost + 0.7*deadline_urgency_cost
     # 5. Build (N) vector of task deadline costs
     task_deadline_costs = np.zeros(N)
-    for n, task in enumerate(unallocated_tasks):
-        task_deadline_costs[n] = calculate_deadline_cost(task[3], current_time)
+    for n, task_id in enumerate(unallocated_task_ids):
+        task_deadline_costs[n] = calculate_deadline_cost(J[task_id][2], current_time)
 
     # 6. Build (N, Q) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
     inbound_sku_distribution_costs = np.full((N, Q), -1*np.inf)
-    for n, task in enumerate(unallocated_tasks):
-        if task[5] == 1: # inbound task
+    for n, task_id in enumerate(unallocated_task_ids):
+        if J[task_id][4] == 1: # inbound task
             # if inbound task, iterate over all goal locations and calculate distance to each goal location in the task's goal locations
             for q in range(Q):
-                if goal_locs[q] in task[2]:
-                    inbound_sku_distribution_costs[n, q] = G.query_sku_KD_trees(task[4], goal_locs[q], 1)[0]
+                if goal_locs[q] in J[task_id][1]:
+                    inbound_sku_distribution_costs[n, q] = G.query_sku_KD_trees(J[task_id][3], goal_locs[q], 1)[0]
         # else do nothing
 
     # 7. Build (N, P) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
     outbound_sku_distribution_costs = np.full((N, P), -1*np.inf)
-    for n, task in enumerate(unallocated_tasks):
-        if task[5] == 0: # outbound task
+    for n, task_id in enumerate(unallocated_task_ids):
+        if J[task_id][4] == 0: # outbound task
             # if outbound task, iterate over all start locations and calculate distance to each start location in the task's start locations
             for p in range(P):
-                if start_locs[p] in task[1]:
+                if start_locs[p] in J[task_id][0]:
                     #get the second closest location
-                    outbound_sku_distribution_costs[n, p] = -1*G.query_sku_KD_trees(task[4], start_locs[p], 2)[0][1]
+                    outbound_sku_distribution_costs[n, p] = -1*G.query_sku_KD_trees(J[task_id][3], start_locs[p], 2)[0][1]
 
     # 8. Build vector of size (M) which includes the estimated time for the agent to complete the task sequence
     agent_task_sequence_time = np.zeros(M)
@@ -188,4 +189,4 @@ def construct_cost_elements(J: Set[Tuple], Rs: AgentLoader, G: Graph, current_ti
             #add the distance between the start of the current task to the goal of the current task
             agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[i][1], Rs.agents[m].task_sequence[i][2])
 
-    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time
+    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time

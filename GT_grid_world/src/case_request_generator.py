@@ -1,16 +1,16 @@
 import numpy as np
 import random
-from typing import Set, Tuple
+from typing import Set, Tuple, Dict
 from .graph import Graph
 from .agent import AgentLoader
 from .inventory_manager.inventory import Inventory
 from .utils import *
 from .analysis.statistics import Stats
     
-def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
+def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
         last_task_id: int, max_task_number: int, inventory: Inventory,
         strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant",
-        deadline_offset: float = 30) -> Tuple[Set[Tuple], int]:
+        deadline_offset: float = 30) -> Tuple[Dict[int, Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
     Each task is defined as (task_id, S_n, D_n, deadline) where:
@@ -39,12 +39,11 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
     
     # Check if we've reached the maximum number of tasks
     if len(J) >= max_task_number:
-        return set(), last_task_id
+        return J, last_task_id
     
     inbound_probability = inbound_to_outbound / (inbound_to_outbound + 1)
     outbound_probability = 1 - inbound_probability
     tasks_to_generate = np.random.choice([0, 1], size=int(N), p=[outbound_probability, inbound_probability])
-    J_new = set()
 
     # Deadline generation
     def get_deadline(current_time: int) -> int:
@@ -81,7 +80,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, start_locations, goal_locations, deadline))
+                J[last_task_id + 1] = (start_locations, goal_locations, deadline, 0, 1)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -97,7 +96,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, start_locations, goal_locations, deadline))
+                J[last_task_id + 1] = (start_locations, goal_locations, deadline, 0, 0)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -129,7 +128,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1))
+                J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -149,7 +148,7 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
                     continue
                 
                 deadline = get_deadline(t)
-                J_new.add((last_task_id + 1, frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0))
+                J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -161,5 +160,5 @@ def CRG(S: Stats, t: int, J: Set[Tuple], G: Graph, Rs: AgentLoader, N: int, inbo
     # print(f"Inbound tasks: {inbound_tasks}")
     # print(f"Number of outbound tasks: {len(outbound_tasks)}")
     # print(f"Number of inbound tasks: {len(inbound_tasks)}")
-    return J_new, last_task_id, outbound_tasks, inbound_tasks
+    return J, last_task_id, outbound_tasks, inbound_tasks
     
