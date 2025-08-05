@@ -20,7 +20,8 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             intermediate_data_interval: int = 1800,
             base_cost_weight: float = 1.0,
             deadline_weight: float = 0.0,
-            sku_distribution_weight: float = 0.0):
+            sku_distribution_weight: float = 0.0,
+            agent_unallocated_penalty: float = 0.0):
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
@@ -62,7 +63,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
             
         if total < max_task_number:
             print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -169,7 +170,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          intermediate_data_interval: int = 1800,
          base_cost_weight: float = 1.0,
          deadline_weight: float = 0.0,
-         sku_distribution_weight: float = 0.0) -> None:
+         sku_distribution_weight: float = 0.0,
+         agent_unallocated_penalty: float = 0.0) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -242,7 +244,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         intermediate_data_interval=intermediate_data_interval,
         base_cost_weight=base_cost_weight,
         deadline_weight=deadline_weight,
-        sku_distribution_weight=sku_distribution_weight
+        sku_distribution_weight=sku_distribution_weight,
+        agent_unallocated_penalty=agent_unallocated_penalty
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -277,7 +280,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             intermediate_data_interval=intermediate_data_interval,
             base_cost_weight=base_cost_weight,
             deadline_weight=deadline_weight,
-            sku_distribution_weight=sku_distribution_weight)
+            sku_distribution_weight=sku_distribution_weight,
+            agent_unallocated_penalty=agent_unallocated_penalty)
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -352,6 +356,7 @@ if __name__=="__main__":
     parser.add_argument('--base-cost-weight', type=float, default=1.0, help='Weight for base cost')
     parser.add_argument('--deadline-weight', type=float, default=0.0, help='Weight for deadline')
     parser.add_argument('--sku-distribution-weight', type=float, default=0.0, help='Weight for sku distribution')
+    parser.add_argument('--agent-unallocated-penalty', type=float, default=0.0, help='Penalty for unallocated agents')
     args = parser.parse_args()
     
     main(
@@ -384,5 +389,6 @@ if __name__=="__main__":
         intermediate_data_interval=args.intermediate_data_interval,
         base_cost_weight=args.base_cost_weight,
         deadline_weight=args.deadline_weight,
-        sku_distribution_weight=args.sku_distribution_weight
+        sku_distribution_weight=args.sku_distribution_weight,
+        agent_unallocated_penalty=args.agent_unallocated_penalty
     )

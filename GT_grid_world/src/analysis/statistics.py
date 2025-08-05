@@ -14,7 +14,8 @@ class Stats:
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
-                 base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None) -> None:
+                 base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
+                 agent_unallocated_penalty: float = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -46,6 +47,7 @@ class Stats:
         self.__base_cost_weight = base_cost_weight
         self.__deadline_weight = deadline_weight
         self.__sku_distribution_weight = sku_distribution_weight
+        self.__agent_unallocated_penalty = agent_unallocated_penalty
 
         self.__output_file = output_file
         
@@ -642,7 +644,7 @@ class Stats:
             "base_cost_weight": self.__base_cost_weight,
             "deadline_weight": self.__deadline_weight,
             "sku_distribution_weight": self.__sku_distribution_weight,
-
+            "agent_unallocated_penalty": self.__agent_unallocated_penalty,
             # Simulation results
             "timesteps_completed": self.__T,
             "total_completed_tasks": int(len(self.__completed_task_ids)),

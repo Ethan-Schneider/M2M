@@ -10,7 +10,8 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
                  method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None, task_id_to_idx: Dict[int, int] = None,
                  omega_1: float = 9.0, omega_2: float = 3.0, agent_start_cost_tensor: np.ndarray = None,
                  start_goal_dist: np.ndarray = None, task_start_mask: np.ndarray = None, task_goal_mask: np.ndarray = None,
-                 original_task_start_mask: np.ndarray = None, original_task_goal_mask: np.ndarray = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], Dict[Tuple[int, int, int, int], int]]:
+                 original_task_start_mask: np.ndarray = None, original_task_goal_mask: np.ndarray = None,
+                 agent_task_sequence_time: np.ndarray = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], Dict[Tuple[int, int, int, int], int]]:
     """
     Shaw removal operator: randomly choose one task, then remove N-1 tasks in decreasing order of relatedness.
     
@@ -38,6 +39,10 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
     if len(allocations) == 0:
         return Rs, allocations, cost_lookup
     
+    # print(f"cost lookup: {cost_lookup}")
+    # print(f"number of cost lookup: {len(cost_lookup.keys())}")
+    # print(f"start_locs: {start_locs}")
+    # print(f"number of start locations: {len(start_locs)}")
     # Randomly choose one task as the seed
     seed_agent_idx, seed_task_id, seed_start_idx, seed_goal_idx = random.choice(list(cost_lookup.keys()))
     
@@ -140,9 +145,24 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         task_goal_mask[:, goal_idx] = original_task_goal_mask[:, goal_idx]
 
     # Update cost elements of task_start_mask and task_goal_mask for removed task idx
+    # Need to ensure that the specific start and goal locations that are used are still marked in the updated mask
     for task_id in tasks_to_update:
         task_start_mask[task_id_to_idx[task_id], :] = original_task_start_mask[task_id_to_idx[task_id], :]
         task_goal_mask[task_id_to_idx[task_id], :] = original_task_goal_mask[task_id_to_idx[task_id], :]
+
+    # Iterate over allocated tasks and edit masks to not use those locations
+    for agent_idx, task_id, start_idx, goal_idx in cost_lookup.keys():
+        task_start_mask[:, start_idx] = 0.0
+        task_goal_mask[:, goal_idx] = 0.0
+
+    # Iterate over all agents in Rs and for the first task in each agent's task sequence, edit the masks to not use those locations
+    for agent in Rs.agents:
+        if len(agent.task_sequence) == 0:
+            continue
+        if agent.task_sequence[0][1] in start_locs:
+            task_start_mask[:, start_locs.index(agent.task_sequence[0][1])] = 0.0
+        if agent.task_sequence[0][2] in goal_locs:
+            task_goal_mask[:, goal_locs.index(agent.task_sequence[0][2])] = 0.0
 
     for agent_idx in changed_agents:
         if len(Rs.agents[agent_idx].task_sequence) == 0:
@@ -152,13 +172,32 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         
         for i, s in enumerate(start_locs):
             if method == "manhattan":
-                agent_start_cost_tensor[agent_idx, i] = -1.0 * manhattan_distance(agent_pos, s)
+                cost = -1.0 * manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                agent_start_cost_tensor[agent_idx, i] = -1.0 * G.get_distance(agent_pos, s)
+                cost = -1.0 * G.get_distance(agent_pos, s)
+            agent_start_cost_tensor[agent_idx, i] = cost
 
-    #TODO: Update agent_task_sequence_time
-    
-    return Rs, allocations, cost_lookup
+    # Update agent_task_sequence_time for changed agents
+    for agent_idx in changed_agents:
+        agent = Rs.agents[agent_idx]
+        if len(agent.task_sequence) == 0:
+            # If agent has no tasks, reset to initial state
+            agent_task_sequence_time[agent_idx] = 0.0
+        else:
+            # Recalculate agent_task_sequence_time based on current task sequence
+            total_time = 0.0
+            if len(agent.task_sequence) == 1:
+                # Single task: distance from agent state to start + start to goal
+                total_time = G.get_distance(agent.state, agent.task_sequence[0][1]) + G.get_distance(agent.task_sequence[0][1], agent.task_sequence[0][2])
+            else:
+                # Multiple tasks: include all transitions
+                total_time = G.get_distance(agent.state, agent.task_sequence[0][1]) + G.get_distance(agent.task_sequence[0][1], agent.task_sequence[0][2])
+                for i in range(1, len(agent.task_sequence)):
+                    total_time += G.get_distance(agent.task_sequence[i-1][2], agent.task_sequence[i][1]) + G.get_distance(agent.task_sequence[i][1], agent.task_sequence[i][2])
+            agent_task_sequence_time[agent_idx] = total_time
+
+    # Return updated cost elements
+    return Rs, allocations, cost_lookup, task_start_mask, task_goal_mask, agent_start_cost_tensor, agent_task_sequence_time
 
 def _calculate_time_at_location(Rs: AgentLoader, agent_idx: int, task_id: int, start_idx: int, goal_idx: int, 
                                cost_lookup: Dict[Tuple[int, int, int, int], int], is_start: bool) -> float:

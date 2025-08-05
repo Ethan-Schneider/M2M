@@ -13,7 +13,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                  method: str = "manhattan", J: Dict[int, Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  inbound_sku_distribution_costs: np.ndarray = None, outbound_sku_distribution_costs: np.ndarray = None,
                  base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
-                 agent_task_sequence_time: np.ndarray = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -29,6 +29,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         idx_to_task_id: Mapping from tensor indices to task IDs
         temp_allocations: List of current allocations (agent_idx, task_idx, start_idx, goal_idx)
         method: Cost calculation method ("manhattan" or "shortest_path")
+        current_time: Current timestep for deadline calculations
     Returns:
         Tuple containing:
         - AgentLoader with updated task sequences
@@ -44,10 +45,22 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
     total_find_best_task_time = 0.0
 
     while True:
-        # If all tasks are assigned, if no start or goal locations are left, break
-        if len(cost_lookup.keys()) == N:
-            break
+        # If no start or goal locations are left, break
         if np.all(task_start_mask == 0) or np.all(task_goal_mask == 0):
+            break
+        
+        # Check if we can assign any more tasks
+        can_assign_any = False
+        for n in range(N):
+            if idx_to_task_id[int(n)] in [key[1] for key in cost_lookup.keys()]:
+                continue
+            valid_p = np.where(task_start_mask[n] == 1)[0]
+            valid_q = np.where(task_goal_mask[n] == 1)[0]
+            if len(valid_p) > 0 and len(valid_q) > 0:
+                can_assign_any = True
+                break
+        
+        if not can_assign_any:
             break
 
         best_cost = -np.inf
@@ -75,14 +88,26 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
 
-            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
+            # Calculate base costs with deadline and agent_task_sequence_time considerations
+            deadline = J[idx_to_task_id[int(n)]][2]
+            if deadline_weight > 0.0:
+                # If deadline has not passed
+                if deadline - current_time > 0:
+                    base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+                # If deadline has passed
+                else:
+                    base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            else:
+                base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
 
+            # Add sku distribution costs
             if J[idx_to_task_id[int(n)]][4] == 1:
                 inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
                 total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
             else:
                 outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
                 total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+
             # Find the index of the maximum cost (since costs are negative, this minimizes distance)
             new_idx = np.argmax(total_costs)
             new_cost = total_costs.flat[new_idx]
@@ -145,6 +170,14 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
 
+        # Update agent task sequence time
+        if len(Rs.agents[m].task_sequence) > 1:
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-2][2], Rs.agents[m].task_sequence[-1][1])
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-1][1], Rs.agents[m].task_sequence[-1][2])
+        else:
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
+            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[0][1], Rs.agents[m].task_sequence[0][2])
+
         total_update_time += time.time() - tik
 
-    return Rs, total_cost, cost_lookup
+    return Rs, total_cost, cost_lookup, task_start_mask, task_goal_mask, agent_start_cost_tensor, agent_task_sequence_time
