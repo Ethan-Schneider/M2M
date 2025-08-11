@@ -166,19 +166,19 @@ class Stats:
             if not agent.task_sequence:
                 num += 1
                 
-        self.__unallocated_agents.append(num)
+        self.__unallocated_agents.append(int(num))
         
     def append_early_task_ids(self, task_id : int) -> None:
         self.__early_task_ids.append(task_id)
 
     def append_open_nodes(self, opened_nodes : int) -> None:
-        self.__opened_nodes.append(opened_nodes)
+        self.__opened_nodes.append(int(opened_nodes))
 
     def append_expanded_nodes(self, expanded_nodes : int) -> None:
-        self.__expanded_nodes.append(expanded_nodes)
+        self.__expanded_nodes.append(int(expanded_nodes))
         
     def append_number_of_collisions(self, number_of_collisions : int) -> None:
-        self.__collisions.append(number_of_collisions)
+        self.__collisions.append(int(number_of_collisions))
         
     def add_estimated_duration(self, task_id : int, estimated_duration : float) -> None:
         self.__estimated_duration[task_id] = estimated_duration
@@ -429,7 +429,7 @@ class Stats:
         return np.sum(list(self.__actual_distance.values()))/60
 
     def compute_stationary_robots(self) -> list:
-        num_idle_robots = [len(self.__paths)]
+        num_idle_robots = [int(len(self.__paths))]
         
         # Create numpy array of tuples
         paths = np.asarray(self.__paths, dtype="f,f")
@@ -663,7 +663,7 @@ class Stats:
             "estimated_duration_of_task_from_start_to_pick": self.__estimated_pickup_duration,
             "collisions": int(np.sum(self.__collisions)),
             "stationary_robots": self.compute_stationary_robots(),
-            # "unallocated_agents": self.__unallocated_agents,
+            "unallocated_agents": self.__unallocated_agents,
             # "throughput (tasks/min)": self.return_throughput(),
             # "SoC(min)": self.__soc,
             # "Total Runtime": self.__total_runtime,
