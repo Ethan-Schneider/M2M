@@ -684,16 +684,16 @@ class Stats:
             "agent_statuses_per_timestep": self.__agent_statuses_per_timestep,
             "agent_goal_locations_per_timestep": self.__agent_goal_locations_per_timestep,
             "tasks_in_system": self.__tasks_in_system,
-            # "warehouse_full_locations_per_timestep": self.__warehouse_full_locations_per_timestep,
-            # "warehouse_row_counts_per_timestep": self.__warehouse_row_counts_per_timestep,
-            # "warehouse_col_counts_per_timestep": self.__warehouse_col_counts_per_timestep,
-            # "driveway_full_locations_per_timestep": self.__driveway_full_locations_per_timestep,
-            # "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
-            # "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
-            # "py_lns_logs": self.__py_lns_logs,
-            # "overdue_task_completions": self.__overdue_task_completions,
-            # "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
-            # "sku_locations_per_timestep": self.__sku_locations_per_timestep
+            "warehouse_full_locations_per_timestep": self.__warehouse_full_locations_per_timestep,
+            "warehouse_row_counts_per_timestep": self.__warehouse_row_counts_per_timestep,
+            "warehouse_col_counts_per_timestep": self.__warehouse_col_counts_per_timestep,
+            "driveway_full_locations_per_timestep": self.__driveway_full_locations_per_timestep,
+            "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
+            "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
+            "py_lns_logs": self.__py_lns_logs,
+            "overdue_task_completions": self.__overdue_task_completions,
+            "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
+            "sku_locations_per_timestep": self.__sku_locations_per_timestep
         }
         
         if intermediate_output_file is not None:
