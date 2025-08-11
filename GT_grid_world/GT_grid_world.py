@@ -115,7 +115,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, J = simulate.simulate(S, B, G, Rs, J, map, t)
+        Rs, J = simulate.simulate(S, G, Rs, J, map, t)
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
