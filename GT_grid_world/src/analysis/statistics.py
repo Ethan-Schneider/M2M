@@ -336,8 +336,8 @@ class Stats:
             start_location (tuple): The start location of the task
             goal_location (tuple): The goal location of the task
         """
-        self.__completed_task_ids.append(task_id)
-        self.__task_completion_timestamps[task_id] = timestep
+        self.__completed_task_ids.append(int(task_id))
+        self.__task_completion_timestamps[task_id] = int(timestep)
         if start_location is not None and goal_location is not None:
             self.__completed_task_details[task_id] = (start_location, goal_location, deadline, sku_id, inbound_task)
         
@@ -353,7 +353,7 @@ class Stats:
     # ====================== Completed To-Pickup Task Id Functions
     
     def add_completed_to_pickup_task_id(self, task_id : int) -> None:
-        self.__completed_to_pickup_task_ids.append(task_id)
+        self.__completed_to_pickup_task_ids.append(int(task_id))
         
     # ====================== Runtime Functions
     

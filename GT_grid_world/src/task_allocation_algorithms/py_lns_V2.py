@@ -348,9 +348,9 @@ class LNS:
                 best_allocations = temp_allocations.copy()
                 best_cost_lookup = temp_cost_lookup.copy()
                 lns_log["improvements"].append({
-                    "iteration": iteration + 1,
-                    "wall_time": np.abs(time.time() - start_time),
-                    "cost": new_cost
+                    "iteration": int(iteration + 1),
+                    "wall_time": float(np.abs(time.time() - start_time)),
+                    "cost": float(new_cost)
                 })
             
             iteration += 1
