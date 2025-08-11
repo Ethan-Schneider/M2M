@@ -3,9 +3,9 @@ import numpy as np
 import argparse
 
 from src import graph, simulate, task_allocation, case_request_generator, router, agent
-from src.analysis import visualize, statistics, buffer
+from src.analysis import visualize, statistics
 
-def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
+def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
             initial_task_assignment_strategy : str = "lns",
@@ -32,7 +32,7 @@ def execute(S : statistics.Stats, B : buffer.Buffer, map : str, Rs : agent.Agent
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
         # Update Buffer 
-        B.add(Rs.get_agent_states(), t)
+        # B.add(Rs.get_agent_states(), t)
         
         print("=============================" + "Task Generation"+ "=============================")
         if t%frequency == 0:
@@ -212,7 +212,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}.json"
     buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
-    B = buffer.Buffer(80, buffer_file)
+    # B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
         num_robots=num_robots,
         simulation_time=T,
@@ -261,7 +261,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     
     tik = time.time()
     # Execute online algorithm
-    execute(S, B, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
+    execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
             case_request_strategy=task_generation_strategy, 
             max_task_number=max_number_tasks, 
             initial_task_assignment_strategy=initial_task_assignment_strategy, 
