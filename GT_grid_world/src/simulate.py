@@ -1,18 +1,16 @@
 from typing import Tuple, Dict
 
 from .analysis.statistics import Stats
-from .analysis.buffer import Buffer
 from .graph import Graph
 from .agent import *
 from .utils import *
 
-def simulate(S : Stats, B : Buffer, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
+def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
     """
     Simulate the system for one timestep.
 
     Args:
         S (Stats): Statistics object
-        B (Buffer): Buffer object
         G (Graph): Graph object
         Rs (AgentLoader): AgentLoader object
         J (Dict[int, Tuple]): Dictionary of tasks
