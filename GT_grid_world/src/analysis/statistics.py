@@ -438,7 +438,7 @@ class Stats:
         prev_state = paths.T[0]
         # Iterate over the state of the system at each timestep, checking how many robots are in the same position as the previous state
         for state in paths.T[1:]:
-            num_idle_robots.append(np.count_nonzero(prev_state == state))
+            num_idle_robots.append(int(np.count_nonzero(prev_state == state)))
             prev_state = state
         return num_idle_robots
     
