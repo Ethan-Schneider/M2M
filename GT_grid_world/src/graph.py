@@ -316,7 +316,7 @@ class Graph:
             if self.__obstacle_graph[self.__aisle_start, col] == 1:
                 continue
             agent_count = np.count_nonzero(np.array([x.get_occupied() for x in self.__occupancy_graph[0:self.__aisle_start, col]]))
-            aisle_occupied.append(agent_count)
+            aisle_occupied.append(int(agent_count))
         return aisle_occupied
     
     def get_driveway_occupancy(self) -> list:
