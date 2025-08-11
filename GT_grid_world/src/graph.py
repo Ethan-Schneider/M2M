@@ -326,7 +326,7 @@ class Graph:
             if self.__obstacle_graph[self.__driveway_start, col] == 1:
                 continue
             agent_count = np.count_nonzero(np.array([x.get_occupied() for x in self.__occupancy_graph[self.__driveway_start:, col]]))
-            driveway_occupied.append(agent_count)
+            driveway_occupied.append(int(agent_count))
         return driveway_occupied
     
     def get_all_occupied(self) -> list:
