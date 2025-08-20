@@ -128,21 +128,22 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                     continue
                 
                 deadline = get_deadline(t)
+                J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
 
-                # If c_lns, compute the distances between all start and goal locations and set the start and goal location to that
-                if improvement_task_assign_strategy == "c_lns":
-                    # Compute the distances between all start and goal locations
-                    distances = {}
-                    for start_location in available_start_locations:
-                        for goal_location in available_goal_locations:
-                            distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
-                    # Find the start and goal location that minimizes the distance
-                    chosen_start_location, chosen_goal_location = min(distances, key=distances.get)
-                    J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 1)
+                # # If c_lns, compute the distances between all start and goal locations and set the start and goal location to that
+                # if improvement_task_assign_strategy == "c_lns":
+                #     # Compute the distances between all start and goal locations
+                #     distances = {}
+                #     for start_location in available_start_locations:
+                #         for goal_location in available_goal_locations:
+                #             distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
+                #     # Find the start and goal location that minimizes the distance
+                #     chosen_start_location, chosen_goal_location = min(distances, key=distances.get)
+                #     J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 1)
                     
-                else:
-                    # add the set of start and goal locations to the task
-                    J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
+                # else:
+                #     # add the set of start and goal locations to the task
+                #     J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
                     
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
@@ -154,7 +155,7 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                 available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
                 
                 # Goal locations are all driveway nodes (excluding already assigned locations)
-                available_goal_locations = set(G.driveway.get_empty_locations())
+                available_goal_locations = set(G.outbound_station_locations)
                 
                 if not available_start_locations or not available_goal_locations:
                     print(f"No available start or goal locations for SKU {sku_id}: Outbound task")
@@ -163,18 +164,24 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                     continue
                 
                 deadline = get_deadline(t)
+                J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
 
-                if improvement_task_assign_strategy == "c_lns":
-                    # Compute the distances between all start and goal locations
-                    distances = {}
-                    for start_location in available_start_locations:
-                        for goal_location in available_goal_locations:
-                            distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
-                    # Find the start and goal location that minimizes the distance
-                    J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 0)
-                else:
-                    # add the set of start and goal locations to the task
-                    J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
+                # if improvement_task_assign_strategy == "c_lns":
+                #     # Remove already assigned locations from available goal locations
+                #     assigned_goal_locations = set(agent.state for agent in Rs.get_free_agents())
+                #     available_goal_locations = available_goal_locations - assigned_goal_locations
+                #     # Compute the distances between all start and goal locations
+                #     distances = {}
+                #     for start_location in available_start_locations:
+                #         for goal_location in available_goal_locations:
+                #             distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
+                #     # Find the start and goal location that minimizes the distance
+                #     chosen_start_location, chosen_goal_location = min(distances, key=distances.get)
+                #     # Set the start and goal location to that
+                #     J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 0)
+                # else:
+                #     # add the set of start and goal locations to the task
+                #     J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
                     
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)

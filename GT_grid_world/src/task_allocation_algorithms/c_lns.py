@@ -8,7 +8,6 @@ from ..analysis.statistics import Stats
 from ..graph import Graph
 
 from ..task_allocation_algorithms.external_algorithms.lns import lns
-from ..task_allocation_algorithms.external_algorithms.lns import dc
 
 def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[int, Tuple], t : int) -> AgentLoader:
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
@@ -28,9 +27,27 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
     
     unassigned_task_ids = list(set(all_task_ids) - set(assigned_tasks))
     unassigned_tasks = []
+    
+    assigned_locations = []
+    for agent in Rs.agents:
+        for task in agent.task_sequence:
+            assigned_locations.append(task[1])
+            assigned_locations.append(task[2])
 
     for task_id in unassigned_task_ids:
-        unassigned_tasks.append((task_id, J[task_id][0], J[task_id][1]))
+        # Find min distance between task's start and goal locations while removing any already assigned locations
+        start_locations = list(set(J[task_id][0]) - set(assigned_locations))
+        goal_locations = list(set(J[task_id][1]) - set(assigned_locations))
+        if start_locations and goal_locations:
+            chosen_start_location = start_locations[np.random.randint(0, len(start_locations))]
+            chosen_goal_location = goal_locations[np.random.randint(0, len(goal_locations))]
+            unassigned_tasks.append((task_id, list(chosen_start_location), list(chosen_goal_location)))
+            assigned_locations.append(chosen_start_location)
+            assigned_locations.append(chosen_goal_location)
+        else:
+            continue
+        
+    print()
     
     print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
@@ -38,11 +55,15 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
         if robot.task_sequence == []:
             Rs_final_states.append((robot.id, robot.state))
         else:
+            print(f"Task goal location for robot {robot.id} is {get_task_goal_location(J, robot.task_sequence[-1])}")
             Rs_final_states.append((robot.id, get_task_goal_location(J, robot.task_sequence[-1])))
             
     sequences = [[] for _ in Rs.get_free_agents()]
     
     print(f"Unassigned Task Ids: {unassigned_task_ids}")
+    print(f"Unassigned Tasks: {unassigned_tasks}")
+    print(f"Rs Final States: {Rs_final_states}")
+    print(f"Sequences: {sequences}")
     
     
     returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
@@ -64,9 +85,7 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
             
             S.append_early_task_ids(task_id)
             
-        # for task_id in sequence:
-        #     if task_id not in Rs.agents[robot_id-1].task_sequence:
-            Rs.agents[robot_id-1].task_sequence.append(task_id)
+            Rs.agents[robot_id-1].task_sequence.append((task_id, list(J[task_id][0])[0], list(J[task_id][1])[0], J[task_id][2]))
 
             S.add_actual_distance(task_id)
             S.add_actual_pickup_distance(task_id)
@@ -91,11 +110,11 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
         else:
             for task_id in sequence:
                 if task_id not in Rs.agents[robot_id-1].task_sequence:
-                    Rs.agents[robot_id-1].task_sequence.append(task_id)
+                    Rs.agents[robot_id-1].task_sequence.append((task_id, J[task_id][0], J[task_id][1], J[task_id[2]]))
 
     # Print agent task sequences
-    for agent in Rs.agents:
-        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
-    exit(0)
+    # for agent in Rs.agents:
+    #     print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
+    # exit(0)
         
     return Rs, [], 0.0
