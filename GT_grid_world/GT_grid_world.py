@@ -49,7 +49,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
                                                                                                 inbound_to_outbound_ratio, last_task_id, max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
-                                                                                                  deadline_generation_method, deadline_offset)
+                                                                                                  deadline_generation_method, deadline_offset, improvement_task_assignment_strategy)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
             

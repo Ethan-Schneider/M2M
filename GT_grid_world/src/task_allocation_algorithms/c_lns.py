@@ -1,5 +1,7 @@
 import numpy as np
 
+from typing import Dict, Tuple
+
 from ..agent import *
 from ..utils import *
 from ..analysis.statistics import Stats
@@ -8,13 +10,10 @@ from ..graph import Graph
 from ..task_allocation_algorithms.external_algorithms.lns import lns
 from ..task_allocation_algorithms.external_algorithms.lns import dc
 
-def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t : int) -> AgentLoader:
+def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[int, Tuple], t : int) -> AgentLoader:
+    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
+    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_medium_wide_deck.map"
 
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-    # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_large.map"
-
-    # for agent in Rs.agents:
-    #     print("Pre Agent Task Sequence", agent.task_sequence)
     print(f"Agent Task Sequences Prior to Purge: {[agent.task_sequence for agent in Rs.agents]}")
     # Remove task sequence for each agent and add them to unassigned tasks
     for agent in Rs.agents:
@@ -25,13 +24,13 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
     #     print("Post Agent Task Sequence", agent.task_sequence)
 
     assigned_tasks = Rs.get_all_assigned_tasks()
-    all_task_ids = [task[0] for task in J]
+    all_task_ids = [key for key in J.keys()]
     
     unassigned_task_ids = list(set(all_task_ids) - set(assigned_tasks))
     unassigned_tasks = []
 
     for task_id in unassigned_task_ids:
-        unassigned_tasks.append((task_id, get_task_start_location(J, task_id), get_task_goal_location(J, task_id)))
+        unassigned_tasks.append((task_id, J[task_id][0], J[task_id][1]))
     
     print(f"Agent Task Sequences After Purge: {[agent.task_sequence for agent in Rs.agents]}")
     Rs_final_states = []
@@ -77,21 +76,26 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : set, t 
 
             # print(f"Estimated Distance for {Rs.agents[robot_id-1].state} to {get_task_start_location(J, task_id)} {dc.distance(map_name, Rs.agents[robot_id-1].state, get_task_start_location(J, task_id))}")
 
-            estimated_to_pickup_path = dc.distance(map_name, Rs.agents[robot_id-1].state, get_task_start_location(J, task_id))
-            estimated_task_path = dc.distance(map_name, get_task_start_location(J, task_id), get_task_goal_location(J, task_id))
+            # estimated_to_pickup_path = dc.distance(map_name, Rs.agents[robot_id-1].state, J[task_id][0])
+            # estimated_task_path = dc.distance(map_name, J[task_id][0], J[task_id][1])
             
-            print(f"Estimated Distance for task {task_id} start to pickup: {Rs.agents[robot_id-1].state} to {get_task_start_location(J, task_id)} {estimated_to_pickup_path}")
-            print(f"Estimated Distance for task {task_id} start to pickup: {get_task_start_location(J, task_id)} to {get_task_goal_location(J, task_id)} {estimated_task_path}")
+            # print(f"Estimated Distance for task {task_id} start to pickup: {Rs.agents[robot_id-1].state} to {get_task_start_location(J, task_id)} {estimated_to_pickup_path}")
+            # print(f"Estimated Distance for task {task_id} start to pickup: {get_task_start_location(J, task_id)} to {get_task_goal_location(J, task_id)} {estimated_task_path}")
         
 
-            S.add_estimated_pickup_duration(task_id, estimated_to_pickup_path)
-            S.add_estimated_pickup_distance(task_id, estimated_to_pickup_path)
+            # S.add_estimated_pickup_duration(task_id, estimated_to_pickup_path)
+            # S.add_estimated_pickup_distance(task_id, estimated_to_pickup_path)
 
-            S.add_estimated_distance(task_id, estimated_task_path)
-            S.add_estimated_duration(task_id, estimated_task_path)
+            # S.add_estimated_distance(task_id, estimated_task_path)
+            # S.add_estimated_duration(task_id, estimated_task_path)
         else:
             for task_id in sequence:
                 if task_id not in Rs.agents[robot_id-1].task_sequence:
                     Rs.agents[robot_id-1].task_sequence.append(task_id)
+
+    # Print agent task sequences
+    for agent in Rs.agents:
+        print(f"Agent {agent.id} task sequence: {agent.task_sequence}")
+    exit(0)
         
-    return Rs
+    return Rs, [], 0.0

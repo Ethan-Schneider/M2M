@@ -10,7 +10,7 @@ from .analysis.statistics import Stats
 def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
         last_task_id: int, max_task_number: int, inventory: Inventory,
         strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant",
-        deadline_offset: float = 30) -> Tuple[Dict[int, Tuple], int]:
+        deadline_offset: float = 30, improvement_task_assign_strategy: str = "c_lns") -> Tuple[Dict[int, Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
     Each task is defined as (task_id, S_n, D_n, deadline) where:
@@ -128,7 +128,22 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                     continue
                 
                 deadline = get_deadline(t)
-                J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
+
+                # If c_lns, compute the distances between all start and goal locations and set the start and goal location to that
+                if improvement_task_assign_strategy == "c_lns":
+                    # Compute the distances between all start and goal locations
+                    distances = {}
+                    for start_location in available_start_locations:
+                        for goal_location in available_goal_locations:
+                            distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
+                    # Find the start and goal location that minimizes the distance
+                    chosen_start_location, chosen_goal_location = min(distances, key=distances.get)
+                    J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 1)
+                    
+                else:
+                    # add the set of start and goal locations to the task
+                    J[last_task_id + 1] = (frozenset([chosen_start_location]), frozenset(available_goal_locations), deadline, sku_id, 1)
+                    
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
@@ -148,7 +163,19 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                     continue
                 
                 deadline = get_deadline(t)
-                J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
+
+                if improvement_task_assign_strategy == "c_lns":
+                    # Compute the distances between all start and goal locations
+                    distances = {}
+                    for start_location in available_start_locations:
+                        for goal_location in available_goal_locations:
+                            distances[(start_location, goal_location)] = G.get_distance(start_location, goal_location)
+                    # Find the start and goal location that minimizes the distance
+                    J[last_task_id + 1] = (chosen_start_location, chosen_goal_location, deadline, sku_id, 0)
+                else:
+                    # add the set of start and goal locations to the task
+                    J[last_task_id + 1] = (frozenset(available_start_locations), frozenset(available_goal_locations), deadline, sku_id, 0)
+                    
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
