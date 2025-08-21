@@ -382,7 +382,6 @@ class LNS:
         self.S.append_py_lns_log(lns_log)
         
         print(f"Final agent task sequences: {[agent.task_sequence for agent in self.best_solution.agents]}")
-        exit(0)
 
         return self.best_solution, best_allocations, self.best_cost
     

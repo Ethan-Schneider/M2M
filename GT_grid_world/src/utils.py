@@ -13,16 +13,6 @@ def get_robot_state(Rs : list, robot_id : int) -> tuple:
         if robot[0] == robot_id:
             return robot[1]
         
-def get_task_start_location(J : set, task_id : int) -> tuple:
-    for task in J:
-        if task[0] == task_id:
-            return task[1]
-        
-def get_task_goal_location(J : set, task_id : int) -> tuple:
-    for task in J:
-        if task[0] == task_id:
-            return task[2]
-        
 def get_unassigned_task_ids(J : set, Ra : list) -> set:
     """Return the set of all task_ids which have not been assigned
 

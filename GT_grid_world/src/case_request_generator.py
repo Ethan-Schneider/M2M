@@ -155,7 +155,7 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                 available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
                 
                 # Goal locations are all driveway nodes (excluding already assigned locations)
-                available_goal_locations = set(G.outbound_station_locations)
+                available_goal_locations = set(G.driveway.get_empty_locations())
                 
                 if not available_start_locations or not available_goal_locations:
                     print(f"No available start or goal locations for SKU {sku_id}: Outbound task")

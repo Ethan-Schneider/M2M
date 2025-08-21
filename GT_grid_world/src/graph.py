@@ -168,8 +168,6 @@ class Graph:
         self.obstacles = []
         self.aisle_locations = []  # Track aisle locations (e)
         self.station_locations = []  # Track inbound/outbound stations (s)
-        self.inbound_station_locations = []
-        self.outbound_station_locations = []
         self.all_locations = []
                 
         # Loop through each character in the map, generating the graph list with Node objects, and saving information into the above lists
@@ -189,15 +187,9 @@ class Graph:
                     obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
                     self.aisle_locations.append((i, j))
-                elif character == "i":
+                elif character == "s":
                     obstacle_row.append(0)
                     row.append(Node(cost, occupied=False, obstacle=False))
-                    self.inbound_station_locations.append((i, j))
-                    self.station_locations.append((i, j))
-                elif character == "o":
-                    obstacle_row.append(0)
-                    row.append(Node(cost, occupied=False, obstacle=False))
-                    self.outbound_station_locations.append((i, j))
                     self.station_locations.append((i, j))
                 elif character == ".":
                     obstacle_row.append(0)
@@ -227,7 +219,7 @@ class Graph:
         
         self.driveway = Inventory(
             num_skus=num_skus,
-            warehouse_locations=self.inbound_station_locations,
+            warehouse_locations=self.station_locations,
             fill_percentage=0.0,
             weight_init=weight_init
         )

@@ -9,14 +9,14 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(7 8)
+seeds=(0)
 num_robots=(40)
-time_horizons=(28800)
+time_horizons=(100)
 max_tasks=(120)
 frequencies=(0.25)
-inbound_outbound_ratio=(0.85)
+inbound_outbound_ratio=(0.75)
 num_skus=(30)
-initial_inventory=(20.0)
+initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
 initial_task_assign_strategy="fast_greedy"
@@ -32,10 +32,10 @@ alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
 output_intermediate_data=True
-intermediate_data_interval=14400
+intermediate_data_interval=2000
 base_cost_weight=1.0
 deadline_weight=0.0
-sku_distribution_weight=0.25
+sku_distribution_weight=0.0
 agent_unallocated_penalty=5
 
 # Loop through all combinations
