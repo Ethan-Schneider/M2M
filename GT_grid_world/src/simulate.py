@@ -64,13 +64,13 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 if start_location in G.warehouse.get_full_locations():
                     try:
                         sku_id = G.warehouse.get_sku_at_location(start_location).sku_id
-                        agent.set_sku_id_carrying(sku_id)
+                        agent.set_sku_id_carrying(G.warehouse.get_sku_at_location(start_location).sku_id)
                         G.warehouse.remove_sku_instance(start_location)
                         G.update_sku_KD_trees(agent.get_sku_id_carrying())
                         
-                        # Update tasks in J with the same sku_id to remove this location as a start location
+                        # Update outbound tasks in J with the same sku_id to remove this location as a start location
                         for other_task_id in J.keys():
-                            if other_task_id != task_id and J[other_task_id][3] == sku_id:
+                            if other_task_id != task_id and J[other_task_id][3] == sku_id and J[other_task_id][4] == 0:
                                 if start_location in J[other_task_id][0]:
                                     # Create new tuple with updated start locations
                                     old_start_locations = J[other_task_id][0]
@@ -78,6 +78,20 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                                     new_task_tuple = (
                                         new_start_locations,
                                         J[other_task_id][1],
+                                        J[other_task_id][2],
+                                        J[other_task_id][3],
+                                        J[other_task_id][4]
+                                    )
+                                    J[other_task_id] = new_task_tuple
+                            # Also update inbound tasks to add this location to the goal locations regardless of sku_id
+                            if other_task_id != task_id and J[other_task_id][4] == 1:
+                                if start_location not in J[other_task_id][1]:
+                                    # Create new tuple with updated goal locations
+                                    old_goal_locations = J[other_task_id][1]
+                                    new_goal_locations = frozenset(old_goal_locations | {start_location})
+                                    new_task_tuple = (
+                                        J[other_task_id][0],
+                                        new_goal_locations,
                                         J[other_task_id][2],
                                         J[other_task_id][3],
                                         J[other_task_id][4]
@@ -92,6 +106,22 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                         # Only save sku id
                         agent.set_sku_id_carrying(G.driveway.get_sku_at_location(start_location).sku_id)
                         G.driveway.remove_sku_instance(start_location)
+                        
+                        # Add this location to the goal locations of all outbound tasks regardless of sku_id
+                        for other_task_id in J.keys():
+                            if other_task_id != task_id and J[other_task_id][4] == 0:
+                                if goal_location not in J[other_task_id][1]:
+                                    # Create new tuple with updated start locations
+                                    old_goal_locations = J[other_task_id][1]
+                                    new_goal_locations = frozenset(old_goal_locations | {start_location})
+                                    new_task_tuple = (
+                                        J[other_task_id][0],
+                                        new_goal_locations,
+                                        J[other_task_id][2],
+                                        J[other_task_id][3],
+                                        J[other_task_id][4]
+                                    )
+                                    J[other_task_id] = new_task_tuple
                     except Exception as e:
                         print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
 
@@ -109,13 +139,13 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 sku_id = J[task_id][3]
                 inbound_task = J[task_id][4]
 
-
+                # Inbound task: dropping off to warehouse
                 if goal_location in G.warehouse.get_empty_locations():
                     G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
                     G.update_sku_KD_trees(agent.get_sku_id_carrying())
-                    # Update tasks in J to remove this location as a goal location for all sku_ids
+                    # Update inbound tasks in J to remove this location as a goal location for all sku_ids
                     for other_task_id in J.keys():
-                        if other_task_id != task_id:
+                        if other_task_id != task_id and J[other_task_id][4] == 1:
                             if goal_location in J[other_task_id][1]:
                                 # Create new tuple with updated goal locations
                                 old_goal_locations = J[other_task_id][1]
@@ -128,11 +158,9 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                                     J[other_task_id][4]
                                 )
                                 J[other_task_id] = new_task_tuple
-                                
-                    # Update outbound tasks to add this location to the start locations if the sku_id matches
-                    for other_task_id in J.keys():
-                        if other_task_id != task_id and J[other_task_id][3] == sku_id:
-                            if goal_location not in J[other_task_id][0]:
+                        # Update outbound tasks to add this location to the start locations if the sku_id matches
+                        if other_task_id != task_id and J[other_task_id][4] == 0 and J[other_task_id][3] == sku_id:
+                            if goal_location in J[other_task_id][0]:
                                 # Create new tuple with updated start locations
                                 old_start_locations = J[other_task_id][0]
                                 new_start_locations = frozenset(old_start_locations | {goal_location})
@@ -144,6 +172,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                                     J[other_task_id][4]
                                 )
                                 J[other_task_id] = new_task_tuple
+                                
                 elif goal_location in G.driveway.get_empty_locations():
                     pass
                 agent.set_sku_id_carrying(None)
