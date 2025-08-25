@@ -34,9 +34,25 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
         # Find min distance between task's start and goal locations while removing any already assigned locations
         start_locations = list(set(J[task_id][0]) - set(assigned_locations))
         goal_locations = list(set(J[task_id][1]) - set(assigned_locations))
+        # if J[task_id][4]:  # If inbound task, remove any start locations that are in full warehouse locations
+        #     goal_locations = list(set(start_locations) - set(G.warehouse.get_full_locations()))
+        # else:  # If outbound task, remove any goal locations that are in empty warehouse locations
+        #     start_locations = list(set(goal_locations) - set(G.warehouse.get_empty_locations()))
+        #     goal_locations = list(set(goal_locations) - set(G.driveway.get_full_locations()))
         if start_locations and goal_locations:
-            chosen_start_location = start_locations[np.random.randint(0, len(start_locations))]
-            chosen_goal_location = goal_locations[np.random.randint(0, len(goal_locations))]
+            # Find the pair of start and goal locations with the minimum distance
+            min_distance = float('inf')
+            chosen_start_location = None
+            chosen_goal_location = None
+            for start_loc in start_locations:
+                for goal_loc in goal_locations:
+                    distance = G.get_distance(start_loc, goal_loc)
+                    if distance < min_distance:
+                        min_distance = distance
+                        chosen_start_location = start_loc
+                        chosen_goal_location = goal_loc
+            # chosen_start_location = start_locations[np.random.randint(0, len(start_locations))]
+            # chosen_goal_location = goal_locations[np.random.randint(0, len(goal_locations))]
             unassigned_tasks.append((task_id, list(chosen_start_location), list(chosen_goal_location)))
             assigned_locations.append(chosen_start_location)
             assigned_locations.append(chosen_goal_location)
