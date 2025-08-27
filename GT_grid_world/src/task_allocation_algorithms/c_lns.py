@@ -24,21 +24,22 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
     unassigned_task_ids = list(set(all_task_ids) - set(assigned_task_ids))
     unassigned_tasks = []
     
-    assigned_locations = []
+    assigned_locations = set()
     for agent in Rs.agents:
         for task in agent.task_sequence:
-            assigned_locations.append(task[1])
-            assigned_locations.append(task[2])
+            assigned_locations.add(task[1])
+            assigned_locations.add(task[2])
+
+    warehouse_occupied_locs = set(G.warehouse.get_full_locations())
+    driveway_occupied_locs = set(G.driveway.get_full_locations())
+
+    unusable_locs = assigned_locations | warehouse_occupied_locs | driveway_occupied_locs
 
     for task_id in unassigned_task_ids:
         # Find min distance between task's start and goal locations while removing any already assigned locations
         start_locations = list(set(J[task_id][0]) - set(assigned_locations))
-        goal_locations = list(set(J[task_id][1]) - set(assigned_locations))
-        # if J[task_id][4]:  # If inbound task, remove any start locations that are in full warehouse locations
-        #     goal_locations = list(set(start_locations) - set(G.warehouse.get_full_locations()))
-        # else:  # If outbound task, remove any goal locations that are in empty warehouse locations
-        #     start_locations = list(set(goal_locations) - set(G.warehouse.get_empty_locations()))
-        #     goal_locations = list(set(goal_locations) - set(G.driveway.get_full_locations()))
+        goal_locations = list(set(J[task_id][1]) - set(unusable_locs))
+
         if start_locations and goal_locations:
             # Find the pair of start and goal locations with the minimum distance
             min_distance = float('inf')
@@ -51,11 +52,10 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
                         min_distance = distance
                         chosen_start_location = start_loc
                         chosen_goal_location = goal_loc
-            # chosen_start_location = start_locations[np.random.randint(0, len(start_locations))]
-            # chosen_goal_location = goal_locations[np.random.randint(0, len(goal_locations))]
-            unassigned_tasks.append((task_id, list(chosen_start_location), list(chosen_goal_location)))
-            assigned_locations.append(chosen_start_location)
-            assigned_locations.append(chosen_goal_location)
+
+            unassigned_tasks.append((task_id, tuple(chosen_start_location), tuple(chosen_goal_location)))
+            assigned_locations.add(chosen_start_location)
+            assigned_locations.add(chosen_goal_location)
         else:
             continue
     
@@ -76,13 +76,14 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
                 print(f"Robot {robot.id} has an unknown status: {robot.status}")
                 Rs_final_states.append((robot.id, robot.state))
             
-    sequences = [[] for _ in Rs.get_free_agents()]
+    sequences = [[] for _ in Rs.agents]
     
     locations = []
     for task in unassigned_tasks:
         locations.append(task[1])
         locations.append(task[2])
     
+    print(f"Unassigned tasks: {unassigned_tasks}")
     returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
     
     assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
