@@ -38,7 +38,7 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
     for task_id in unassigned_task_ids:
         # Find min distance between task's start and goal locations while removing any already assigned locations
         start_locations = list(set(J[task_id][0]) - set(assigned_locations))
-        goal_locations = list(set(J[task_id][1]) - set(unusable_locs))
+        goal_locations = list(set(J[task_id][1]) - set(assigned_locations))
 
         if start_locations and goal_locations:
             # Find the pair of start and goal locations with the minimum distance
