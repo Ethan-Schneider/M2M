@@ -35,10 +35,14 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
 
     unusable_locs = assigned_locations | warehouse_occupied_locs | driveway_occupied_locs
 
+    empty_locs = set(G.driveway.get_empty_locations()) | set(G.warehouse.get_empty_locations())
+
+    start_loc_unusable_locs = assigned_locations | empty_locs
+
     for task_id in unassigned_task_ids:
         # Find min distance between task's start and goal locations while removing any already assigned locations
-        start_locations = list(set(J[task_id][0]) - set(assigned_locations))
-        goal_locations = list(set(J[task_id][1]) - set(assigned_locations))
+        start_locations = list(set(J[task_id][0]) - set(start_loc_unusable_locs))
+        goal_locations = list(set(J[task_id][1]) - set(unusable_locs))
 
         if start_locations and goal_locations:
             # Find the pair of start and goal locations with the minimum distance
@@ -53,9 +57,17 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
                         chosen_start_location = start_loc
                         chosen_goal_location = goal_loc
 
-            unassigned_tasks.append((task_id, tuple(chosen_start_location), tuple(chosen_goal_location)))
-            assigned_locations.add(chosen_start_location)
-            assigned_locations.add(chosen_goal_location)
+            if chosen_start_location is None or chosen_goal_location is None:
+                continue
+            else:
+                unassigned_tasks.append((task_id, tuple(chosen_start_location), tuple(chosen_goal_location)))
+                assigned_locations.add(chosen_start_location)
+                assigned_locations.add(chosen_goal_location)
+
+                start_loc_unusable_locs.add(chosen_start_location)
+                start_loc_unusable_locs.add(chosen_goal_location)
+                unusable_locs.add(chosen_start_location)
+                unusable_locs.add(chosen_goal_location)
         else:
             continue
     
