@@ -209,8 +209,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     """
     np.random.seed(seed)
     
-    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}.json"
-    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
+    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}.json"
+    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
@@ -314,7 +314,7 @@ if __name__=="__main__":
                        choices=['py_lns', 'c_lns', 'c_p_lns', 'none'],
                        help='Task assignment strategy for improvement')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
-                       choices=['ecbs'],
+                       choices=['ecbs', 'pbs'],
                        help='Path planning strategy')
     parser.add_argument('--map', type=str, default='data/maps/symbotic_small',
                        help='Map file path')
