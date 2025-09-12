@@ -8,7 +8,8 @@ from .construct_cost_elements import construct_cost_elements, manhattan_distance
 
 def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
                          agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None, task_deadline_costs=None, inbound_sku_distribution_costs=None, 
-                         outbound_sku_distribution_costs=None, base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
+                         outbound_sku_distribution_costs=None, base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
+                         agent_task_sequence_limit=-1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
     This is a batched greedy algorithm that allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -109,7 +110,16 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             else:
                 outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
                 total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
-
+                
+            # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
+            if agent_task_sequence_limit > 0:
+                for m in range(M):
+                    if len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
+                        total_costs[m, :, :] = -1 * np.inf
+            # # If all total_costs are -inf, break
+            # if np.all(total_costs == -1 * np.inf):
+            #     break
+            
             # Find argmax of total_costs, if there are multiple max values, choose one randomly
             new_idx = np.argmax(total_costs)
             new_cost = total_costs.flat[new_idx]
@@ -163,6 +173,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
         if Rs.agents[m].status == 0:
             Rs.agents[m].status = 1
         update_tik = time.time()
+        
 
         # Invalidate this task, start, and goal for all future agents
         task_start_mask_[:, p] = 0
@@ -180,6 +191,10 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
+            
+        # If agent task sequence limit is reached, set agent_start_cost_temsor[m, :] to inf
+        # if agent_task_sequence_limit > 0 and len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
+        #     agent_start_cost_tensor[m, :] = -1 * np.inf
 
         # Update agent task sequence time
         if len(Rs.agents[m].task_sequence) > 1:
@@ -197,7 +212,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
 
 def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
-                     current_time: int, method : str = "manhattan", base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                     current_time: int, method : str = "manhattan", base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_limit=-1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm (batched greedy version).
     Allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -259,7 +274,8 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
         deadline_weight=deadline_weight,
         sku_distribution_weight=sku_distribution_weight,
         agent_task_sequence_time=agent_task_sequence_time,
-        current_time=current_time
+        current_time=current_time,
+        agent_task_sequence_limit=agent_task_sequence_limit
     )
     total_allocation_time += time.time() - allocation_tik
         

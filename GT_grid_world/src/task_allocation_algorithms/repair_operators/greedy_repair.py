@@ -13,7 +13,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                  method: str = "manhattan", J: Dict[int, Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  inbound_sku_distribution_costs: np.ndarray = None, outbound_sku_distribution_costs: np.ndarray = None,
                  base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
-                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0, agent_task_sequence_limit: int = -1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -107,6 +107,15 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             else:
                 outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
                 total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+            
+            # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
+            if agent_task_sequence_limit > -1:
+                for m in range(M):
+                    if len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
+                        total_costs[m, :, :] = -1 * np.inf
+            # If all total_costs are -inf, break
+            if np.all(total_costs == -1 * np.inf):
+                break
 
             # Find the index of the maximum cost (since costs are negative, this minimizes distance)
             new_idx = np.argmax(total_costs)
@@ -169,6 +178,10 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
+            
+        # If agent task sequence limit is reached, set agent_start_cost_temsor[m, :] to inf
+        # if agent_task_sequence_limit > 0 and len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
+        #     agent_start_cost_tensor[m, :] = -1 * np.inf
 
         # Update agent task sequence time
         if len(Rs.agents[m].task_sequence) > 1:

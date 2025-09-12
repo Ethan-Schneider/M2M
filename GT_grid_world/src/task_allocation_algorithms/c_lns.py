@@ -11,7 +11,9 @@ from ..task_allocation_algorithms.external_algorithms.lns import lns
 
 def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[int, Tuple], t : int) -> AgentLoader:
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_medium_wide_deck.map"
+    
+    stripped_map_name = map_name.split("/")[-1]
+    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/" + stripped_map_name + ".map"
     # Remove task sequence for each agent and add them to unassigned tasks
     for agent in Rs.agents:
         while len(agent.task_sequence) > 1:

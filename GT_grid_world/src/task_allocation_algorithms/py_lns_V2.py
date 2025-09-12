@@ -77,6 +77,7 @@ class LNS:
         # Store best solution found
         self.best_solution = None
         self.best_cost = -np.inf
+        self.agent_task_sequence_limit = 3
 
         self.initial_cost = -np.inf
 
@@ -123,7 +124,8 @@ class LNS:
                                                                         base_cost_weight=self.base_cost_weight,
                                                                         deadline_weight=self.deadline_weight,
                                                                         sku_distribution_weight=self.sku_distribution_weight,
-                                                                        agent_task_sequence_time=self.agent_task_sequence_time)
+                                                                        agent_task_sequence_time=self.agent_task_sequence_time, 
+                                                                        agent_task_sequence_limit=self.agent_task_sequence_limit)
         elif self.initial_task_assignment_strategy == "fast_FCF":
             current_solution, allocations, __ = fast_FCF_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         elif self.initial_task_assignment_strategy == "fast_SCF":
@@ -249,7 +251,7 @@ class LNS:
                                                                          deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
                                                                          agent_task_sequence_time=temp_agent_task_sequence_time,
-                                                                         current_time=self.current_time)
+                                                                         current_time=self.current_time, agent_task_sequence_limit=self.agent_task_sequence_limit)
                 # Update the temp cost elements with the returned values
                 temp_start_goal_dist = temp_start_goal_dist.copy()
                 temp_task_deadline_costs = temp_task_deadline_costs.copy()
