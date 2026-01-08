@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(140 141 142)
+seeds=(150)
 num_robots=(40)
 time_horizons=(28800)
 max_tasks=(120)

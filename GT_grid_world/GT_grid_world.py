@@ -194,6 +194,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S.reallocation_data[t_key]["agents"] = agents
                 S.reallocation_data[t_key]["prior_path_cost"] = prior_cost
                 for agent_group in agents:
+                    
+                    # Skip if only one agent in group or 6+ agents
+                    if len(agent_group) <= 1 or len(agent_group) > 5:
+                        continue
 
                     task_ids = []
                     for agent_id in agent_group:

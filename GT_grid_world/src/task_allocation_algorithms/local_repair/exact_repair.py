@@ -9,9 +9,9 @@ from ...analysis.statistics import Stats
 
 def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocation_group : list) -> AgentLoader:
     
-    print(f"Initial Agent Task Locations:")
-    for agent in Rs.agents:
-        print(f"Agent {agent.id} with status {agent.status} with location {agent.state} and task sequence {agent.task_sequence}")
+    # print(f"Initial Agent Task Locations:")
+    # for agent in Rs.agents:
+    #     print(f"Agent {agent.id} with status {agent.status} with location {agent.state} and task sequence {agent.task_sequence}")
     
     allocated_locations = set()
     for agent in Rs.agents:
@@ -25,9 +25,8 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
     # print(f"Allocated Locations: {allocated_locations}")
             
     locations = set()
-    invalid_locations = set()
     
-    print(f"Reallocation group: {reallocation_group}")
+    # print(f"Reallocation group: {reallocation_group}")
     
     for agent_id in reallocation_group:
         agent_status = Rs.get_agent(agent_id).status
@@ -91,9 +90,9 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
     m = Munkres()
     indexes = m.compute(cost_matrix)
     
-    print(f"Indexes: {indexes}")
+    # print(f"Indexes: {indexes}")
     for index in indexes:
-        print(f"Agent {reallocation_group[index[0]]} allocated location {locations[index[1]]}")
+        # print(f"Agent {reallocation_group[index[0]]} allocated location {locations[index[1]]}")
         agent_id = reallocation_group[index[0]]
         agent = Rs.get_agent(agent_id)
         loc = locations[index[1]]
@@ -105,9 +104,9 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
         else:
             print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
             
-    print(f"Final Agent Task Locations:")
-    for agent in Rs.agents:
-        print(f"Agent {agent.id} with location {agent.state} and task sequence {agent.task_sequence}")
+    # print(f"Final Agent Task Locations:")
+    # for agent in Rs.agents:
+    #     print(f"Agent {agent.id} with location {agent.state} and task sequence {agent.task_sequence}")
     
     return Rs
         
