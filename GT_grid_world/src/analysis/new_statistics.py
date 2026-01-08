@@ -6,7 +6,7 @@ from .graphing import *
 from ..agent import *
 
 class Stats: 
-    def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
+    def __init__(self, initial_inventory_file: str, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
                  initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
@@ -15,9 +15,13 @@ class Stats:
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
                  base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
-                 agent_unallocated_penalty: float = None, solution_repair_function: str = None) -> None:
+                 agent_unallocated_penalty: float = None,
+                 total_travel_time_weight: float = None,
+                 w: int = None, min_inventory_percentage : float = None, max_inventory_percentage : float = None, 
+                 task_frequency_schedule : str = None) -> None:
         # Store input parameters
         self.__seed = seed
+        self.__initial_inventory_file = initial_inventory_file
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         self.__max_tasks = max_tasks
@@ -48,13 +52,16 @@ class Stats:
         self.__deadline_weight = deadline_weight
         self.__sku_distribution_weight = sku_distribution_weight
         self.__agent_unallocated_penalty = agent_unallocated_penalty
-        self.__solution_repair_function = solution_repair_function
-
+        self.__total_travel_time_weight = total_travel_time_weight
+        self.__w = w
+        self.__min_inventory_percentage = min_inventory_percentage
+        self.__max_inventory_percentage = max_inventory_percentage
+        self.__task_frequency_schedule = task_frequency_schedule
+        self.__output_file = output_file
+        
         self.__num_improved_assignments = 0
         self.__num_worse_assignments = 0
         self.__num_same_assignments = 0
-
-        self.__output_file = output_file
         
         self.__early_task_ids = []
         
@@ -158,13 +165,20 @@ class Stats:
         # Locations of each SKU per timestep
         self.__sku_locations_per_timestep = []
         
+        # Deadline tracking
+        self.__task_deadlines = {}  # task_id -> deadline
+        self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
+        
         # SKU Agents carrying over time
         
         self.__carrying_skus = []
         
-        # Deadline tracking
-        self.__task_deadlines = {}  # task_id -> deadline
-        self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
+        # Successful/Unseccessful task allocations and path plans per timestep
+        self.__task_success = []
+        self.__path_plan_success = []
+        
+        self.__prior_cumulative_path_cost = {}
+        self.__post_cumulative_path_cost = {}
 
         self.reallocation_data = {}
 
@@ -184,15 +198,29 @@ class Stats:
                                        }
 
         return t
-    
-    def append_carrying_skus(self, skus : list) -> None:
-        self.__carrying_skus.append(skus)
-    
-    def get_num_skus(self) -> int:
-        return self.__num_skus
 
     def get_output_file(self) -> str:   
         return self.__output_file
+    
+    def append_prior_cumulative_path_cost(self, t : int, Rs : AgentLoader) -> None:
+        total_cost = 0
+        
+        for agent in Rs.agents:
+            total_cost += len(agent.path_sequence)
+        
+        self.__prior_cumulative_path_cost[t] = total_cost
+    
+    def append_post_cumulative_path_cost(self, t : int, Rs : AgentLoader):
+        total_cost = 0
+        
+        for agent in Rs.agents:
+            total_cost += len(agent.path_sequence)
+            
+        self.__post_cumulative_path_cost[t] = total_cost
+        
+    def compute_difference_between_pre_post_path_cost(self):
+        dif = [a_i - b_i for a_i, b_i in zip(self.__post_cumulative_path_cost.values(), self.__prior_cumulative_path_cost.values())]
+        return dif
 
     def compute_unallocated_agents(self, Rs : AgentLoader):
         num = 0
@@ -313,7 +341,7 @@ class Stats:
         
     def remove_actual_distance(self, task_id : int) -> None:
         del self.__actual_distance[task_id]
-        
+
     def get_actual_distance(self, task_id : int) -> float:
         return self.__actual_distance[task_id]
     
@@ -326,7 +354,7 @@ class Stats:
         
     def remove_actual_pickup_distance(self, task_id : int) -> None:
         del self.__actual_pickup_distance[task_id]
-        
+
     def get_actual_pickup_distance(self, task_id : int) -> float:
         return self.__actual_pickup_distance[task_id]
     
@@ -397,15 +425,6 @@ class Stats:
         
     # ====================== Runtime Functions
     
-    def increment_improved_assignments(self) -> None:
-        self.__num_improved_assignments += 1
-        
-    def increment_worse_assignments(self) -> None:
-        self.__num_worse_assignments += 1
-        
-    def increment_same_assignments(self) -> None:
-        self.__num_same_assignments += 1
-    
     def set_total_runtime(self, time : float) -> None:
         self.__total_runtime = time
         
@@ -429,6 +448,29 @@ class Stats:
     def append_admisibility_differences(self, admisibility : list) -> None:
         for b in admisibility:
             self.__admisibility_differences.append(b)
+            
+    def append_carrying_skus(self, skus : list) -> None:
+        self.__carrying_skus.append(skus)
+        
+    def increment_improved_assignments(self) -> None:
+        self.__num_improved_assignments += 1
+        
+    def increment_worse_assignments(self) -> None:
+        self.__num_worse_assignments += 1
+        
+    def increment_same_assignments(self) -> None:
+        self.__num_same_assignments += 1
+        
+    def append_task_success(self, success : bool) -> None:
+        if success:
+            self.__task_success.append(1)
+        else:  
+            self.__task_success.append(0)
+    def append_path_plan_success(self, success : bool) -> None:
+        if success:
+            self.__path_plan_success.append(1)
+        else:  
+            self.__path_plan_success.append(0)
     # ====================== Utils
     def trim_data(self):
         # Trim Actual Distance 
@@ -664,6 +706,7 @@ class Stats:
         data = {
             # Input parameters from main
             "seed": self.__seed,
+            "initial_inventory_file": self.__initial_inventory_file,
             "num_robots": self.__num_of_robots,
             "time_horizon": self.__T,
             "max_tasks": self.__max_tasks,
@@ -694,7 +737,11 @@ class Stats:
             "deadline_weight": self.__deadline_weight,
             "sku_distribution_weight": self.__sku_distribution_weight,
             "agent_unallocated_penalty": self.__agent_unallocated_penalty,
-            "solution_repair_function": self.__solution_repair_function,
+            "total_travel_time_weight" : self.__total_travel_time_weight,
+            "lookahead_window (w)": self.__w,
+            "min_inventory_percentage": self.__min_inventory_percentage,
+            "max_inventory_percentage": self.__max_inventory_percentage,
+            "task_frequency_schedule": self.__task_frequency_schedule,
             # Simulation results
             "timesteps_completed": self.__T,
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -712,7 +759,9 @@ class Stats:
             "actual_duration_of_task_from_start_to_pick": self.__actual_pickup_duration,
             "estimated_duration_of_task_from_start_to_pick": self.__estimated_pickup_duration,
             "actual_distance_start_to_pick": self.__actual_pickup_distance,
+            # "estimated_distance_start_to_pick": self.__estimated_pickup_distance,
             "actual_distance_of_task_from_pick_to_place": self.__actual_distance,
+            # "estimated_distance": self.__estimated_distance,
             "collisions": int(np.sum(self.__collisions)),
             "stationary_robots": self.compute_stationary_robots(),
             "unallocated_agents": self.__unallocated_agents,
@@ -750,6 +799,8 @@ class Stats:
             "num_improved_assignments": self.__num_improved_assignments,
             "num_worse_assignments": self.__num_worse_assignments,
             "num_same_assignments": self.__num_same_assignments,
+            "task_success": self.__task_success,
+            "path_plan_success": self.__path_plan_success,
             "solution_repair_data": self.reallocation_data
         }
         
@@ -897,15 +948,15 @@ class Stats:
         self.__driveway_full_locations_per_timestep.append(len(full_locations))
 
     def append_sku_inventory_state(self, warehouse, driveway, num_skus):
-        warehouse_counts = [len(warehouse.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
-        driveway_counts = [len(driveway.get_sku_instances(sku_id)) for sku_id in range(1, num_skus + 1)]
+        warehouse_counts = [len(warehouse.get_sku_instances(sku_id)) for sku_id in range(0, num_skus)]
+        driveway_counts = [len(driveway.get_sku_instances(sku_id)) for sku_id in range(0, num_skus)]
         self.__warehouse_sku_counts_per_timestep.append(warehouse_counts)
         self.__driveway_sku_counts_per_timestep.append(driveway_counts)
 
     def append_sku_centroids(self, warehouse, num_skus):
         """Compute and log the centroid of each SKU (warehouse+driveway) for this timestep."""
         centroids = []
-        for sku_id in range(1, num_skus + 1):
+        for sku_id in range(0, num_skus):
             locations = warehouse.get_sku_instances(sku_id)
             if locations:
                 arr = np.array(locations)
@@ -916,12 +967,20 @@ class Stats:
             centroids.append(centroid)
         self.__sku_centroids_per_timestep.append(centroids)
 
-    def append_sku_locations(self, warehouse, num_skus):
+    def append_sku_locations(self, warehouse, driveway, num_skus):
         """Log the locations of each SKU for this timestep."""
         locations_per_sku = []
-        for sku_id in range(1, num_skus + 1):
+        for sku_id in range(0, num_skus):
+            # locations = warehouse.get_sku_instances(sku_id)
+            # locations_per_sku.append([tuple(loc) for loc in locations])
+            sku_locations = []
             locations = warehouse.get_sku_instances(sku_id)
-            locations_per_sku.append([tuple(loc) for loc in locations])
+            for loc in locations:
+                sku_locations.append(tuple(loc))
+            locations = driveway.get_sku_instances(sku_id)
+            for loc in locations:
+                sku_locations.append(tuple(loc))
+            locations_per_sku.append(sku_locations)
         self.__sku_locations_per_timestep.append(locations_per_sku)
 
     def append_py_lns_log(self, log: dict):

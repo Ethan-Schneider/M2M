@@ -1,0 +1,310 @@
+import numpy as np
+from typing import Tuple, Dict, List
+
+from ...agent import AgentLoader, Agent
+from ...graph import Graph
+from ...analysis.statistics import Stats
+
+from sortedcontainers import SortedList
+
+from ...path_finding_algorithms.external_algorithms.PBS import pbs
+
+class BnB:
+    def __init__(self, Rs : AgentLoader, G : Graph, J : set, S : Stats, 
+                 reallocation_group : list, map_name : str, t_key : float) -> None:
+        self.Rs = Rs
+        self.G = G
+        self.J = J
+        self.S = S
+
+        self.map_name = map_name
+
+        self.t_key = t_key
+
+        self.agents = reallocation_group
+
+        self.allocated_locations = set()
+        self.goals = set()
+
+        tasks = []
+        goals_per_task = []
+        
+        for agent in self.Rs.agents:
+            if agent.task_sequence:
+                for task in agent.task_sequence:
+                    # print(f"task {task}")
+                    self.allocated_locations.add(task[1])  # Start location
+                    self.allocated_locations.add(task[2])  # End location
+
+        for agent_id in self.agents:
+            agent_status = self.Rs.get_agent(agent_id).status
+            
+            # print(f"Agent status: {agent_status}")
+            
+            if Rs.get_agent(agent_id).task_sequence:
+                task_id = Rs.get_agent(agent_id).task_sequence[0][0]
+            else:
+                print(f"Agent has no task sequence ...")
+                exit()
+                
+            if agent_status == 1:
+                self.goals = self.goals.union(J[task_id][0])
+                goals_per_task.append(len(J[task_id][0]))
+                self.allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][1])
+            # If status is 2, get locations of current task's dropoff location
+            elif agent_status == 2:
+                self.goals = self.goals.union(J[task_id][1])
+                goals_per_task.append(len(J[task_id][1]))
+                self.allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][2])
+            else:
+                print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
+
+        self.S.reallocation_data[self.t_key]["tasks"] = tasks
+        num_combinations = np.prod(goals_per_task) + (np.sum(goals_per_task)**2 - np.sum(np.square(goals_per_task)))/2 + np.sum(goals_per_task)
+        self.S.reallocation_data[self.t_key]["possible_number_nodes"] = int(num_combinations)
+                        
+        # print(f"Number of combinations: {num_combinations}")
+        print(f"Goals: {self.goals} and num goals {len(self.goals)}")
+        # print(f"Already Allocated Locations: {self.allocated_locations}")
+
+        self.goals = self.goals - self.allocated_locations
+        
+        print(f"Goals: {self.goals} and num goals {len(self.goals)}")
+
+        self.original_goals = list(self.goals)
+        
+        self.best_cost = np.inf
+        self.best_assignment = None
+
+        self.cost_matrix = []
+        
+        for agent_id in reallocation_group:
+            task_id = Rs.get_agent(agent_id).task_sequence[0][0]
+            agent_status = Rs.get_agent(agent_id).status
+            
+            if agent_status == 1:
+                task_loc_set = J[task_id][0]
+            elif agent_status == 2:
+                task_loc_set = J[task_id][1]
+            else:
+                print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
+            
+            row = []
+            for loc in self.goals:
+                if loc in self.allocated_locations:
+                    row.append(np.inf)
+                elif loc not in task_loc_set:
+                    row.append(np.inf)
+                else:
+                    row.append(G.get_distance(Rs.get_agent(agent_id).state, loc))
+            self.cost_matrix.append(row)
+
+        self.nodes = SortedList()
+
+        self.pruned_nodes = 0
+        self.expanded_nodes = 0
+
+    def solve(self) -> AgentLoader:
+        self._branch({}, self.agents, self.goals, 0.0)
+
+        self.S.reallocation_data[self.t_key]["nodes_expanded"] = self.expanded_nodes
+        self.S.reallocation_data[self.t_key]["nodes_pruned"] = self.pruned_nodes
+
+        self._modify_Rs(self.best_assignment)
+        return self.Rs
+    
+    def _modify_Rs(self, assignment : dict) -> None:
+        if assignment is None:
+            return
+        
+        for agent_id, goal_idx in assignment.items():
+            print(f"Agent {agent_id} with status {self.Rs.get_agent(agent_id).status} assigned to goal loc {self.original_goals[goal_idx]}: SKU needed: {self.J[self.Rs.get_agent(agent_id).task_sequence[0][0]][3]}: SKU at Location: {self.G.warehouse.get_sku_at_location(self.original_goals[goal_idx])}")
+            agent = self.Rs.get_agent(agent_id)
+            goal_loc = self.original_goals[goal_idx]
+            print(f"Agent task sequence: {agent.task_sequence[0]}")
+            # exit()
+            # print(f"Agent {agent_id} with goal_loc {goal_loc}")
+            if agent.status == 1:
+                agent.task_sequence[0] = (agent.task_sequence[0][0], goal_loc, agent.task_sequence[0][2], agent.task_sequence[0][3])
+            elif agent.status == 2:
+                agent.task_sequence[0] = (agent.task_sequence[0][0], agent.task_sequence[0][1], goal_loc, agent.task_sequence[0][3])                
+            else:
+                print(f"Agent {agent.id} should not have status {agent.status} Exiting ...")
+                exit()
+    
+    # def _cost_matrix(self) -> list:
+    #     cost_matrix = []
+        
+    #     for agent_id in self.agents:
+    #         # print(f"agent: {agent_id}")
+    #         task_id = self.Rs.get_agent(agent_id).task_sequence[0][0]
+    #         agent_status = self.Rs.get_agent(agent_id).status
+            
+    #         if agent_status == 1:
+    #             task_loc_set = self.J[task_id][0]
+    #         elif agent_status == 2:
+    #             task_loc_set = self.J[task_id][1]
+    #         else:
+    #             print(f"Agent {agent_id} with status {self.Rs.get_agent(agent_id).status}")
+            
+    #         row = []
+    #         for loc in self.original_goals:
+    #             # print(f"goal : {loc}")
+    #             if loc not in task_loc_set:
+    #                 row.append(np.inf)
+    #             else:
+    #                 row.append(self.G.get_distance(self.Rs.get_agent(agent_id).state, loc))
+    #         cost_matrix.append(row)
+        
+    #     # print(f"Cost Matrix: {cost_matrix}")
+
+    #     return cost_matrix
+
+    def _lower_bound(self, remaining_agents : list, remaining_goals : set) -> float:
+        lb = 0.0
+        for agent_id in remaining_agents:
+            best = np.inf
+            for goal in remaining_goals:
+                best = min(best, self.cost_matrix[self.agents.index(agent_id)][self.original_goals.index(goal)])
+            lb += best
+        return lb
+
+    
+    def mapf_cost(self, assignments: Dict[int, int]) -> float:
+        """
+        assignments: agent -> goal
+        """
+        goal_locations = []
+        agent_states = []
+
+        # print(f"Assignments: {assignments}")
+
+        for assignment in assignments.items():
+            goal_locations.append(self.original_goals[assignment[1]])
+            agent_states.append(self.Rs.get_agent(assignment[0]).state)
+
+        sequences = []
+        w = 1.2
+
+        # print(f"Number of agent assignments: {len(assignments)}")
+        
+        latch = False
+        while not sequences:
+            # Execute the path planning algorithm
+            sequences = pbs.test_cpp_func(self.map_name, len(assignments), 1, w, agent_states, goal_locations)
+            if sequences == []:
+                print("+++++++++++++++++++Execution Failed with w = ", w)
+                
+            # If a solution cannot be found with a higher suboptimality bound, break
+            if w >= 1.2:
+                if latch:
+                    break
+                latch = True
+            w += 5.0
+
+        cost = 0
+        for sequence in sequences:
+            cost += len(sequence)
+
+        return cost
+
+    def _branch(self, assignment : dict, remaining_agents : list, remaining_goals : set, current_cost : float) -> bool:
+        """
+        Expands current node to append them to the sorted list of all nodes
+        
+        :param self: Description
+        :param assignment: Description
+        :type assignment: dict
+        :param current_cost: Description
+        :type current_cost: float
+        """
+        lb = current_cost + self._lower_bound(remaining_agents, remaining_goals)
+
+        # If lower bound is higher than best cost, prune node
+        if lb >= self.best_cost:
+            self.pruned_nodes += 1
+            return
+        
+        # If fully allocated
+        
+        if not remaining_agents:
+            if current_cost < self.best_cost:
+                self.best_cost = current_cost
+                self.best_assignment = assignment
+            return
+        
+        # Choose next agent
+
+        i = -1
+        min_number = np.inf
+
+        multiple = False
+        agents = []
+
+        for agent_id in remaining_agents:
+            agent = self.Rs.get_agent(agent_id)
+            if agent.status == 1:
+                num_goals = len(remaining_goals - self.J[agent.task_sequence[0][0]][0])
+            elif agent.status == 2:
+                num_goals = len(remaining_goals - self.J[agent.task_sequence[0][0]][1])
+            if num_goals < min_number:
+                i = agent_id
+                min_number = num_goals
+                agents = [agent_id]
+            elif num_goals == min_number:
+                multiple = True
+                agents.append(agent_id)
+            else:
+                continue
+
+        if multiple:
+            # print(f"Multiple Agents {agents} with identical number of goal locations {min_number}")
+            i = np.random.choice(agents)
+            # print(f"Agent {i} chosen")
+
+
+        # print(f"Agent {i} with number of goal locations {min_number}")
+
+        # print(f"goals: {self.original_goals}")
+        # print(f"remaiming goals: {remaining_goals}")
+        # print(f"Agent {i} goal costs {self.cost_matrix[self.agents.index(i)]}")
+
+        child_nodes = SortedList()
+
+        for g in remaining_goals:
+            j = self.original_goals.index(g)
+            
+            if self.cost_matrix[self.agents.index(i)][j] == np.inf:
+                continue
+
+            if self.cost_matrix[self.agents.index(i)] == np.inf:
+                continue
+
+            child_assignment = assignment.copy()
+            child_assignment[i] = j
+
+            child_remaining_agents = remaining_agents.copy()
+            child_remaining_agents.remove(i)
+
+            child_remaining_goals = remaining_goals.copy()
+            child_remaining_goals.remove(g)
+
+            mapf_cost = self.mapf_cost(child_assignment)
+
+            # print(f"MAPF Cost: {mapf_cost}")
+            # print(f"Child Nodes: {child_nodes}")
+
+            tie_breaker = 0
+
+            for child in child_nodes:
+                if child[0] == mapf_cost:
+                    tie_breaker += 1
+            
+            child_nodes.add((mapf_cost, tie_breaker, child_assignment, child_remaining_agents, child_remaining_goals))
+
+        # print(f"Child Nodes: {child_nodes}")
+
+        for node in child_nodes:
+            # print(f"Node cost {node[0]}")
+            self.expanded_nodes += 1
+            self._branch(node[2], node[3], node[4], node[0])

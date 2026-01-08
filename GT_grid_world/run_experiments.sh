@@ -9,12 +9,12 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(0)
+seeds=(140 141 142)
 num_robots=(40)
-time_horizons=(100)
+time_horizons=(28800)
 max_tasks=(120)
 frequencies=(0.25)
-inbound_outbound_ratio=(0.75)
+inbound_outbound_ratio=(0.85)
 num_skus=(30)
 initial_inventory=(25.0)
 weight_init_method="uniform"
@@ -23,7 +23,7 @@ initial_task_assign_strategy="fast_greedy"
 improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="ecbs"
-map="data/maps/symbotic_medium_wide_deck"
+map="data/maps/study_small_restricted"
 removal_operator="shaw"
 repair_operator="greedy"
 acceptance_function="simulated_annealing"
@@ -32,11 +32,12 @@ alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
 output_intermediate_data=True
-intermediate_data_interval=2000
+intermediate_data_interval=4000
 base_cost_weight=1.0
 deadline_weight=0.0
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5
+solution_repair_function="BnB"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -68,6 +69,7 @@ for seed in "${seeds[@]}"; do
                         echo "  Deadline Weight: $deadline_weight"
                         echo "  Sku Distribution Weight: $sku_distribution_weight"
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
+                        echo "  Solution Repair Function: $solution_repair_function"
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -99,8 +101,9 @@ for seed in "${seeds[@]}"; do
                             --base-cost-weight "$base_cost_weight" \
                             --deadline-weight "$deadline_weight" \
                             --sku-distribution-weight "$sku_distribution_weight" \
-                            --agent-unallocated-penalty "$agent_unallocated_penalty"
-                        
+                            --agent-unallocated-penalty "$agent_unallocated_penalty" \
+                            --solution-repair-function "$solution_repair_function"
+
                         # Optional: Add a small delay between runs
                         sleep 1
                     done

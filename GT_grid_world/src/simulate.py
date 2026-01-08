@@ -5,6 +5,43 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
+
+def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : int, sku_id : int) -> None:
+    """
+    Ensure all tasks referencing warehouse locations remain consistent with the
+    current inventory layout after a SKU is removed or added.
+    """
+    if not J:
+        return
+
+    for other_task_id in list(J.keys()):
+        if other_task_id == changed_task_id:
+            continue
+
+        task_tuple = J[other_task_id]
+        start_locations, goal_locations, deadline, task_sku_id, task_type = task_tuple
+
+        if task_sku_id == sku_id:
+            if task_type == 0:
+                new_start_locs = frozenset(G.warehouse.get_sku_instances(sku_id))
+                new_goal_locs = frozenset(G.driveway.get_empty_locations())
+                J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
+                continue
+            elif task_type == 1:
+                new_goal_locs = frozenset(G.warehouse.get_empty_locations())
+                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
+                continue
+        else:
+            if task_type == 0:
+                new_goal_locs = frozenset(G.driveway.get_empty_locations())
+                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
+                continue
+            elif task_type == 1:
+                new_goal_locs = frozenset(G.warehouse.get_empty_locations())
+                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
+                continue
+
+
 def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
     """
     Simulate the system for one timestep.
@@ -30,15 +67,20 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
         else:
             # Update Agent State and Graph Occupied States
             G.set_occupied(agent.state, False)
+            old_state = agent.state
             agent.state = agent.path_sequence.pop(0)
             G.set_occupied(agent.state, True)
             
             if agent.status == 1:
-                # S.update_actual_pickup_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
+                if old_state != agent.state:
+                    S.update_actual_pickup_distance(agent.task_sequence[0][0], 1)
                 S.update_actual_pickup_duration(agent.task_sequence[0][0], S.get_actual_pickup_duration(agent.task_sequence[0][0]) + 1)
                 
             elif agent.status == 2:
-                # S.update_actual_distance(agent.task_sequence[0][0], euclidian_distance(old_state, agent.state))
+                if agent.get_sku_id_carrying() is None:
+                    raise ValueError(f"Agent {agent.id} is not carrying any item when it is in the delivery phase for task {agent.task_sequence[0][0]}: agent status {agent.status}")
+                if old_state != agent.state:
+                    S.update_actual_distance(agent.task_sequence[0][0], 1)
                 S.update_actual_duration(agent.task_sequence[0][0], S.get_actual_duration(agent.task_sequence[0][0]) + 1)
             else:
                 pass
@@ -52,6 +94,8 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
     S.add_aisle_occupancy(G.get_aisle_occupancy())
     S.add_driveway_occupancy(G.get_driveway_occupancy())
     
+    S.append_carrying_skus(Rs.get_all_agent_carrying_skus())
+    
     for agent in Rs.agents:
         if agent.status == 1:
             if agent.state == agent.task_sequence[0][1]:
@@ -60,40 +104,22 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 start_location = task[1]
                 goal_location = task[2]
                 deadline = task[3]
-                # Outbound: picking up from warehouse
+                
+                # Outbound or warehouse-based pickup
                 if start_location in G.warehouse.get_full_locations():
                     try:
                         sku_id = G.warehouse.get_sku_at_location(start_location).sku_id
+                        if sku_id is None:
+                            raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
                         agent.set_sku_id_carrying(G.warehouse.get_sku_at_location(start_location).sku_id)
                         G.warehouse.remove_sku_instance(start_location)
                         G.update_sku_KD_trees(agent.get_sku_id_carrying())
+
+                        _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
+
+                        if agent.get_sku_id_carrying() is None:
+                            raise ValueError(f"Agent should be holding item after pickup ... Exiting")
                         
-                        # Update outbound tasks in J with the same sku_id to remove this location as a start location
-                        # for other_task_id in J.keys():
-                        #     if other_task_id != task_id and J[other_task_id][3] == sku_id and J[other_task_id][4] == 0:
-                        #         if start_location in J[other_task_id][0]:
-                        #             # Create new tuple with updated start locations
-                        #             new_start_locations = frozenset(G.warehouse.get_sku_instances(sku_id))
-                        #             new_task_tuple = (
-                        #                 new_start_locations,
-                        #                 J[other_task_id][1],
-                        #                 J[other_task_id][2],
-                        #                 J[other_task_id][3],
-                        #                 J[other_task_id][4]
-                        #             )
-                        #             J[other_task_id] = new_task_tuple
-                        #     # Also update inbound tasks to add this location to the goal locations regardless of sku_id
-                        #     if other_task_id != task_id and J[other_task_id][4] == 1:
-                        #         # Refresh inbound goal locations from current warehouse empties
-                        #         new_goal_locations = frozenset(G.warehouse.get_empty_locations())
-                        #         new_task_tuple = (
-                        #             J[other_task_id][0],
-                        #             new_goal_locations,
-                        #             J[other_task_id][2],
-                        #             J[other_task_id][3],
-                        #             J[other_task_id][4]
-                        #         )
-                        #         J[other_task_id] = new_task_tuple
                     except Exception as e:
                         print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
                         exit()
@@ -101,21 +127,18 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 elif start_location in G.driveway.get_full_locations():
                     try:
                         # Only save sku id
-                        agent.set_sku_id_carrying(G.driveway.get_sku_at_location(start_location).sku_id)
+                        print(f"Agent {agent.id} picking up task {task_id} with sku {G.driveway.get_sku_at_location(start_location)}")
+                        sku_id = G.driveway.get_sku_at_location(start_location).sku_id
+                        if sku_id is None:
+                            raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
+                        agent.set_sku_id_carrying(sku_id)
                         G.driveway.remove_sku_instance(start_location)
                         
-                        # Refresh goal locations of all outbound tasks to current driveway empties
-                        # for other_task_id in J.keys():
-                        #     if other_task_id != task_id and J[other_task_id][4] == 0:
-                        #         new_goal_locations = frozenset(G.driveway.get_empty_locations())
-                        #         new_task_tuple = (
-                        #             J[other_task_id][0],
-                        #             new_goal_locations,
-                        #             J[other_task_id][2],
-                        #             J[other_task_id][3],
-                        #             J[other_task_id][4]
-                        #         )
-                        #         J[other_task_id] = new_task_tuple
+                        _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
+
+                        if agent.get_sku_id_carrying() is None:
+                            raise ValueError(f"Agent should be holding item after pickup ... Exiting")
+
                     except Exception as e:
                         print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
 
@@ -127,43 +150,23 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 task_id = task[0]
                 start_location = task[1]
                 goal_location = task[2]
+                deadline = task[3]
                 
-
                 deadline = J[task_id][2]
                 sku_id = J[task_id][3]
                 inbound_task = J[task_id][4]
 
+                if sku_id != agent.get_sku_id_carrying():
+                    raise ValueError(f"Agent {agent.id} carrying sku {agent.get_sku_id_carrying()} but task {task_id} requires sku {sku_id} ... Exiting")
+
                 # Inbound task: dropping off to warehouse
                 if goal_location in G.warehouse.get_empty_locations():
-                    G.warehouse.add_sku_instance(agent.get_sku_id_carrying(), goal_location)
+                    print(f"Agent {agent.id} dropping off task {task_id} with sku {agent.get_sku_id_carrying()}")
+                    carried_sku = agent.get_sku_id_carrying()
+                    G.warehouse.add_sku_instance(carried_sku, goal_location)
                     G.update_sku_KD_trees(agent.get_sku_id_carrying())
-                    # Update inbound tasks in J to remove this location as a goal location for all sku_ids
-                    # for other_task_id in J.keys():
-                    #     if other_task_id != task_id and J[other_task_id][4] == 1:
-                    #         if goal_location in J[other_task_id][1]:
-                    #             # Create new tuple with updated goal locations
-                    #             new_goal_locations = frozenset(G.warehouse.get_empty_locations())
-                    #             new_task_tuple = (
-                    #                 J[other_task_id][0],
-                    #                 new_goal_locations,
-                    #                 J[other_task_id][2],
-                    #                 J[other_task_id][3],
-                    #                 J[other_task_id][4]
-                    #             )
-                    #             J[other_task_id] = new_task_tuple
-                    #     # Update outbound tasks to add this location to the start locations if the sku_id matches
-                    #     if other_task_id != task_id and J[other_task_id][4] == 0 and J[other_task_id][3] == sku_id:
-                    #         if goal_location not in J[other_task_id][0]:
-                    #             # Create new tuple with updated start locations
-                    #             new_start_locations = frozenset(G.warehouse.get_sku_instances(sku_id))
-                    #             new_task_tuple = (
-                    #                 new_start_locations,
-                    #                 J[other_task_id][1],
-                    #                 J[other_task_id][2],
-                    #                 J[other_task_id][3],
-                    #                 J[other_task_id][4]
-                    #             )
-                    #             J[other_task_id] = new_task_tuple
+                    _refresh_tasks_after_warehouse_change(J, G, task_id, carried_sku)
+
                                 
                 elif goal_location in G.driveway.get_empty_locations():
                     pass
@@ -198,6 +201,5 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                     
                     if t <= 100:
                         S.append_early_task_ids(new_task_id)
-    # print(f"Task start locations: {[list(J.values())[0][0]]}")
-    # print(f"Task goal locations: {[list(J.values())[0][1]]}")
+                        
     return Rs, J

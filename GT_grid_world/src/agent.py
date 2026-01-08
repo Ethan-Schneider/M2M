@@ -77,6 +77,13 @@ class AgentLoader:
     def get_all_assigned_tasks_per_robot(self):
         return [agent.get_assigned_task_ids() for agent in self.agents]   
     
+    def get_all_agent_carrying_skus(self) -> list:
+        skus = []
+        for agent in self.agents:
+            skus.append(agent.get_sku_id_carrying())
+        
+        return skus
+    
     def get_all_assigned_tasks(self): 
         tasks = []
         for agent in self.agents:

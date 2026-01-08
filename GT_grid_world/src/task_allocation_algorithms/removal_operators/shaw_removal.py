@@ -37,7 +37,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         - Updated cost_lookup dictionary
     """
     if len(allocations) == 0:
-        return Rs, allocations, cost_lookup
+        return Rs, allocations, cost_lookup, task_start_mask, task_goal_mask, agent_start_cost_tensor, agent_task_sequence_time
     
     # print(f"cost lookup: {cost_lookup}")
     # print(f"number of cost lookup: {len(cost_lookup.keys())}")
@@ -52,7 +52,7 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
     
     if seed_s_j is None or seed_g_j is None:
         print(f"Warning: Could not find seed task {seed_task_id} in agent {seed_agent_idx}'s sequence")
-        return Rs, allocations, cost_lookup
+        return Rs, allocations, cost_lookup, task_start_mask, task_goal_mask, agent_start_cost_tensor, agent_task_sequence_time
     
     # Calculate relatedness scores for all other tasks
     relatedness_scores = []
