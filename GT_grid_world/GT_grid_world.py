@@ -193,6 +193,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 t_key = S.create_new_realloc_data(t)
                 S.reallocation_data[t_key]["agents"] = agents
                 S.reallocation_data[t_key]["prior_path_cost"] = prior_cost
+                repair_tik = time.time()
                 for agent_group in agents:
                     
                     # Skip if only one agent in group or 6+ agents
@@ -204,8 +205,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         task = Rs.get_agent(agent_id).task_sequence[0][0]
                         task_ids.append(task)
                     S.reallocation_data[t_key]["tasks"] = task_ids
-
-                    repair_tik = time.time()
 
                     if solution_repair_function == "HA":
                         Rs = HA_exact_repair(Rs, G, S, J, agent_group)
