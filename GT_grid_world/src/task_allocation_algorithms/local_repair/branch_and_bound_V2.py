@@ -1,4 +1,5 @@
 import numpy as np
+import time
 from typing import Tuple, Dict, List
 
 from ...agent import AgentLoader, Agent
@@ -11,7 +12,13 @@ from ...path_finding_algorithms.external_algorithms.PBS import pbs
 
 class BnB:
     def __init__(self, Rs : AgentLoader, G : Graph, J : set, S : Stats, 
-                 reallocation_group : list, map_name : str, t_key : float) -> None:
+                 reallocation_group : list, map_name : str, t_key : float, initial_cost : float) -> None:
+
+        self.start_time = time.time()
+        self.current_time = time.time()
+        # time limit of 1 second
+        self.time_limit = 1.0
+
         self.Rs = Rs
         self.G = G
         self.J = J
@@ -110,7 +117,12 @@ class BnB:
         self.S.reallocation_data[self.t_key]["nodes_expanded"] = self.expanded_nodes
         self.S.reallocation_data[self.t_key]["nodes_pruned"] = self.pruned_nodes
 
+        if np.abs(self.current_time - self.start_time) > self.time_limit:
+            return self.Rs
+
         self._modify_Rs(self.best_assignment)
+        
+        print(f"Best Assignment: {self.best_assignment} with cost {self.best_cost}")
         return self.Rs
     
     def _modify_Rs(self, assignment : dict) -> None:
@@ -131,34 +143,6 @@ class BnB:
             else:
                 print(f"Agent {agent.id} should not have status {agent.status} Exiting ...")
                 exit()
-    
-    # def _cost_matrix(self) -> list:
-    #     cost_matrix = []
-        
-    #     for agent_id in self.agents:
-    #         # print(f"agent: {agent_id}")
-    #         task_id = self.Rs.get_agent(agent_id).task_sequence[0][0]
-    #         agent_status = self.Rs.get_agent(agent_id).status
-            
-    #         if agent_status == 1:
-    #             task_loc_set = self.J[task_id][0]
-    #         elif agent_status == 2:
-    #             task_loc_set = self.J[task_id][1]
-    #         else:
-    #             print(f"Agent {agent_id} with status {self.Rs.get_agent(agent_id).status}")
-            
-    #         row = []
-    #         for loc in self.original_goals:
-    #             # print(f"goal : {loc}")
-    #             if loc not in task_loc_set:
-    #                 row.append(np.inf)
-    #             else:
-    #                 row.append(self.G.get_distance(self.Rs.get_agent(agent_id).state, loc))
-    #         cost_matrix.append(row)
-        
-    #     # print(f"Cost Matrix: {cost_matrix}")
-
-    #     return cost_matrix
 
     def _lower_bound(self, remaining_agents : list, remaining_goals : set) -> float:
         lb = 0.0
@@ -176,22 +160,43 @@ class BnB:
         """
         goal_locations = []
         agent_states = []
-
-        # print(f"Assignments: {assignments}")
+        
+        # agents in self.agents but not in assignment, choose their best goal location from self.cost_matrix and add that to agent_states and goal_locations
+        # for agent_id in self.agents:
+        #     if agent_id not in assignments:
+        #         best_goal = np.argmin(self.cost_matrix[self.agents.index(agent_id)])
+        #         goal_locations.append(self.original_goals[best_goal])
+        #         agent_states.append(self.Rs.get_agent(agent_id).state)
 
         for assignment in assignments.items():
             goal_locations.append(self.original_goals[assignment[1]])
             agent_states.append(self.Rs.get_agent(assignment[0]).state)
+            
+        # # For all agents not included in self.agents, add their state and goal locations to sequences
+        # for agent in self.Rs.agents:
+        #     # if agent.id not in list(assignments.keys()):
+        #     if agent.id not in self.agents:
+        #         agent_states.append(agent.state)
+        #         # If robot is going to pickup, set goal location to the task's start location
+        #         if agent.status == 1:
+        #             # Get current assigned task's start location
+        #             goal_locations.append(agent.task_sequence[0][1])
+                    
+        #         # If robot is going to delivery, set goal location to the task's goal location
+        #         elif agent.status == 2:
+        #             goal_locations.append(agent.task_sequence[0][2])
+                    
+        #         # If robot is a free_agent, set goal location to current state
+        #         else:
+        #             goal_locations.append(agent.state)
 
         sequences = []
         w = 1.2
-
-        # print(f"Number of agent assignments: {len(assignments)}")
         
         latch = False
         while not sequences:
             # Execute the path planning algorithm
-            sequences = pbs.test_cpp_func(self.map_name, len(assignments), 1, w, agent_states, goal_locations)
+            sequences = pbs.test_cpp_func(self.map_name, len(agent_states), 1, w, agent_states, goal_locations)
             if sequences == []:
                 print("+++++++++++++++++++Execution Failed with w = ", w)
                 
@@ -202,9 +207,12 @@ class BnB:
                 latch = True
             w += 5.0
 
+        if not sequences:
+            return np.inf
+
         cost = 0
         for sequence in sequences:
-            cost += len(sequence)
+            cost += len(sequence[1:])
 
         return cost
 
@@ -218,10 +226,14 @@ class BnB:
         :param current_cost: Description
         :type current_cost: float
         """
+        self.current_time = time.time()
+        if np.abs(self.current_time - self.start_time) > self.time_limit:
+            return
+        
         lb = current_cost + self._lower_bound(remaining_agents, remaining_goals)
 
         # If lower bound is higher than best cost, prune node
-        if lb >= self.best_cost:
+        if lb > self.best_cost:
             self.pruned_nodes += 1
             return
         
@@ -243,6 +255,7 @@ class BnB:
 
         for agent_id in remaining_agents:
             agent = self.Rs.get_agent(agent_id)
+            num_goals = np.inf
             if agent.status == 1:
                 num_goals = len(remaining_goals - self.J[agent.task_sequence[0][0]][0])
             elif agent.status == 2:

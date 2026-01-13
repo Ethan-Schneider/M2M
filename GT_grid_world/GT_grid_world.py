@@ -12,7 +12,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             max_task_number : int = 20,
             initial_task_assignment_strategy : str = "lns",
             improvement_task_assignment_strategy : str = "py_lns",
-            path_planning_strategy : str = "ecbs", time_limit : int = 99999,
+            path_planning_strategy : str = "ecbs", time_limit : int = 999999,
             cost_calculation_method : str = "manhattan",
             removal_operator : str = "worst", repair_operator : str = "greedy",
             acceptance_function: str = "greedy", T_0: float = 1.0, alpha: float = 0.99,
@@ -102,12 +102,32 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
-
+        
+        # if t > 50:
+        #     costs = []
+        #     for i in range(100):
+        #         for agent in Rs.agents:
+        #             if agent.path_sequence == []:
+        #                 Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+        #                 break
+        #         cost = 0
+        #         for agent in Rs.agents:
+        #             cost += len(agent.path_sequence)
+        #         costs.append(cost)
+        #     print(f"Routing costs over 100 iterations: {costs}")
+        #     print(f"Number of different costs: {len(set(costs))}")
+        #     exit()
+        # else:
+        #     for agent in Rs.agents:
+        #         if agent.path_sequence == []:
+        #             Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+        #             break            
+        
         for agent in Rs.agents:
             if agent.path_sequence == []:
                 Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
-                break
-            
+                break    
+
         tok = time.time()
         S.add_total_PF_time(tok-tik)
         
@@ -191,13 +211,22 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 
                 agents = [[a.id for a in group] for aisle, group in aisle_groups.items()]
                 t_key = S.create_new_realloc_data(t)
-                S.reallocation_data[t_key]["agents"] = agents
-                S.reallocation_data[t_key]["prior_path_cost"] = prior_cost
+                S.reallocation_data[t_key]["agents"] = []
+                S.reallocation_data[t_key]["prior_path_cost"] = []
+                S.reallocation_data[t_key]["post_path_cost"] = [] 
+                S.reallocation_data[t_key]["change_in_path_cost"] = []     
+                S.reallocation_data[t_key]["rejected_solution"] = []
                 repair_tik = time.time()
+                if solution_repair_function == "HA":
+                    temp_Rs = Rs.copy()
                 for agent_group in agents:
                     
-                    # Skip if only one agent in group or 6+ agents
-                    if len(agent_group) <= 1 or len(agent_group) > 5:
+                    group_cost = 0
+                    for agent_id in agent_group:
+                        group_cost += len(Rs.get_agent(agent_id).path_sequence)
+
+                    # Skip if only one agent in group
+                    if len(agent_group) <= 1:
                         continue
 
                     task_ids = []
@@ -207,10 +236,103 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     S.reallocation_data[t_key]["tasks"] = task_ids
 
                     if solution_repair_function == "HA":
-                        Rs = HA_exact_repair(Rs, G, S, J, agent_group)
+                        if len(agent_group) >= 5:
+                            continue
+                        
+                        prior_cost = 0
+                        for agent in temp_Rs.agents:
+                            prior_cost += len(agent.path_sequence)
+                        S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
+                        HA_agent_group = agent_group.copy()
+                        for agent in temp_Rs.agents:
+                            if agent.id not in agent_group and agent.task_sequence and G.get_distance(agent.state, temp_Rs.get_agent(agent_group[0]).state) <= 5:
+                                HA_agent_group.append(agent.id)
+                        S.reallocation_data[t_key]["agents"].append(HA_agent_group)
+                        # temp_Rs = Rs.copy()
+                        temp_Rs = HA_exact_repair(temp_Rs, G, S, J, HA_agent_group)
                     elif solution_repair_function == "BnB":
-                        bnb = BnB(Rs, G, J, S, agent_group, map, t_key)
-                        Rs = bnb.solve()
+                        if len(agent_group) >= 4:
+                            continue
+                        
+                        all_prior_states = []
+                        all_prior_goals = []
+                        for agent in Rs.agents:
+                            all_prior_states.append(agent.state)
+                            if agent.status == 1:
+                                all_prior_goals.append(agent.task_sequence[0][1])
+                            elif agent.status == 2:
+                                all_prior_goals.append(agent.task_sequence[0][2])
+                            else:
+                                all_prior_goals.append(agent.state)
+
+                        prior_goals = []
+                        for agent_id in agent_group:
+                            if Rs.get_agent(agent_id).status == 1:
+                                prior_goals.append(Rs.get_agent(agent_id).task_sequence[0][1])
+                            elif Rs.get_agent(agent_id).status == 2:
+                                prior_goals.append(Rs.get_agent(agent_id).task_sequence[0][2])
+                        prior_cost = 0
+                        for agent in Rs.agents:
+                            prior_cost += len(agent.path_sequence)
+                            
+                        S.reallocation_data[t_key]["agents"].append(agent_group)
+                        S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
+                        
+                        temp_Rs = Rs.copy()
+                        
+                        bnb = BnB(temp_Rs, G, J, S, agent_group, map, t_key, prior_cost)
+                        temp_Rs = bnb.solve()
+                        temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
+                        
+                        all_post_states = []
+                        all_post_goals = []
+                        for agent in temp_Rs.agents:
+                            all_post_states.append(agent.state)
+                            if agent.status == 1:
+                                all_post_goals.append(agent.task_sequence[0][1])
+                            elif agent.status == 2:
+                                all_post_goals.append(agent.task_sequence[0][2])
+                            else:
+                                all_post_goals.append(agent.state)
+
+                        post_cost = 0
+
+                        for agent in temp_Rs.agents:
+                            post_cost += len(agent.path_sequence)
+                            
+                        post_goals = []
+                        for agent_id in agent_group:
+                            if temp_Rs.get_agent(agent_id).status == 1:
+                                post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][1])
+                            elif temp_Rs.get_agent(agent_id).status == 2:
+                                post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][2])
+
+                        S.reallocation_data[t_key]["post_path_cost"].append(post_cost)
+                        S.reallocation_data[t_key]["change_in_path_cost"].append(post_cost - prior_cost)
+                        
+                        if post_cost < prior_cost:
+                            Rs = temp_Rs.copy()
+                            S.reallocation_data[t_key]["rejected_solution"].append(False)
+                        else:
+                            S.reallocation_data[t_key]["rejected_solution"].append(True)
+                        
+                        # identical = True
+                        # # Check if pre_goals and post_goals are identical
+                        # for i in range(len(prior_goals)):
+                        #     if prior_goals[i] != post_goals[i]:
+                        #         print(f"Goal for agent {agent_group[i]} changed from {prior_goals[i]} to {post_goals[i]}")
+                        #         identical = False
+                        #         break
+
+                        # if post_cost > prior_cost and identical:
+                        #     print(f"Post cost {post_cost} is greater than prior cost {prior_cost}")
+                        #     print(f"Agent group: {agent_group} with prior goals: {prior_goals} and post goals: {post_goals}")
+                        #     print(f"Agent states: {[Rs.get_agent(agent_id).state for agent_id in agent_group]}")
+                        #     print(f"All prior agent states: {all_prior_states}")
+                        #     print(f"All post agent states: {all_post_states}")
+                        #     print(f"All prior goals: {all_prior_goals}")
+                        #     print(f"All post goals: {all_post_goals}")
+                        #     exit()
                     else:
                         print(f"Unknown solution repair function: {solution_repair_function}: Exiting ...")
                         exit()
@@ -220,16 +342,51 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 print(f"Repaired Solution")
                 S.reallocation_data[t_key]["computation_time"] = float(np.abs(time.time() - repair_tik))
                 
-                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+                if solution_repair_function == "HA":
+                    temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
+                    
+                    all_post_states = []
+                    all_post_goals = []
+                    for agent in temp_Rs.agents:
+                        all_post_states.append(agent.state)
+                        if agent.status == 1:
+                            all_post_goals.append(agent.task_sequence[0][1])
+                        elif agent.status == 2:
+                            all_post_goals.append(agent.task_sequence[0][2])
+                        else:
+                            all_post_goals.append(agent.state)
 
-                post_cost = 0
-                
-                for agent in Rs.agents:
-                    post_cost += len(agent.path_sequence)
+                    post_cost = 0
+                    
+                    for agent in temp_Rs.agents:
+                        post_cost += len(agent.path_sequence)
+                        
+                    post_goals = []
+                    for agent_id in agent_group:
+                        if temp_Rs.get_agent(agent_id).status == 1:
+                            post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][1])
+                        elif temp_Rs.get_agent(agent_id).status == 2:
+                            post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][2])
 
-                S.reallocation_data[t_key]["post_path_cost"] = post_cost
+                    S.reallocation_data[t_key]["post_path_cost"].append(post_cost)
+                    S.reallocation_data[t_key]["change_in_path_cost"].append(post_cost - prior_cost)
+                    
+                    if post_cost < prior_cost:
+                        Rs = temp_Rs.copy()
+                        S.reallocation_data[t_key]["rejected_solution"].append(False)
+                    else:
+                        S.reallocation_data[t_key]["rejected_solution"].append(True)
 
-                S.reallocation_data[t_key]["change_in_path_cost"] = post_cost - prior_cost       
+                # Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+
+                # post_cost = 0
+
+                    # for agent in Rs.agents:
+                #     post_cost += len(agent.path_sequence)
+
+                # S.reallocation_data[t_key]["post_path_cost"] = post_cost
+
+                # S.reallocation_data[t_key]["change_in_path_cost"] = post_cost - prior_cost       
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
@@ -274,7 +431,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
          task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
-         path_planning_strategy: str, map_name: str, time_limit: int = 86400,
+         path_planning_strategy: str, map_name: str, time_limit: int = 999999,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
          output_graphs: bool = False, num_skus: int = 10,

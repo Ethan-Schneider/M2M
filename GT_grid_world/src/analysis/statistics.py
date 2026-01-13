@@ -180,7 +180,8 @@ class Stats:
                                        "prior_path_cost" : None,
                                        "post_path_cost" : None,
                                        "change_in_path_cost" : None,
-                                       "computation_time" : None
+                                       "computation_time" : None,
+                                       "rejected_solution" : False
                                        }
 
         return t

@@ -101,3 +101,14 @@ class AgentLoader:
 
     def __str__(self):
         return f"AgentLoader with {len(self.agents)} agents out of {len(self.agents)} allowed"
+    
+    def copy(self):
+        """Create a deep copy of the current solution."""
+        new_solution = AgentLoader([])
+        for agent in self.agents:
+            new_agent = agent.__class__(agent.id, agent.state, task_sequence=agent.task_sequence.copy(), home=agent.home)
+            new_agent.status = agent.status
+            new_agent.path_sequence = agent.path_sequence.copy()
+            new_agent.sku_id_carrying = agent.sku_id_carrying
+            new_solution.agents.append(new_agent)
+        return new_solution
