@@ -5,6 +5,9 @@ import argparse
 from src import graph, simulate, task_allocation, case_request_generator, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
 from src.task_allocation_algorithms.local_repair.exact_repair import HA_exact_repair
+from src.task_allocation_algorithms.repair_detection.backtracking import detect_backtracking
+from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
+from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
@@ -24,6 +27,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             deadline_weight: float = 0.0,
             sku_distribution_weight: float = 0.0,
             agent_unallocated_penalty: float = 0.0,
+            solution_repair_detection_function: str = "none",
             solution_repair_function: str = "none"):
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
@@ -138,68 +142,22 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         
         print("=============================" +"Task Reallocation"+ "=============================")
         # Identify which agents are backtracking, and need to reallocate their current task 
-         
 
         if solution_repair_function != "none":
-            agents_to_reallocate = []
-            for agent_ in Rs.agents:
-                if agent_.path_sequence:
-                    if agent_.status == 1:
-                        current_target_location = agent_.task_sequence[0][1]
-                    elif agent_.status == 2:
-                        current_target_location = agent_.task_sequence[0][2]
-                    else:
-                        continue
-                    
-                    current_loc = agent_.state
-                    
-                    # Backtracking detection: Defined as increasing the L1 distance to the target location along their path sequence
-                    for loc in agent_.path_sequence[1:]:
-                        d1 = np.linalg.norm(np.array(current_target_location) - np.array(current_loc), ord=1)
-                        d2 = np.linalg.norm(np.array(current_target_location) - np.array(loc), ord=1)
-                        
-                        # print(f"Agent {agent_.id} at location {current_loc} with target location {current_target_location}")
-                        # print(f"Distance to target from current location: {d1}, distance to target from next location: {d2}")
-                        
-                        if d2 > d1:
-                            agents_to_reallocate.append(agent_)
-                            break
-                        current_loc = loc
-                    # print(f"Agent {agent_.id} at location {agent_.state} and status {agent_.status} with current target location {current_target_location}")
-                    # print(f"Agent {agent_.id} path sequence: {agent_.path_sequence}")
             
-            aisle_groups = {}
-            if agents_to_reallocate:
-                # print(f"Agents to reallocate: {[agent_.id for agent_ in agents_to_reallocate]}")
-                # for agent_ in agents_to_reallocate:
-                #     print(f"Agent {agent_.id} path sequence before reallocation: {agent_.path_sequence} with goal location {agent_.task_sequence}")
-                # exit()
+            detection_tik = time.time()
+            
+            if solution_repair_detection_function == "Backtracking":
+                aisle_groups = detect_backtracking(Rs)
+            elif solution_repair_detection_function == "Duration":
+                aisle_groups = duration_difference(Rs, G)
+            elif solution_repair_detection_function == "Progress":
+                aisle_groups = sliding_window_progress(Rs, G)
+            else:
+                raise ValueError(f"Unknown solution repair detection function: {solution_repair_detection_function}: Exiting ...")
                 
-                # Group agents to be reallocated together
+            detection_tok = time.time()
                 
-                # # Group agents by having the same aisle for their current goal location
-                for agent_ in agents_to_reallocate:
-                    # get agent_id's current goal location column
-                    if Rs.get_agent(agent_.id).status == 1:
-                        goal_aisle = Rs.get_agent(agent_.id).task_sequence[0][1][1]
-                    elif Rs.get_agent(agent_.id).status == 2:
-                        goal_aisle = Rs.get_agent(agent_.id).task_sequence[0][2][1]
-                    else:
-                        print(f"Agent {agent_.id}")
-                    
-                    if goal_aisle not in aisle_groups.keys():
-                        aisle_groups[goal_aisle] = [agent_]
-                    
-                    for comparison_agent in Rs.agents:
-                        if comparison_agent.id != agent_.id and comparison_agent.task_sequence:
-                            if comparison_agent.status == 1:
-                                comp_aisle = comparison_agent.task_sequence[0][1][1]
-                            elif comparison_agent.status == 2:
-                                comp_aisle = comparison_agent.task_sequence[0][2][1]
-                            else:
-                                continue
-                            if goal_aisle == comp_aisle and comparison_agent not in aisle_groups[goal_aisle]:
-                                aisle_groups[goal_aisle].append(comparison_agent)
             if aisle_groups:
                 print(f"Aisle groups for reallocation: { {aisle: [a.id for a in group] for aisle, group in aisle_groups.items()} }")
                 
@@ -215,11 +173,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S.reallocation_data[t_key]["prior_path_cost"] = []
                 S.reallocation_data[t_key]["post_path_cost"] = [] 
                 S.reallocation_data[t_key]["change_in_path_cost"] = []     
+                S.reallocation_data[t_key]["path_planning_compute_time"] = []
+                S.reallocation_data[t_key]["lower_bound_and_checks"] = []
                 S.reallocation_data[t_key]["rejected_solution"] = []
+                S.reallocation_data[t_key]["bnb_init_compute_time"] = []
+                S.reallocation_data[t_key]["bnb_solve_time"] = []
+                S.reallocation_data[t_key]["bnb_routing_time"] = []
+                S.reallocation_data[t_key]["detection_computation_time"] = np.abs(detection_tok - detection_tik)
                 repair_tik = time.time()
                 if solution_repair_function == "HA":
                     temp_Rs = Rs.copy()
                 for agent_group in agents:
+                    if np.abs(time.time() - repair_tik) >= 1.0:
+                        break
                     
                     group_cost = 0
                     for agent_id in agent_group:
@@ -244,9 +210,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                             prior_cost += len(agent.path_sequence)
                         S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
                         HA_agent_group = agent_group.copy()
-                        for agent in temp_Rs.agents:
-                            if agent.id not in agent_group and agent.task_sequence and G.get_distance(agent.state, temp_Rs.get_agent(agent_group[0]).state) <= 5:
-                                HA_agent_group.append(agent.id)
+                        # for agent in temp_Rs.agents:
+                        #     if agent.id not in agent_group and agent.task_sequence and G.get_distance(agent.state, temp_Rs.get_agent(agent_group[0]).state) <= 5:
+                        #         HA_agent_group.append(agent.id)
                         S.reallocation_data[t_key]["agents"].append(HA_agent_group)
                         # temp_Rs = Rs.copy()
                         temp_Rs = HA_exact_repair(temp_Rs, G, S, J, HA_agent_group)
@@ -280,9 +246,17 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         
                         temp_Rs = Rs.copy()
                         
+                        init_tik = time.time()
                         bnb = BnB(temp_Rs, G, J, S, agent_group, map, t_key, prior_cost)
+                        S.reallocation_data[t_key]["bnb_init_compute_time"].append(np.abs(time.time() - init_tik))
+                        
+                        solve_tik = time.time()
                         temp_Rs = bnb.solve()
+                        S.reallocation_data[t_key]["bnb_solve_time"].append(np.abs(time.time() - solve_tik))
+                        
+                        routing_tik = time.time()
                         temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
+                        S.reallocation_data[t_key]["bnb_routing_time"].append(np.abs(time.time() - routing_tik))
                         
                         all_post_states = []
                         all_post_goals = []
@@ -340,7 +314,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     # print(f"final assignment : {assignment} with cost: {cost}")
                     
                 print(f"Repaired Solution")
-                S.reallocation_data[t_key]["computation_time"] = float(np.abs(time.time() - repair_tik))
+                S.reallocation_data[t_key]["computation_time"] = np.abs(time.time() - repair_tik)
                 
                 if solution_repair_function == "HA":
                     temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
@@ -447,6 +421,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          deadline_weight: float = 0.0,
          sku_distribution_weight: float = 0.0,
          agent_unallocated_penalty: float = 0.0,
+         solution_repair_detection_function: str = "none",
          solution_repair_function: str = "none") -> None:
     """
     Run a single instance of the simulation with specified parameters.
@@ -482,13 +457,15 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         base_cost_weight: Weight for base cost
         deadline_weight: Weight for deadline
         sku_distribution_weight: Weight for sku distribution
+        agent_unallocated_penalty: Weight for agent unallocated penalty
+        solution_repair_detection_function: Function to detect solution repair needs
         solution_repair_function: Function to repair solution post allocation and motion planning
     """
     np.random.seed(seed)
     
     stripped_map_name = map_name.split("/")[-1].replace(".json", "")
     
-    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_function}_{seed}.json"
+    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
     buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
@@ -525,6 +502,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         deadline_weight=deadline_weight,
         sku_distribution_weight=sku_distribution_weight,
         agent_unallocated_penalty=agent_unallocated_penalty,
+        solution_repair_detection_function=solution_repair_detection_function,
         solution_repair_function=solution_repair_function
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
@@ -562,6 +540,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             deadline_weight=deadline_weight,
             sku_distribution_weight=sku_distribution_weight,
             agent_unallocated_penalty=agent_unallocated_penalty,
+            solution_repair_detection_function=solution_repair_detection_function,
             solution_repair_function=solution_repair_function
     )
     tok = time.time()
@@ -639,6 +618,7 @@ if __name__=="__main__":
     parser.add_argument('--deadline-weight', type=float, default=0.0, help='Weight for deadline')
     parser.add_argument('--sku-distribution-weight', type=float, default=0.0, help='Weight for sku distribution')
     parser.add_argument('--agent-unallocated-penalty', type=float, default=0.0, help='Penalty for unallocated agents')
+    parser.add_argument('--solution-repair-detection-function', type=str, default='none', help='Solution repair detection function')
     parser.add_argument('--solution-repair-function', type=str, default='none', help='Solution repair function')
     args = parser.parse_args()
     
@@ -674,5 +654,6 @@ if __name__=="__main__":
         deadline_weight=args.deadline_weight,
         sku_distribution_weight=args.sku_distribution_weight,
         agent_unallocated_penalty=args.agent_unallocated_penalty,
+        solution_repair_detection_function=args.solution_repair_detection_function,
         solution_repair_function=args.solution_repair_function
     )

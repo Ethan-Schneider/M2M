@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(150)
+seeds=(227)
 num_robots=(40)
 time_horizons=(28800)
 max_tasks=(120)
@@ -20,9 +20,9 @@ initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="informed_uniform"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="py_lns"
+improvement_task_assign_strategy="c_lns"
 cost_calculation_method="shortest_path"
-path_planning_strategy="ecbs"
+path_planning_strategy="pbs"
 map="data/maps/study_small_restricted"
 removal_operator="shaw"
 repair_operator="greedy"
@@ -32,11 +32,12 @@ alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
 output_intermediate_data=True
-intermediate_data_interval=4000
+intermediate_data_interval=2000
 base_cost_weight=1.0
 deadline_weight=0.0
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5
+solution_repair_detection_function="Duration"
 solution_repair_function="BnB"
 
 # Loop through all combinations
@@ -69,6 +70,7 @@ for seed in "${seeds[@]}"; do
                         echo "  Deadline Weight: $deadline_weight"
                         echo "  Sku Distribution Weight: $sku_distribution_weight"
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
+                        echo "  Solution Repair Detection Function: $solution_repair_detection_function"
                         echo "  Solution Repair Function: $solution_repair_function"
                         echo "----------------------------------------"
                         
@@ -102,6 +104,7 @@ for seed in "${seeds[@]}"; do
                             --deadline-weight "$deadline_weight" \
                             --sku-distribution-weight "$sku_distribution_weight" \
                             --agent-unallocated-penalty "$agent_unallocated_penalty" \
+                            --solution-repair-detection-function "$solution_repair_detection_function" \
                             --solution-repair-function "$solution_repair_function"
 
                         # Optional: Add a small delay between runs

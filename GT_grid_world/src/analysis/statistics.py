@@ -15,7 +15,7 @@ class Stats:
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
                  base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
-                 agent_unallocated_penalty: float = None, solution_repair_function: str = None) -> None:
+                 agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -48,6 +48,7 @@ class Stats:
         self.__deadline_weight = deadline_weight
         self.__sku_distribution_weight = sku_distribution_weight
         self.__agent_unallocated_penalty = agent_unallocated_penalty
+        self.__solution_repair_detection_function = solution_repair_detection_function
         self.__solution_repair_function = solution_repair_function
 
         self.__num_improved_assignments = 0
@@ -181,6 +182,12 @@ class Stats:
                                        "post_path_cost" : None,
                                        "change_in_path_cost" : None,
                                        "computation_time" : None,
+                                       "detection_computation_time" : None,
+                                       "bnb_init_compute_time" : None,
+                                       "bnb_solve_time" : None,
+                                       "bnb_routing_time" : None,
+                                       "lower_bound_and_checks" : None,
+                                       "path_planning_compute_time" : None,
                                        "rejected_solution" : False
                                        }
 
@@ -695,6 +702,7 @@ class Stats:
             "deadline_weight": self.__deadline_weight,
             "sku_distribution_weight": self.__sku_distribution_weight,
             "agent_unallocated_penalty": self.__agent_unallocated_penalty,
+            "solution_repair_detection_function": self.__solution_repair_detection_function,
             "solution_repair_function": self.__solution_repair_function,
             # Simulation results
             "timesteps_completed": self.__T,

@@ -14,8 +14,9 @@ class BnB:
     def __init__(self, Rs : AgentLoader, G : Graph, J : set, S : Stats, 
                  reallocation_group : list, map_name : str, t_key : float, initial_cost : float) -> None:
 
+        S.reallocation_data[t_key]["path_planning_compute_time"].append(0)
+        S.reallocation_data[t_key]["lower_bound_and_checks"].append(0)
         self.start_time = time.time()
-        self.current_time = time.time()
         # time limit of 1 second
         self.time_limit = 1.0
 
@@ -71,12 +72,12 @@ class BnB:
         self.S.reallocation_data[self.t_key]["possible_number_nodes"] = int(num_combinations)
                         
         # print(f"Number of combinations: {num_combinations}")
-        print(f"Goals: {self.goals} and num goals {len(self.goals)}")
+        # print(f"Goals: {self.goals} and num goals {len(self.goals)}")
         # print(f"Already Allocated Locations: {self.allocated_locations}")
 
         self.goals = self.goals - self.allocated_locations
         
-        print(f"Goals: {self.goals} and num goals {len(self.goals)}")
+        # print(f"Goals: {self.goals} and num goals {len(self.goals)}")
 
         self.original_goals = list(self.goals)
         
@@ -117,12 +118,12 @@ class BnB:
         self.S.reallocation_data[self.t_key]["nodes_expanded"] = self.expanded_nodes
         self.S.reallocation_data[self.t_key]["nodes_pruned"] = self.pruned_nodes
 
-        if np.abs(self.current_time - self.start_time) > self.time_limit:
+        if np.abs(time.time() - self.start_time) >= self.time_limit:
             return self.Rs
 
         self._modify_Rs(self.best_assignment)
         
-        print(f"Best Assignment: {self.best_assignment} with cost {self.best_cost}")
+        # print(f"Best Assignment: {self.best_assignment} with cost {self.best_cost}")
         return self.Rs
     
     def _modify_Rs(self, assignment : dict) -> None:
@@ -130,10 +131,10 @@ class BnB:
             return
         
         for agent_id, goal_idx in assignment.items():
-            print(f"Agent {agent_id} with status {self.Rs.get_agent(agent_id).status} assigned to goal loc {self.original_goals[goal_idx]}: SKU needed: {self.J[self.Rs.get_agent(agent_id).task_sequence[0][0]][3]}: SKU at Location: {self.G.warehouse.get_sku_at_location(self.original_goals[goal_idx])}")
+            # print(f"Agent {agent_id} with status {self.Rs.get_agent(agent_id).status} assigned to goal loc {self.original_goals[goal_idx]}: SKU needed: {self.J[self.Rs.get_agent(agent_id).task_sequence[0][0]][3]}: SKU at Location: {self.G.warehouse.get_sku_at_location(self.original_goals[goal_idx])}")
             agent = self.Rs.get_agent(agent_id)
             goal_loc = self.original_goals[goal_idx]
-            print(f"Agent task sequence: {agent.task_sequence[0]}")
+            # print(f"Agent task sequence: {agent.task_sequence[0]}")
             # exit()
             # print(f"Agent {agent_id} with goal_loc {goal_loc}")
             if agent.status == 1:
@@ -195,6 +196,9 @@ class BnB:
         
         latch = False
         while not sequences:
+            if np.abs(time.time() - self.start_time) >= self.time_limit:
+                return np.inf
+            
             # Execute the path planning algorithm
             sequences = pbs.test_cpp_func(self.map_name, len(agent_states), 1, w, agent_states, goal_locations)
             if sequences == []:
@@ -226,8 +230,8 @@ class BnB:
         :param current_cost: Description
         :type current_cost: float
         """
-        self.current_time = time.time()
-        if np.abs(self.current_time - self.start_time) > self.time_limit:
+        lb_and_check_tik = time.time()
+        if np.abs(time.time() - self.start_time) >= self.time_limit:
             return
         
         lb = current_cost + self._lower_bound(remaining_agents, remaining_goals)
@@ -244,6 +248,8 @@ class BnB:
                 self.best_cost = current_cost
                 self.best_assignment = assignment
             return
+        
+        self.S.reallocation_data[self.t_key]["lower_bound_and_checks"][-1] += np.abs(time.time() - lb_and_check_tik)
         
         # Choose next agent
 
@@ -271,20 +277,14 @@ class BnB:
                 continue
 
         if multiple:
-            # print(f"Multiple Agents {agents} with identical number of goal locations {min_number}")
             i = np.random.choice(agents)
-            # print(f"Agent {i} chosen")
-
-
-        # print(f"Agent {i} with number of goal locations {min_number}")
-
-        # print(f"goals: {self.original_goals}")
-        # print(f"remaiming goals: {remaining_goals}")
-        # print(f"Agent {i} goal costs {self.cost_matrix[self.agents.index(i)]}")
 
         child_nodes = SortedList()
 
         for g in remaining_goals:
+            if np.abs(time.time() - self.start_time) >= self.time_limit:
+                return
+            
             j = self.original_goals.index(g)
             
             if self.cost_matrix[self.agents.index(i)][j] == np.inf:
@@ -302,7 +302,9 @@ class BnB:
             child_remaining_goals = remaining_goals.copy()
             child_remaining_goals.remove(g)
 
+            mapf_tik = time.time()
             mapf_cost = self.mapf_cost(child_assignment)
+            self.S.reallocation_data[self.t_key]["path_planning_compute_time"][-1] += np.abs(time.time() - mapf_tik)
 
             # print(f"MAPF Cost: {mapf_cost}")
             # print(f"Child Nodes: {child_nodes}")
@@ -318,6 +320,9 @@ class BnB:
         # print(f"Child Nodes: {child_nodes}")
 
         for node in child_nodes:
+            if np.abs(time.time() - self.start_time) >= self.time_limit:
+                return
+            
             # print(f"Node cost {node[0]}")
             self.expanded_nodes += 1
             self._branch(node[2], node[3], node[4], node[0])
