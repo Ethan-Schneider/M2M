@@ -30,10 +30,10 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
     # If two agents have the same goal location, set the goal location of the agnet with no task to its home location
     # Check if any goal location is found more than once
     if len(goal_locations) != len(set(goal_locations)):
-        raise ValueError(f"Agents have duplicate goal locations: {goal_locations} with agent states: {states}")
-        # for i, agent in enumerate(Rs.agents):
-        #     if goal_locations.count(goal_locations[i]) > 1 and agent.status == 0:
-        #         goal_locations[i] = agent.home
+        # raise ValueError(f"Agents have duplicate goal locations: {goal_locations} with agent states: {states}")
+        for i, agent in enumerate(Rs.agents):
+            if goal_locations.count(goal_locations[i]) > 1 and agent.status == 0:
+                goal_locations[i] = agent.home
 
     print(f"Goal locations: {goal_locations}")
     # print(f"Number of goal locations: {len(goal_locations)}")
