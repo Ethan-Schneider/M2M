@@ -9,7 +9,7 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(300 301 302 303 304 305 306 307 308 309)
+seeds=(500 501 502 503 504 505 506 507 508 509)
 num_robots=(40)
 time_horizons=(28800)
 max_tasks=(120)
@@ -31,7 +31,7 @@ T_0=1.0
 alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
-output_intermediate_data=True
+output_intermediate_data=False
 intermediate_data_interval=14400
 base_cost_weight=1.0
 deadline_weight=0.0

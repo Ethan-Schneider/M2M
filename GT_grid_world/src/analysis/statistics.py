@@ -143,6 +143,7 @@ class Stats:
         # Track agent statuses and goal locations per timestep
         self.__agent_statuses_per_timestep = []  # List of lists: [timestep][agent_id] = status
         self.__agent_goal_locations_per_timestep = []  # List of lists: [timestep][agent_id] = goal_location
+        self.__agent_task_per_timestep = [] # List of lists: [timestep][agent_id] = task_id
         
         self.__warehouse_full_locations_per_timestep = []
         self.__warehouse_row_counts_per_timestep = []
@@ -181,6 +182,10 @@ class Stats:
                                        "prior_path_cost" : None,
                                        "post_path_cost" : None,
                                        "change_in_path_cost" : None,
+                                       "prior_agent_path_cost" : None,
+                                       "post_agent_path_cost" : None,
+                                       "prior_group_path_cost" : None,
+                                       "post_group_path_cost" : None,
                                        "computation_time" : None,
                                        "detection_computation_time" : None,
                                        "bnb_init_compute_time" : None,
@@ -745,6 +750,7 @@ class Stats:
             "agent_statuses_per_timestep": self.__agent_statuses_per_timestep,
             "agent_carrying_skus_per_timestep" : self.__carrying_skus,
             "agent_goal_locations_per_timestep": self.__agent_goal_locations_per_timestep,
+            "agent_task_per_timestep": self.__agent_task_per_timestep,
             "tasks_in_system": self.__tasks_in_system,
             "warehouse_full_locations_per_timestep": self.__warehouse_full_locations_per_timestep,
             "warehouse_row_counts_per_timestep": self.__warehouse_row_counts_per_timestep,
@@ -848,10 +854,16 @@ class Stats:
         """
         agent_statuses = []
         agent_goal_locations = []
+        agent_tasks = []
         
         for agent in Rs.agents:
             agent_statuses.append(agent.status)
-            
+            # Append the current task ID for the agent
+            if agent.task_sequence:
+                agent_tasks.append(agent.task_sequence[0][0])
+            else:
+                agent_tasks.append(None)
+
             if agent.status == 1:  # Going to pickup
                 goal_location = agent.task_sequence[0][1]  # First task's start location
             elif agent.status == 2:  # Going to delivery
@@ -863,6 +875,7 @@ class Stats:
         
         self.__agent_statuses_per_timestep.append(agent_statuses)
         self.__agent_goal_locations_per_timestep.append(agent_goal_locations)
+        self.__agent_task_per_timestep.append(agent_tasks)
 
     def append_tasks_in_system(self, num_tasks: int) -> None:
         self.__tasks_in_system.append(num_tasks)
@@ -925,12 +938,20 @@ class Stats:
             centroids.append(centroid)
         self.__sku_centroids_per_timestep.append(centroids)
 
-    def append_sku_locations(self, warehouse, num_skus):
+    def append_sku_locations(self, warehouse, driveway, num_skus):
         """Log the locations of each SKU for this timestep."""
         locations_per_sku = []
         for sku_id in range(1, num_skus + 1):
+            # locations = warehouse.get_sku_instances(sku_id)
+            # locations_per_sku.append([tuple(loc) for loc in locations])
+            sku_locations = []
             locations = warehouse.get_sku_instances(sku_id)
-            locations_per_sku.append([tuple(loc) for loc in locations])
+            for loc in locations:
+                sku_locations.append(tuple(loc))
+            locations = driveway.get_sku_instances(sku_id)
+            for loc in locations:
+                sku_locations.append(tuple(loc))
+            locations_per_sku.append(sku_locations)
         self.__sku_locations_per_timestep.append(locations_per_sku)
 
     def append_py_lns_log(self, log: dict):

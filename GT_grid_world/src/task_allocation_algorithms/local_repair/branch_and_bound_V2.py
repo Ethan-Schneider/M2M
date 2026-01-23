@@ -67,7 +67,6 @@ class BnB:
             else:
                 print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
 
-        self.S.reallocation_data[self.t_key]["tasks"] = tasks
         num_combinations = np.prod(goals_per_task) + (np.sum(goals_per_task)**2 - np.sum(np.square(goals_per_task)))/2 + np.sum(goals_per_task)
         self.S.reallocation_data[self.t_key]["possible_number_nodes"] = int(num_combinations)
                         

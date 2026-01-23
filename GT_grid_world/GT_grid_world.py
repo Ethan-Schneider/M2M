@@ -160,16 +160,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 
             if aisle_groups:
                 print(f"Aisle groups for reallocation: { {aisle: [a.id for a in group] for aisle, group in aisle_groups.items()} }")
-                
-                # S.append_prior_cumulative_path_cost(t, Rs)
 
-                prior_cost = 0
-                for agent in Rs.agents:
-                    prior_cost += len(agent.path_sequence)
-                
                 agents = [[a.id for a in group] for aisle, group in aisle_groups.items()]
                 t_key = S.create_new_realloc_data(t)
                 S.reallocation_data[t_key]["agents"] = []
+                S.reallocation_data[t_key]["tasks"] = []
                 S.reallocation_data[t_key]["prior_path_cost"] = []
                 S.reallocation_data[t_key]["post_path_cost"] = [] 
                 S.reallocation_data[t_key]["change_in_path_cost"] = []     
@@ -180,16 +175,20 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S.reallocation_data[t_key]["bnb_solve_time"] = []
                 S.reallocation_data[t_key]["bnb_routing_time"] = []
                 S.reallocation_data[t_key]["detection_computation_time"] = np.abs(detection_tok - detection_tik)
+
+                S.reallocation_data[t_key]["prior_agent_path_cost"] = []
+                S.reallocation_data[t_key]["post_agent_path_cost"] = []
+                S.reallocation_data[t_key]["prior_group_path_cost"] = []
+                S.reallocation_data[t_key]["post_group_path_cost"] = []
                 repair_tik = time.time()
-                if solution_repair_function == "HA":
-                    temp_Rs = Rs.copy()
                 for agent_group in agents:
+                    temp_Rs = Rs.copy()
                     if np.abs(time.time() - repair_tik) >= 1.0:
                         break
                     
                     group_cost = 0
                     for agent_id in agent_group:
-                        group_cost += len(Rs.get_agent(agent_id).path_sequence)
+                        group_cost += len(temp_Rs.get_agent(agent_id).path_sequence)
 
                     # Skip if only one agent in group
                     if len(agent_group) <= 1:
@@ -197,54 +196,34 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
                     task_ids = []
                     for agent_id in agent_group:
-                        task = Rs.get_agent(agent_id).task_sequence[0][0]
+                        task = temp_Rs.get_agent(agent_id).task_sequence[0][0]
                         task_ids.append(task)
-                    S.reallocation_data[t_key]["tasks"] = task_ids
+                    S.reallocation_data[t_key]["tasks"].append(task_ids)
+
+                    prior_cost = 0
+                    for agent in temp_Rs.agents:
+                        prior_cost += len(agent.path_sequence)
+                    S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
+                    S.reallocation_data[t_key]["prior_agent_path_cost"].append(temp_Rs.get_agent(agent_group[0]).path_sequence.__len__())
+
+                    prior_group_cost  = 0
+                    for agent_id in agent_group:
+                        prior_group_cost += len(temp_Rs.get_agent(agent_id).path_sequence)
+                    S.reallocation_data[t_key]["prior_group_path_cost"].append(prior_group_cost)
 
                     if solution_repair_function == "HA":
                         if len(agent_group) >= 5:
                             continue
-                        
-                        prior_cost = 0
-                        for agent in temp_Rs.agents:
-                            prior_cost += len(agent.path_sequence)
-                        S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
+
                         HA_agent_group = agent_group.copy()
-                        # for agent in temp_Rs.agents:
-                        #     if agent.id not in agent_group and agent.task_sequence and G.get_distance(agent.state, temp_Rs.get_agent(agent_group[0]).state) <= 5:
-                        #         HA_agent_group.append(agent.id)
                         S.reallocation_data[t_key]["agents"].append(HA_agent_group)
                         # temp_Rs = Rs.copy()
                         temp_Rs = HA_exact_repair(temp_Rs, G, S, J, HA_agent_group)
                     elif solution_repair_function == "BnB":
                         if len(agent_group) >= 4:
                             continue
-                        
-                        all_prior_states = []
-                        all_prior_goals = []
-                        for agent in Rs.agents:
-                            all_prior_states.append(agent.state)
-                            if agent.status == 1:
-                                all_prior_goals.append(agent.task_sequence[0][1])
-                            elif agent.status == 2:
-                                all_prior_goals.append(agent.task_sequence[0][2])
-                            else:
-                                all_prior_goals.append(agent.state)
-
-                        prior_goals = []
-                        for agent_id in agent_group:
-                            if Rs.get_agent(agent_id).status == 1:
-                                prior_goals.append(Rs.get_agent(agent_id).task_sequence[0][1])
-                            elif Rs.get_agent(agent_id).status == 2:
-                                prior_goals.append(Rs.get_agent(agent_id).task_sequence[0][2])
-                        prior_cost = 0
-                        for agent in Rs.agents:
-                            prior_cost += len(agent.path_sequence)
                             
                         S.reallocation_data[t_key]["agents"].append(agent_group)
-                        S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
-                        
-                        temp_Rs = Rs.copy()
                         
                         init_tik = time.time()
                         bnb = BnB(temp_Rs, G, J, S, agent_group, map, t_key, prior_cost)
@@ -253,88 +232,27 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         solve_tik = time.time()
                         temp_Rs = bnb.solve()
                         S.reallocation_data[t_key]["bnb_solve_time"].append(np.abs(time.time() - solve_tik))
-                        
-                        routing_tik = time.time()
-                        temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
-                        S.reallocation_data[t_key]["bnb_routing_time"].append(np.abs(time.time() - routing_tik))
-                        
-                        all_post_states = []
-                        all_post_goals = []
-                        for agent in temp_Rs.agents:
-                            all_post_states.append(agent.state)
-                            if agent.status == 1:
-                                all_post_goals.append(agent.task_sequence[0][1])
-                            elif agent.status == 2:
-                                all_post_goals.append(agent.task_sequence[0][2])
-                            else:
-                                all_post_goals.append(agent.state)
-
-                        post_cost = 0
-
-                        for agent in temp_Rs.agents:
-                            post_cost += len(agent.path_sequence)
-                            
-                        post_goals = []
-                        for agent_id in agent_group:
-                            if temp_Rs.get_agent(agent_id).status == 1:
-                                post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][1])
-                            elif temp_Rs.get_agent(agent_id).status == 2:
-                                post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][2])
-
-                        S.reallocation_data[t_key]["post_path_cost"].append(post_cost)
-                        S.reallocation_data[t_key]["change_in_path_cost"].append(post_cost - prior_cost)
-                        
-                        if post_cost < prior_cost:
-                            Rs = temp_Rs.copy()
-                            S.reallocation_data[t_key]["rejected_solution"].append(False)
-                        else:
-                            S.reallocation_data[t_key]["rejected_solution"].append(True)
-                        
-                        # identical = True
-                        # # Check if pre_goals and post_goals are identical
-                        # for i in range(len(prior_goals)):
-                        #     if prior_goals[i] != post_goals[i]:
-                        #         print(f"Goal for agent {agent_group[i]} changed from {prior_goals[i]} to {post_goals[i]}")
-                        #         identical = False
-                        #         break
-
-                        # if post_cost > prior_cost and identical:
-                        #     print(f"Post cost {post_cost} is greater than prior cost {prior_cost}")
-                        #     print(f"Agent group: {agent_group} with prior goals: {prior_goals} and post goals: {post_goals}")
-                        #     print(f"Agent states: {[Rs.get_agent(agent_id).state for agent_id in agent_group]}")
-                        #     print(f"All prior agent states: {all_prior_states}")
-                        #     print(f"All post agent states: {all_post_states}")
-                        #     print(f"All prior goals: {all_prior_goals}")
-                        #     print(f"All post goals: {all_post_goals}")
-                        #     exit()
                     else:
                         print(f"Unknown solution repair function: {solution_repair_function}: Exiting ...")
                         exit()
+                        
 
-                    # print(f"final assignment : {assignment} with cost: {cost}")
-                    
-                print(f"Repaired Solution")
-                S.reallocation_data[t_key]["computation_time"] = np.abs(time.time() - repair_tik)
-                
-                if solution_repair_function == "HA":
+                    routing_tik = time.time()
                     temp_Rs = router.pathPlan(map, temp_Rs, path_planning_strategy, S)
-                    
-                    all_post_states = []
-                    all_post_goals = []
-                    for agent in temp_Rs.agents:
-                        all_post_states.append(agent.state)
-                        if agent.status == 1:
-                            all_post_goals.append(agent.task_sequence[0][1])
-                        elif agent.status == 2:
-                            all_post_goals.append(agent.task_sequence[0][2])
-                        else:
-                            all_post_goals.append(agent.state)
+                    S.reallocation_data[t_key]["bnb_routing_time"].append(np.abs(time.time() - routing_tik))
 
                     post_cost = 0
-                    
+
                     for agent in temp_Rs.agents:
                         post_cost += len(agent.path_sequence)
                         
+                    S.reallocation_data[t_key]["post_agent_path_cost"].append(temp_Rs.get_agent(agent_group[0]).path_sequence.__len__())
+                    
+                    post_group_cost = 0
+                    for agent_id in agent_group:
+                        post_group_cost += len(temp_Rs.get_agent(agent_id).path_sequence)
+                    S.reallocation_data[t_key]["post_group_path_cost"].append(post_group_cost)
+
                     post_goals = []
                     for agent_id in agent_group:
                         if temp_Rs.get_agent(agent_id).status == 1:
@@ -351,16 +269,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     else:
                         S.reallocation_data[t_key]["rejected_solution"].append(True)
 
-                # Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
-
-                # post_cost = 0
-
-                    # for agent in Rs.agents:
-                #     post_cost += len(agent.path_sequence)
-
-                # S.reallocation_data[t_key]["post_path_cost"] = post_cost
-
-                # S.reallocation_data[t_key]["change_in_path_cost"] = post_cost - prior_cost       
+                    # print(f"final assignment : {assignment} with cost: {cost}")
+                    
+                print(f"Repaired Solution")
+                S.reallocation_data[t_key]["computation_time"] = np.abs(time.time() - repair_tik)
+                print(S.reallocation_data[t_key]["tasks"])
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
@@ -384,7 +297,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         S.append_sku_centroids(G.warehouse, G.warehouse.get_all_skus().__len__())
         
         # Log SKU locations per timestep
-        S.append_sku_locations(G.warehouse, G.warehouse.get_all_skus().__len__())
+        S.append_sku_locations(G.warehouse, G.driveway, G.warehouse.get_all_skus().__len__())
         
         # Record agent statuses and goal locations for this timestep
         S.add_agent_statuses_and_goals(Rs)
@@ -572,7 +485,7 @@ if __name__=="__main__":
                        choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
-                       choices=['py_lns', 'c_lns', 'c_p_lns', 'none'],
+                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'none'],
                        help='Task assignment strategy for improvement')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs', 'pbs'],
