@@ -153,6 +153,21 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 aisle_groups = duration_difference(Rs, G)
             elif solution_repair_detection_function == "Progress":
                 aisle_groups = sliding_window_progress(Rs, G)
+            elif solution_repair_detection_function == "Ensamble":
+                aisle_groups_bt = detect_backtracking(Rs)
+                aisle_groups_du = duration_difference(Rs, G)
+                aisle_groups_sw = sliding_window_progress(Rs, G)
+
+                # Combine the aisle groups, remove duplicates
+                aisle_groups = {}
+                for group in [aisle_groups_bt, aisle_groups_du, aisle_groups_sw]:
+                    for aisle, agents in group.items():
+                        if aisle not in aisle_groups:
+                            aisle_groups[aisle] = agents
+                        else:
+                            for agent in agents:
+                                if agent not in aisle_groups[aisle]:
+                                    aisle_groups[aisle].append(agent)
             else:
                 raise ValueError(f"Unknown solution repair detection function: {solution_repair_detection_function}: Exiting ...")
                 
