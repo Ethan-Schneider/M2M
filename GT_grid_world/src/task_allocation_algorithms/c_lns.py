@@ -100,7 +100,11 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
     print(f"Unassigned tasks: {unassigned_tasks}")
     returned_sequence = lns.LNS(map_name, unassigned_tasks, Rs_final_states, sequences)
     
+    # print(returned_sequence)
+    
     assigned_returned_sequence = [x[1][0] for x in returned_sequence if x[1] != []]
+    # print(assigned_returned_sequence)
+    # exit()
     for task_id in unassigned_task_ids:
         if task_id in assigned_returned_sequence:
             S.add_task_reallocation(task_id)

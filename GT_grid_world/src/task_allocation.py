@@ -5,6 +5,7 @@ from .utils import *
 from typing import Dict, Tuple
 from .task_allocation_algorithms.c_lns import lns_call
 from .task_allocation_algorithms.c_p_lns import p_lns_call
+# from .task_allocation_algorithms.c_rmca import rmca_call
 from .task_allocation_algorithms.initial_solutions.max_regret_FC import max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.randomized_max_regret_FC import randomized_max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.FCF import FCF_call
@@ -52,6 +53,8 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         return lns_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "c_p_lns":
         return p_lns_call(S, G, map, Rs, J, t)
+    # elif improvement_task_assignment_strategy == "c_rmca":
+    #     return rmca_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "none":
         pass
     else:
@@ -79,7 +82,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
     elif initial_task_assignment_strategy == "fast_SCF":
         return fast_SCF_call(S, G, Rs, J, t, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "fast_greedy":
-        return fast_greedy_call(S, G, Rs, J, t, method=cost_calculation_method, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight)
+        return fast_greedy_call(S, G, Rs, J, t, method=cost_calculation_method, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_task_sequence_limit=3)
     else:
         print("ERROR: Unknown task assignment strategy " + initial_task_assignment_strategy + ", please choose another one.")
         return Rs

@@ -55,6 +55,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
     while True:
         iteration += 1
+        # print(f"iteration: {iteration}")
         # If all tasks are assigned, if no start or goal locations are left, break
         if len(assigned_tasks) == N:
             print(f"All tasks assigned: {len(assigned_tasks)}")
@@ -67,7 +68,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
         # Iterate over each task and find the best allocation
         argmin_tik = time.time()
-        best_cost = -1 * np.inf
+        best_cost = np.inf
         best = None
 
         # Iterate over each task
@@ -83,6 +84,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
             # If there are no valid start or goal locations, skip
             if len(valid_p) == 0 or len(valid_q) == 0:
+                # print(f"Skipping because no valid start or goal locations")
                 continue
 
             # Mask out all invalid start and goal locations
@@ -90,42 +92,50 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
 
             # Calculate base costs
-            deadline = J[idx_to_task_id[int(n)]][2]
-            if deadline_weight > 0.0:
-                # If deadline has not passed
-                if deadline - current_time > 0:
-                    base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-                    # base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :]) - deadline_weight*(deadline - (current_time - ((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])))
-                # If deadline has passed
-                else:
-                    base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            else:
-                base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
+            # deadline = J[idx_to_task_id[int(n)]][2]
+            # if deadline_weight > 0.0:
+            #     # If deadline has not passed
+            #     if deadline - current_time > 0:
+            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            #         # base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :]) - deadline_weight*(deadline - (current_time - ((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])))
+            #     # If deadline has passed
+            #     else:
+            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            # else:
+            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
 
-            # If inbound task, add inbound sku distribution costs
-            if J[idx_to_task_id[int(n)]][4] == 1:
-                inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
-            # If outbound task, add outbound sku distribution costs
+            # print(f"inbound_sku_distribution_costs: {inbound_sku_distribution_costs}")
+            # print(f"outbound sku distribution costs: {outbound_sku_distribution_costs}")
+
+            if sku_distribution_weight > 0:
+                # If inbound task, add inbound sku distribution costs
+                if J[idx_to_task_id[int(n)]][4] == 1:
+                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
+                    # print(f"inbound sku costs: {inbound_sku_distribution_costs_n}")
+                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+                # If outbound task, add outbound sku distribution costs
+                else:
+                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
+                    # print(f"outbound sku costs: {outbound_sku_distribution_costs_n}")
+                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
             else:
-                outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+                total_costs = base_costs
                 
             # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
             if agent_task_sequence_limit > 0:
                 for m in range(M):
                     if len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
-                        total_costs[m, :, :] = -1 * np.inf
+                        total_costs[m, :, :] = np.inf
             # # If all total_costs are -inf, break
             # if np.all(total_costs == -1 * np.inf):
             #     break
             
             # Find argmax of total_costs, if there are multiple max values, choose one randomly
-            new_idx = np.argmax(total_costs)
+            new_idx = np.argmin(total_costs)
             new_cost = total_costs.flat[new_idx]
 
             # If new best cost is found, update the best allocation
-            if new_cost > best_cost:
+            if new_cost < best_cost:
                 # If there are multiple max costs, choose one randomly
                 if np.sum(total_costs == new_cost) > 1:
                     # Restructure max location into list of tuples
@@ -144,7 +154,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
         # If no best task is found, break
         total_argmin_time += time.time() - argmin_tik
-        if best is None or best_cost == -1 * np.inf:
+        if best is None or best_cost == np.inf:
             print(f"No best task found")
             break
 
@@ -185,9 +195,9 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
         # 4. Update costs for agent-start allocation for agent m
         for p_ in range(P):
             if method == "manhattan":
-                cost = -1.0 * manhattan_distance(goal_locs[q], start_locs[p_])
+                cost = manhattan_distance(goal_locs[q], start_locs[p_])
             elif method == "shortest_path":
-                cost = -1.0 * G.get_distance(goal_locs[q], start_locs[p_])
+                cost = G.get_distance(goal_locs[q], start_locs[p_])
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
@@ -198,11 +208,11 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
         # Update agent task sequence time
         if len(Rs.agents[m].task_sequence) > 1:
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-2][2], Rs.agents[m].task_sequence[-1][1])
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-1][1], Rs.agents[m].task_sequence[-1][2])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[-2][2], Rs.agents[m].task_sequence[-1][1])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[-1][1], Rs.agents[m].task_sequence[-1][2])
         else:
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[0][1], Rs.agents[m].task_sequence[0][2])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[0][1], Rs.agents[m].task_sequence[0][2])
 
         total_update_time += time.time() - update_tik
 
@@ -236,6 +246,8 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
     if len(J) == num_allocated_tasks:  # No tasks to assign
         print(f"No tasks to assign")
         return Rs, [], 0.0
+    
+    print(f"Number of Tasks: {len(J)}")
     
     # Clear all but the first task in each agent's task sequence
     for agent in Rs.agents:

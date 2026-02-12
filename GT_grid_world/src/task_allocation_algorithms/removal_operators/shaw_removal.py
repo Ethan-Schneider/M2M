@@ -172,9 +172,9 @@ def shaw_removal(Rs: AgentLoader, allocations: List[Tuple[int, int, int, int]], 
         
         for i, s in enumerate(start_locs):
             if method == "manhattan":
-                cost = -1.0 * manhattan_distance(agent_pos, s)
+                cost = manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                cost = -1.0 * G.get_distance(agent_pos, s)
+                cost = G.get_distance(agent_pos, s)
             agent_start_cost_tensor[agent_idx, i] = cost
 
     # Update agent_task_sequence_time for changed agents

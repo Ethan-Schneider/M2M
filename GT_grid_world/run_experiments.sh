@@ -9,18 +9,18 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(500 501 502 503 504 505 506 507 508 509)
+seeds=(837)
 num_robots=(40)
-time_horizons=(28800)
+time_horizons=(4000)
 max_tasks=(120)
 frequencies=(0.25)
-inbound_outbound_ratio=(0.85)
+inbound_outbound_ratio=(1.0)
 num_skus=(30)
-initial_inventory=(25.0)
+initial_inventory=(85.0)
 weight_init_method="uniform"
-task_gen_strategy="informed_uniform"
+task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="c_lns"
+improvement_task_assign_strategy="py_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
 map="data/maps/study_small_restricted"
@@ -32,13 +32,13 @@ alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
 output_intermediate_data=False
-intermediate_data_interval=14400
+intermediate_data_interval=4000
 base_cost_weight=1.0
 deadline_weight=0.0
-sku_distribution_weight=0.0
-agent_unallocated_penalty=5
-solution_repair_detection_function="Duration"
-solution_repair_function="BnB"
+sku_distribution_weight=0.25
+agent_unallocated_penalty=5.0
+solution_repair_detection_function="none"
+solution_repair_function="none"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -84,7 +84,7 @@ for seed in "${seeds[@]}"; do
                             --improvement-task-assign-strategy "$improvement_task_assign_strategy" \
                             --path-planning-strategy "$path_planning_strategy" \
                             --time-limit 86400 \
-                            --initial-inventory 25.0 \
+                            --initial-inventory "$initial_inventory" \
                             --frequency "$frequency" \
                             --inbound-outbound-ratio "$inbound_outbound_ratio" \
                             --num-skus "$num_sku" \

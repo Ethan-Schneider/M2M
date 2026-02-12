@@ -63,7 +63,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         if not can_assign_any:
             break
 
-        best_cost = -np.inf
+        best_cost = np.inf
         best = None
 
         tik = time.time()
@@ -89,40 +89,43 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
 
             # Calculate base costs with deadline and agent_task_sequence_time considerations
-            deadline = J[idx_to_task_id[int(n)]][2]
-            if deadline_weight > 0.0:
-                # If deadline has not passed
-                if deadline - current_time > 0:
-                    base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-                # If deadline has passed
-                else:
-                    base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            else:
-                base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
+            # deadline = J[idx_to_task_id[int(n)]][2]
+            # if deadline_weight > 0.0:
+            #     # If deadline has not passed
+            #     if deadline - current_time > 0:
+            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            #     # If deadline has passed
+            #     else:
+            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            # else:
+            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
 
-            # Add sku distribution costs
-            if J[idx_to_task_id[int(n)]][4] == 1:
-                inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+            if sku_distribution_weight > 0:
+                # Add sku distribution costs
+                if J[idx_to_task_id[int(n)]][4] == 1:
+                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
+                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+                else:
+                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
+                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
             else:
-                outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+                total_costs = base_costs
             
             # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
             if agent_task_sequence_limit > -1:
                 for m in range(M):
                     if len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
-                        total_costs[m, :, :] = -1 * np.inf
+                        total_costs[m, :, :] = np.inf
             # If all total_costs are -inf, break
-            if np.all(total_costs == -1 * np.inf):
+            if np.all(total_costs == np.inf):
                 break
 
             # Find the index of the maximum cost (since costs are negative, this minimizes distance)
-            new_idx = np.argmax(total_costs)
+            new_idx = np.argmin(total_costs)
             new_cost = total_costs.flat[new_idx]
 
             # If the new cost is greater than the current best cost, update the best allocation
-            if new_cost > best_cost:
+            if new_cost < best_cost:
                 # If there are multiple maximum costs, choose one randomly
                 if np.sum(total_costs == new_cost) > 1:
                     max_locations = np.where(total_costs == new_cost)
@@ -140,7 +143,7 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
 
         total_find_best_task_time += time.time() - tik
 
-        if best is None or best_cost == -np.inf:
+        if best is None or best_cost == np.inf:
             break
 
         tik = time.time()
@@ -172,9 +175,9 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
         # Update costs for agent-start allocation for agent m
         for p_ in range(P):
             if method == "manhattan":
-                cost = -1.0 * manhattan_distance(goal_locs[q], start_locs[p_])
+                cost = manhattan_distance(goal_locs[q], start_locs[p_])
             elif method == "shortest_path":
-                cost = -1.0 * G.get_distance(goal_locs[q], start_locs[p_])
+                cost = G.get_distance(goal_locs[q], start_locs[p_])
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
@@ -185,11 +188,11 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
 
         # Update agent task sequence time
         if len(Rs.agents[m].task_sequence) > 1:
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-2][2], Rs.agents[m].task_sequence[-1][1])
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[-1][1], Rs.agents[m].task_sequence[-1][2])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[-2][2], Rs.agents[m].task_sequence[-1][1])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[-1][1], Rs.agents[m].task_sequence[-1][2])
         else:
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[0][1], Rs.agents[m].task_sequence[0][2])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[0][1], Rs.agents[m].task_sequence[0][2])
 
         total_update_time += time.time() - tik
 

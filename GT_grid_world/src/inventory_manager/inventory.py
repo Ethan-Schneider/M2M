@@ -111,6 +111,10 @@ class Inventory:
         """Get all locations that contain SKU instances."""
         return list(self.__location_to_sku.keys())
     
+    def get_fullness_percentage(self) -> float:
+        """Get percentage of locations in warehouse full"""
+        return len(list(self.__location_to_sku.keys()))/(len(self.__warehouse_locations))
+    
     def get_sku_instances(self, sku_id: int) -> List[tuple]:
         """Get all locations containing instances of a specific SKU."""
         if sku_id not in self.__skus:

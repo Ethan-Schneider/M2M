@@ -28,7 +28,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             sku_distribution_weight: float = 0.0,
             agent_unallocated_penalty: float = 0.0,
             solution_repair_detection_function: str = "none",
-            solution_repair_function: str = "none"):
+            solution_repair_function: str = "none",
+            initial_inventory : float = 25.0):
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
@@ -56,7 +57,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
                                                                                                 inbound_to_outbound_ratio, last_task_id, max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
-                                                                                                  deadline_generation_method, deadline_offset, improvement_task_assignment_strategy)
+                                                                                                  deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
+                                                                                                  initial_inventory)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
             
@@ -435,6 +437,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     )
     G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
+    # print(f"Number of full locations in warehouse: {len(G.warehouse.get_full_locations())}")
+    # exit()
+
     # Initialize state of robots (robot_id, state)
     robots = []
     for robot_id, location in enumerate(G.get_all_occupied()):
@@ -469,7 +474,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             sku_distribution_weight=sku_distribution_weight,
             agent_unallocated_penalty=agent_unallocated_penalty,
             solution_repair_detection_function=solution_repair_detection_function,
-            solution_repair_function=solution_repair_function
+            solution_repair_function=solution_repair_function,
+            initial_inventory=initial_inventory
     )
     tok = time.time()
     S.set_total_runtime(tok-tik)
@@ -494,7 +500,7 @@ if __name__=="__main__":
     parser.add_argument('--time-horizon', type=int, required=True, help='Time horizon T')
     parser.add_argument('--max-tasks', type=int, required=True, help='Maximum number of tasks')
     parser.add_argument('--task-gen-strategy', type=str, required=True, 
-                       choices=['informed_uniform', 'uninformed_uniform'],
+                       choices=['informed_uniform', 'uninformed_uniform', 'feedback_control'],
                        help='Task generation strategy')
     parser.add_argument('--initial-task-assign-strategy', type=str, required=True,
                        choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],

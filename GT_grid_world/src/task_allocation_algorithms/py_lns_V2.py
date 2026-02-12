@@ -28,7 +28,8 @@ class LNS:
                  base_cost_weight: float = 1.0,
                  deadline_weight: float = 0.0,
                  sku_distribution_weight: float = 0.0,
-                 agent_unallocated_penalty: float = 0.0):
+                 agent_unallocated_penalty: float = 0.0,
+                 agent_task_sequence_limit : int = -1):
         """
         Initialize Large Neighborhood Search algorithm.
         
@@ -52,13 +53,6 @@ class LNS:
         self.G = G
         self.Rs = self._copy_solution(Rs)
 
-        # Remove all but the first task in each agent's task sequence
-        for agent in self.Rs.agents:
-            if agent.task_sequence == []:
-                continue
-            while len(agent.task_sequence) > 1:
-                agent.task_sequence.pop(-1)
-
         self.J = J
         self.initial_task_assignment_strategy = initial_task_assignment_strategy
         self.time_limit = time_limit
@@ -74,12 +68,12 @@ class LNS:
         self.deadline_weight = deadline_weight
         self.sku_distribution_weight = sku_distribution_weight
         self.agent_unallocated_penalty = agent_unallocated_penalty
+        self.agent_task_sequence_limit = agent_task_sequence_limit
         # Store best solution found
         self.best_solution = None
-        self.best_cost = -np.inf
-        self.agent_task_sequence_limit = 3
+        self.best_cost = np.inf
 
-        self.initial_cost = -np.inf
+        self.initial_cost = np.inf
 
         # Cost lookup table to store allocation costs {(agent_idx, task_id, start_idx, goal_idx): cost}
         self.cost_lookup = {}
@@ -132,7 +126,7 @@ class LNS:
             current_solution, allocations, __ = fast_SCF_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         else:
             print("ERROR: Unknown initial task assignment strategy " + self.initial_task_assignment_strategy + ", please choose another one.")
-            return self.Rs, [], -np.inf
+            return self.Rs, [], np.inf
         
         inital_task_assignment_time += time.time() - inital_task_assignment_tik
         #Iterate over task assignment, if duplicate tasks are found, exit
@@ -184,6 +178,10 @@ class LNS:
         iteration = 0
 
         while time.time() - start_time < self.time_limit:
+            # if iteration >= 100:
+            #     print(f"Exiting at iteration {iteration}")
+            #     break
+            # print(f"Iteration: {iteration}")
             # Create a copy of the current solution to modify
             temp_solution = self._copy_solution(current_solution)
             temp_cost_lookup = current_cost_lookup.copy()
@@ -294,6 +292,8 @@ class LNS:
             cost_tik = time.time()
             new_cost = self._calculate_total_cost(temp_cost_lookup, new_solution)
             cost_computation_time += time.time() - cost_tik
+            
+            # print(f"New Cost: {new_cost} vs. Best Cost {self.best_cost}")
 
             # Debug: Print cost information every 50 iterations
             # if iteration % 50 == 0:
@@ -303,7 +303,7 @@ class LNS:
             repaired_solution_costs.append(new_cost)
             # Acceptance function
             if self.acceptance_function == "greedy":
-                if new_cost > current_cost:
+                if new_cost < current_cost:
                     current_solution = self._copy_solution(new_solution)
                     current_allocations = temp_allocations.copy()
                     current_cost_lookup = temp_cost_lookup.copy()
@@ -315,7 +315,7 @@ class LNS:
                     current_agent_task_sequence_time = temp_agent_task_sequence_time.copy()
                     current_cost = new_cost
             elif self.acceptance_function == "simulated_annealing":
-                if new_cost > current_cost:
+                if new_cost < current_cost:
                     current_solution = self._copy_solution(new_solution)
                     current_allocations = temp_allocations.copy()
                     current_cost_lookup = temp_cost_lookup.copy()
@@ -327,7 +327,7 @@ class LNS:
                     current_agent_task_sequence_time = temp_agent_task_sequence_time.copy()
                     current_cost = new_cost
                 else:
-                    prob = math.exp(-1*(current_cost - new_cost) / T) if T > 0 else 0
+                    prob = math.exp(-1*(new_cost - current_cost) / T) if T > 0 else 0
                     # print(f"prob: {prob}")
                     if random.random() < prob:
                         current_solution = self._copy_solution(new_solution)
@@ -343,7 +343,7 @@ class LNS:
                 T = self.alpha * T
 
             # Update best if better
-            if new_cost > self.best_cost:
+            if new_cost < self.best_cost:
                 print(f"IMPROVEMENT FOUND! Iteration {iteration}: New best cost: {new_cost} (previous: {self.best_cost})")
                 self.best_solution = self._copy_solution(new_solution)
                 self.best_cost = new_cost
@@ -458,8 +458,15 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
         num_allocated_tasks += len(agent.task_sequence)
     if len(J.keys()) == num_allocated_tasks:  # No tasks to assign
         return Rs, [], 0.0
+
+    # Remove all but the first task in each agent's task sequence
+    for agent in Rs.agents:
+        if agent.task_sequence == []:
+            continue
+        while len(agent.task_sequence) > 1:
+            agent.task_sequence.pop(-1)
     
     lns = LNS(S, G, Rs, J, initial_task_assignment_strategy, time_limit, removal_size, 
               cost_calculation_method, removal_operator, repair_operator, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, current_time=t if t is not None else 0,
-              base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
+              base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty, agent_task_sequence_limit=3)
     return lns.run(t=t)

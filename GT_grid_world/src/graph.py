@@ -105,6 +105,7 @@ class Graph:
             else:
                 return [(0, 0)]
         else:
+            # print(f"SKU KD Tree values: {self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)}")
             return self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)
 
     def update_sku_KD_trees(self, sku_id: int) -> None:

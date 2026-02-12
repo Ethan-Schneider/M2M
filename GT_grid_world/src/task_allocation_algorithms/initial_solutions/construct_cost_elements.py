@@ -101,11 +101,14 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
 
     # 1. Build (P, Q) distance matrix between all start and goal locations
     if method == "manhattan":
-        start_goal_dist = np.array([[-1.0 * manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
+        start_goal_dist = np.array([[manhattan_distance(s, g) for g in goal_locs] for s in start_locs])
     elif method == "shortest_path":
-        start_goal_dist = np.array([[-1.0 * G.get_distance(s, g) for g in goal_locs] for s in start_locs])
+        start_goal_dist = np.array([[G.get_distance(s, g) for g in goal_locs] for s in start_locs])
     else:
         raise ValueError(f"Invalid cost calculation method: {method}")
+    
+    # print(f"Start Goal Distance Matrix: {start_goal_dist} with shape {start_goal_dist.shape}")
+    # exit()
 
     # 2. Build (N, P) task-start membership matrix (1 if task n has start_loc p and p not unusable, else 0)
     task_start_mask = np.zeros((N, P), dtype=np.float32)
@@ -135,9 +138,9 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
         for i, s in enumerate(start_locs):
             # Base cost (negative for argmax logic)
             if method == "manhattan":
-                agent_start_cost_tensor[m, i] = -1.0 * manhattan_distance(agent_pos, s)
+                agent_start_cost_tensor[m, i] = manhattan_distance(agent_pos, s)
             elif method == "shortest_path":
-                agent_start_cost_tensor[m, i] = -1.0 * G.get_distance(agent_pos, s)
+                agent_start_cost_tensor[m, i] = G.get_distance(agent_pos, s)
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             
@@ -152,41 +155,49 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
             
             # Combine base cost with deadline urgency (positive urgency cost increases the negative base cost)
             # agent_start_cost_tensor[m, i] = 0.3*base_cost + 0.7*deadline_urgency_cost
+            
+    # print(f"Agent Start Cost Matrix: {agent_start_cost_tensor} with shape {agent_start_cost_tensor.shape}")
+    
     # 5. Build (N) vector of task deadline costs
     task_deadline_costs = np.zeros(N)
     for n, task_id in enumerate(unallocated_task_ids):
         task_deadline_costs[n] = calculate_deadline_cost(J[task_id][2], current_time)
 
     # 6. Build (N, Q) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
-    inbound_sku_distribution_costs = np.full((N, Q), -1*np.inf)
+    inbound_sku_distribution_costs = np.full((N, Q), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
         if J[task_id][4] == 1: # inbound task
             # if inbound task, iterate over all goal locations and calculate distance to each goal location in the task's goal locations
             for q in range(Q):
                 if goal_locs[q] in J[task_id][1]:
-                    inbound_sku_distribution_costs[n, q] = G.query_sku_KD_trees(J[task_id][3], goal_locs[q], 1)[0]
+                    # print(f"Inbound distribution cost: ")
+                    inbound_sku_distribution_costs[n, q] = -1*G.query_sku_KD_trees(J[task_id][3], goal_locs[q], 1)[0]
         # else do nothing
 
     # 7. Build (N, P) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
-    outbound_sku_distribution_costs = np.full((N, P), -1*np.inf)
+    outbound_sku_distribution_costs = np.full((N, P), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
         if J[task_id][4] == 0: # outbound task
             # if outbound task, iterate over all start locations and calculate distance to each start location in the task's start locations
             for p in range(P):
                 if start_locs[p] in J[task_id][0]:
                     #get the second closest location
-                    outbound_sku_distribution_costs[n, p] = -1*G.query_sku_KD_trees(J[task_id][3], start_locs[p], 2)[0][1]
+                    # print(f"Outbound distribution cost")
+                    outbound_sku_distribution_costs[n, p] = G.query_sku_KD_trees(J[task_id][3], start_locs[p], 2)[0][1]
+                    
+    # print(f"Outbound SKU Distribution: {outbound_sku_distribution_costs} with shape {outbound_sku_distribution_costs.shape}")
+
 
     # 8. Build vector of size (M) which includes the estimated time for the agent to complete the task sequence
     agent_task_sequence_time = np.zeros(M)
     for m in range(M):
         if len(Rs.agents[m].task_sequence) == 0:
             continue
-        agent_task_sequence_time[m] = -1*G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
+        agent_task_sequence_time[m] = G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
         for i in range(1, len(Rs.agents[m].task_sequence)):
             #add the distance between the goal of the previous task and the start of the current task
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[i-1][2], Rs.agents[m].task_sequence[i][1])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[i-1][2], Rs.agents[m].task_sequence[i][1])
             #add the distance between the start of the current task to the goal of the current task
-            agent_task_sequence_time[m] -= G.get_distance(Rs.agents[m].task_sequence[i][1], Rs.agents[m].task_sequence[i][2])
+            agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[i][1], Rs.agents[m].task_sequence[i][2])
 
     return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time
