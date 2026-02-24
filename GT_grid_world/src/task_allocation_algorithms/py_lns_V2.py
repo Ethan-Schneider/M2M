@@ -195,6 +195,8 @@ class LNS:
             temp_agent_task_sequence_time = current_agent_task_sequence_time.copy()
 
             num_before = len(temp_cost_lookup.keys())
+            
+            # print(f"Number tasks before removal: {num_before}: Iteration: {iteration}")
 
             # Remove allocations
             removal_tik = time.time()
@@ -233,6 +235,8 @@ class LNS:
 
             num_after = len(temp_cost_lookup.keys())
             number_of_tasks_removed.append(num_before - num_after)
+            
+            # print(f"Number tasks after removal: {num_after}: Iteration: {iteration}")
 
             destroyed_solution_costs.append(self._calculate_total_cost(temp_cost_lookup, temp_solution))
             
@@ -288,6 +292,8 @@ class LNS:
             
             tok = time.time()
             repair_time += tok - tik
+            
+            # print(f"Number tasks after repair: {len(temp_cost_lookup.keys())}: Iteration: {iteration}")
 
             cost_tik = time.time()
             new_cost = self._calculate_total_cost(temp_cost_lookup, new_solution)
@@ -406,7 +412,7 @@ class LNS:
         # Penalize unallocated agents
         for agent in Rs.agents:
             if len(agent.task_sequence) == 0:
-                total_cost -= self.agent_unallocated_penalty
+                total_cost += self.agent_unallocated_penalty
                 continue
         return total_cost
     

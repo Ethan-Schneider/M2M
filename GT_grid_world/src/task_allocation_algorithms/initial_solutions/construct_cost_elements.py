@@ -164,27 +164,39 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
         task_deadline_costs[n] = calculate_deadline_cost(J[task_id][2], current_time)
 
     # 6. Build (N, Q) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
+    # print(f"Q: {Q}")
     inbound_sku_distribution_costs = np.full((N, Q), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
+        # print(f"Task io: {J[task_id][4]}")
         if J[task_id][4] == 1: # inbound task
             # if inbound task, iterate over all goal locations and calculate distance to each goal location in the task's goal locations
-            for q in range(Q):
-                if goal_locs[q] in J[task_id][1]:
+            for q in J[task_id][1]:
+                if q not in unusable_locs:
+                    j = goal_loc_to_idx[q]
+                    # print(f"n: {n} \n q: {q} \n for {J[task_id][3]} and goal locs {goal_locs[q]}")
                     # print(f"Inbound distribution cost: ")
-                    inbound_sku_distribution_costs[n, q] = -1*G.query_sku_KD_trees(J[task_id][3], goal_locs[q], 1)[0]
+                    inbound_sku_distribution_costs[n, j] = -1*G.query_sku_KD_trees(J[task_id][3], goal_locs[j], 1)[0]
         # else do nothing
+    # print(f"Inbound sku distribution costs: {inbound_sku_distribution_costs}")
+    # if np.isinf(inbound_sku_distribution_costs).any():
+    #     print(f"Inbound Costs: {inbound_sku_distribution_costs}")
+    #     exit()
 
     # 7. Build (N, P) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
     outbound_sku_distribution_costs = np.full((N, P), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
         if J[task_id][4] == 0: # outbound task
             # if outbound task, iterate over all start locations and calculate distance to each start location in the task's start locations
-            for p in range(P):
-                if start_locs[p] in J[task_id][0]:
+            # print(len(J[task_id][0]))
+            for p in J[task_id][0]:
+                if p not in allocated_locs:
+                    # print("here")
+                    i = start_loc_to_idx[p]
+                    # print(p)
                     #get the second closest location
                     # print(f"Outbound distribution cost")
-                    outbound_sku_distribution_costs[n, p] = G.query_sku_KD_trees(J[task_id][3], start_locs[p], 2)[0][1]
-                    
+                    outbound_sku_distribution_costs[n, i] = G.query_sku_KD_trees(J[task_id][3], start_locs[i], 2)[0][1]
+    # print(f"Outbound sku distribution costs: {outbound_sku_distribution_costs}")
     # print(f"Outbound SKU Distribution: {outbound_sku_distribution_costs} with shape {outbound_sku_distribution_costs.shape}")
 
 

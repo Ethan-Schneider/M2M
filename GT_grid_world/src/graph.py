@@ -105,8 +105,14 @@ class Graph:
             else:
                 return [(0, 0)]
         else:
+            if self.__sku_KD_trees[sku_id].n > 1: 
+                return self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)
+            else:
+                if num_neighbors == 1:
+                    return [0]
+                else:
+                    return [(0, 0)]
             # print(f"SKU KD Tree values: {self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)}")
-            return self.__sku_KD_trees[sku_id].query(location, k=num_neighbors, p=1)
 
     def update_sku_KD_trees(self, sku_id: int) -> None:
         sku_locations = self.warehouse.get_sku_instances(sku_id)
