@@ -323,8 +323,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         global_tok = time.time()
         
-        if (global_tok - global_tik) >= time_limit:
-            return
+        # if (global_tok - global_tik) >= time_limit:
+        #     return
         
         # exit()
         
@@ -515,7 +515,7 @@ if __name__=="__main__":
                        help='Path planning strategy')
     parser.add_argument('--map', type=str, default='data/maps/symbotic_small',
                        help='Map file path')
-    parser.add_argument('--time-limit', type=int, default=86400,
+    parser.add_argument('--time-limit', type=int, default=999999,
                        help='Maximum runtime in seconds')
     parser.add_argument('--visualize', action='store_true',
                        help='Generate visualization output')

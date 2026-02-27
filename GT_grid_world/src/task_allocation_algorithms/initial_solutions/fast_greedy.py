@@ -218,6 +218,7 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
     print(f"Total argmin time: {total_argmin_time}")
     print(f"Total update time: {total_update_time}")
+    # exit()
     return Rs, allocations, total_cost
 
 

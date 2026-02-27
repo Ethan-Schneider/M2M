@@ -9,18 +9,18 @@ mkdir -p data/videos
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(837)
+seeds=(900 901 902 903)
 num_robots=(40)
-time_horizons=(4000)
+time_horizons=(28800)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
 num_skus=(30)
-initial_inventory=(85.0)
+initial_inventory=(60.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="py_lns"
+improvement_task_assign_strategy="c_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
 map="data/maps/study_small_restricted"
@@ -35,7 +35,7 @@ output_intermediate_data=False
 intermediate_data_interval=4000
 base_cost_weight=1.0
 deadline_weight=0.0
-sku_distribution_weight=0.25
+sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"

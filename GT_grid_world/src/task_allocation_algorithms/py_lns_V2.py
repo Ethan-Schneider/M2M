@@ -413,7 +413,6 @@ class LNS:
         for agent in Rs.agents:
             if len(agent.task_sequence) == 0:
                 total_cost += self.agent_unallocated_penalty
-                continue
         return total_cost
     
     def _calculate_total_cost_V2(self, Rs: AgentLoader, G : Graph) -> float:
