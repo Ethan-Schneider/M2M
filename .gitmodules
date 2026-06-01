@@ -7,7 +7,7 @@
 	url = https://github.com/Ethan-Schneider/PBS.git
 [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns"]
 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
-	url = https://github.gatech.edu/eschneider32/LNS.git
-[submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns"]
-	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns
-	url = https://github.gatech.edu/eschneider32/LNS.git
+	url = https://github.com/Ethan-Schneider/LNS.git
+# [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns"]
+# 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns
+# 	url = https://github.gatech.edu/eschneider32/LNS.git
