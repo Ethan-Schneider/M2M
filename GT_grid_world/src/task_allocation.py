@@ -4,8 +4,6 @@ from .agent import *
 from .utils import *
 from typing import Dict, Tuple
 from .task_allocation_algorithms.c_lns import lns_call
-from .task_allocation_algorithms.c_p_lns import p_lns_call
-# from .task_allocation_algorithms.c_rmca import rmca_call
 from .task_allocation_algorithms.initial_solutions.max_regret_FC import max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.randomized_max_regret_FC import randomized_max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.FCF import FCF_call
@@ -51,10 +49,6 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
     elif improvement_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
-    elif improvement_task_assignment_strategy == "c_p_lns":
-        return p_lns_call(S, G, map, Rs, J, t)
-    # elif improvement_task_assignment_strategy == "c_rmca":
-    #     return rmca_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "none":
         pass
     else:
@@ -65,8 +59,6 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         return random_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
-    elif initial_task_assignment_strategy == "c_p_lns":
-        return p_lns_call(S, G, map, Rs, J, t)
     elif initial_task_assignment_strategy == "greedy":
         return greedy_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "randomized_greedy":
