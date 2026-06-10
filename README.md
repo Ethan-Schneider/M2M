@@ -56,11 +56,8 @@ This will populate:
 | Submodule | Path | Purpose |
 |-----------|------|---------|
 | LNS | `GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns` | Large Neighborhood Search task allocator |
-| C-LNS | `GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns` | Conflict-aware LNS task allocator |
 | PBS | `GT_grid_world/src/path_finding_algorithms/external_algorithms/PBS` | Priority-Based Search path planner |
 | EECBS | `GT_grid_world/src/path_finding_algorithms/external_algorithms/EECBS` | Enhanced ECBS path planner |
-
-> **Note:** The LNS and C-LNS submodules are hosted on `github.gatech.edu` and require Georgia Tech credentials. Make sure you have SSH access configured or use HTTPS with a personal access token.
 
 ### Building the C++ Modules
 
@@ -69,13 +66,6 @@ Each submodule must be compiled in-place so that Python can import the resulting
 **LNS (task allocation):**
 ```bash
 cd GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
-cmake .
-make
-```
-
-**C-LNS (conflict-aware task allocation):**
-```bash
-cd GT_grid_world/src/task_allocation_algorithms/external_algorithms/p_lns
 cmake .
 make
 ```
@@ -152,6 +142,10 @@ The script creates output directories (`data/raw_data`, `data/buffer_data`, `dat
 **Output** — results for each run are written to `data/raw_data/`. Intermediate snapshots can be enabled by setting `output_intermediate_data=True` and `intermediate_data_interval` to the desired timestep cadence.
 
 ---
+
+## 
+
+Codebase to visualize output files from simulation: [M2M_Visualizer](https://github.com/Ethan-Schneider/M2M_Visualizer)
 
 ## Paper Experiments
 
