@@ -38,9 +38,11 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
         - Updated last_task_id
     """
     
-    # Check if we've reached the maximum number of tasks
+    outbound_tasks: list = []
+    inbound_tasks: list = []
+
     if len(J) >= max_task_number:
-        return J, last_task_id
+        return J, last_task_id, outbound_tasks, inbound_tasks
     
     inbound_probability = inbound_to_outbound / (inbound_to_outbound + 1)
     outbound_probability = 1 - inbound_probability
@@ -58,11 +60,12 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                 if not goal_locations:
                     continue
                 
-                deadline = get_deadline(t)
+                deadline = get_deadline(t, deadline_generation_method, deadline_offset)
                 J[last_task_id + 1] = (start_locations, goal_locations, deadline, 0, 1)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
+                inbound_tasks.append(last_task_id)
                 
             elif task == 0:  # Outbound task
                 # Start locations are all aisle locations containing SKUs
@@ -74,15 +77,14 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                 if not start_locations:
                     continue
                 
-                deadline = get_deadline(t)
+                deadline = get_deadline(t, deadline_generation_method, deadline_offset)
                 J[last_task_id + 1] = (start_locations, goal_locations, deadline, 0, 0)
                 S.add_task_release(last_task_id + 1, t)
                 S.add_task_deadline(last_task_id + 1, deadline)
                 last_task_id += 1
+                outbound_tasks.append(last_task_id)
     
     elif strategy == "informed_uniform":
-        outbound_tasks = []
-        inbound_tasks = []
         # Get tasking weights for all SKUs
         tasking_weights = inventory.get_tasking_weights()
         total_weight = sum(tasking_weights.values())
@@ -107,8 +109,6 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
                     break
                 
     elif strategy == "feedback_control":
-        outbound_tasks = []
-        inbound_tasks = []
         # Get tasking weights for all SKUs
         tasking_weights = inventory.get_tasking_weights()
         total_weight = sum(tasking_weights.values())

@@ -68,18 +68,23 @@ class Inventory:
     def add_sku_instance(self, sku_id: int, location: tuple) -> None:
         """
         Add a SKU instance to a specific location.
-        
+
         Args:
             sku_id: The SKU ID to add
             location: The location to add the SKU instance to
         """
+        # ``np.random.choice`` returns ``numpy.int64``; coerce to a native int
+        # so downstream code (JSON serialization, dict key lookups against
+        # plain ints, etc.) doesn't trip on the numpy type.
+        sku_id = int(sku_id)
+
         if sku_id not in self.__skus:
             raise ValueError(f"SKU {sku_id} does not exist")
         if location not in self.__warehouse_locations:
             raise ValueError(f"Location {location} is not a valid warehouse location")
         if location in self.__location_to_sku:
             raise ValueError(f"Location {location} is already occupied")
-            
+
         self.__sku_instances[sku_id].append(location)
         self.__location_to_sku[location] = sku_id
     
