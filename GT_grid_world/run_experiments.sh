@@ -1,17 +1,18 @@
 #!/bin/bash
 
-# Create directories if they don't exist
-mkdir -p data/raw_data
-mkdir -p data/buffer_data
-mkdir -p data/videos
-
 #Init absolute path
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
+repo_root="$parent_path/.."
+
+# Create directories if they don't exist
+mkdir -p "$repo_root/data/raw_data"
+mkdir -p "$repo_root/data/buffer_data"
+mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(900 901 902 903)
+seeds=(900)
 num_robots=(40)
-time_horizons=(28800)
+time_horizons=(60)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
@@ -23,7 +24,7 @@ initial_task_assign_strategy="fast_greedy"
 improvement_task_assign_strategy="c_lns"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
-map="data/maps/study_small_restricted"
+map="$repo_root/data/maps/study_small_restricted"
 removal_operator="shaw"
 repair_operator="greedy"
 acceptance_function="simulated_annealing"

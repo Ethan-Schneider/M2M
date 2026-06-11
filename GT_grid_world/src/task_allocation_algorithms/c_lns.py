@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 from typing import Dict, Tuple
@@ -13,7 +14,8 @@ def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[in
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     
     stripped_map_name = map_name.split("/")[-1]
-    map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/" + stripped_map_name + ".map"
+    lns_maps_dir = os.path.join(os.path.dirname(__file__), "external_algorithms", "lns", "maps")
+    map_name = os.path.join(lns_maps_dir, stripped_map_name + ".map")
     # Remove task sequence for each agent and add them to unassigned tasks
     for agent in Rs.agents:
         while len(agent.task_sequence) > 1:
