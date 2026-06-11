@@ -5,41 +5,65 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 
+# Task type codes mirror those in case_request_generator.py:
+#   0 = outbound (warehouse -> driveway)
+#   1 = inbound  (driveway  -> warehouse)
+#   2 = shuffle  (warehouse -> warehouse, shelf-to-shelf)
+TASK_TYPE_OUTBOUND = 0
+TASK_TYPE_INBOUND = 1
+TASK_TYPE_SHUFFLE = 2
+
+# Task types whose pickup happens in the warehouse (so SKU removal there
+# affects their start_locs).
+WAREHOUSE_PICKUP_TASK_TYPES = frozenset({TASK_TYPE_OUTBOUND, TASK_TYPE_SHUFFLE})
+
+# Task types whose dropoff happens in the warehouse (so warehouse-empty
+# changes affect their goal_locs).
+WAREHOUSE_DROPOFF_TASK_TYPES = frozenset({TASK_TYPE_INBOUND, TASK_TYPE_SHUFFLE})
+
 
 def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : int, sku_id : int) -> None:
     """
     Ensure all tasks referencing warehouse locations remain consistent with the
     current inventory layout after a SKU is removed or added.
+
+    Refresh policy:
+      - For tasks whose pickup happens in the warehouse and whose SKU matches
+        the changed SKU, re-derive start_locs from current SKU instances.
+      - For tasks whose dropoff happens in the warehouse, re-derive goal_locs
+        from current warehouse-empty cells (regardless of SKU, because adding
+        or removing any SKU shifts the empty set).
+      - For outbound tasks (dropoff = driveway), re-derive goal_locs from
+        current driveway-empty cells. The current execution flow only modifies
+        warehouse occupancy here, so this branch is mostly defensive but kept
+        consistent so the same helper is reusable when driveway-side
+        transitions are added.
     """
     if not J:
         return
+
+    warehouse_empty = frozenset(G.warehouse.get_empty_locations())
+    driveway_empty = frozenset(G.driveway.get_empty_locations())
+    same_sku_warehouse_instances = frozenset(G.warehouse.get_sku_instances(sku_id)) if sku_id is not None else frozenset()
 
     for other_task_id in list(J.keys()):
         if other_task_id == changed_task_id:
             continue
 
-        task_tuple = J[other_task_id]
-        start_locations, goal_locations, deadline, task_sku_id, task_type = task_tuple
+        start_locations, goal_locations, deadline, task_sku_id, task_type = J[other_task_id]
 
-        if task_sku_id == sku_id:
-            if task_type == 0:
-                new_start_locs = frozenset(G.warehouse.get_sku_instances(sku_id))
-                new_goal_locs = frozenset(G.driveway.get_empty_locations())
-                J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
-                continue
-            elif task_type == 1:
-                new_goal_locs = frozenset(G.warehouse.get_empty_locations())
-                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
-                continue
-        else:
-            if task_type == 0:
-                new_goal_locs = frozenset(G.driveway.get_empty_locations())
-                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
-                continue
-            elif task_type == 1:
-                new_goal_locs = frozenset(G.warehouse.get_empty_locations())
-                J[other_task_id] = (start_locations, new_goal_locs, deadline, task_sku_id, task_type)
-                continue
+        new_start_locs = start_locations
+        new_goal_locs = goal_locations
+
+        if task_type in WAREHOUSE_PICKUP_TASK_TYPES and task_sku_id == sku_id:
+            new_start_locs = same_sku_warehouse_instances
+        if task_type in WAREHOUSE_DROPOFF_TASK_TYPES:
+            new_goal_locs = warehouse_empty
+        elif task_type == TASK_TYPE_OUTBOUND:
+            new_goal_locs = driveway_empty
+
+        if new_start_locs is not start_locations or new_goal_locs is not goal_locations:
+            J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
 
 
 def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:

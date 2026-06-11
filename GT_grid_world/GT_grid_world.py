@@ -29,7 +29,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             agent_unallocated_penalty: float = 0.0,
             solution_repair_detection_function: str = "none",
             solution_repair_function: str = "none",
-            initial_inventory : float = 25.0):
+            initial_inventory : float = 25.0,
+            shuffle_percentage: float = 0.0):
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
@@ -58,7 +59,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                                                                                                 inbound_to_outbound_ratio, last_task_id, max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
-                                                                                                  initial_inventory)
+                                                                                                  initial_inventory,
+                                                                                                  shuffle_percentage=shuffle_percentage)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
             
@@ -354,7 +356,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          sku_distribution_weight: float = 0.0,
          agent_unallocated_penalty: float = 0.0,
          solution_repair_detection_function: str = "none",
-         solution_repair_function: str = "none") -> None:
+         solution_repair_function: str = "none",
+         shuffle_percentage: float = 0.0) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -477,7 +480,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             agent_unallocated_penalty=agent_unallocated_penalty,
             solution_repair_detection_function=solution_repair_detection_function,
             solution_repair_function=solution_repair_function,
-            initial_inventory=initial_inventory
+            initial_inventory=initial_inventory,
+            shuffle_percentage=shuffle_percentage
     )
     tok = time.time()
     S.set_total_runtime(tok-tik)
@@ -556,6 +560,11 @@ if __name__=="__main__":
     parser.add_argument('--agent-unallocated-penalty', type=float, default=0.0, help='Penalty for unallocated agents')
     parser.add_argument('--solution-repair-detection-function', type=str, default='none', help='Solution repair detection function')
     parser.add_argument('--solution-repair-function', type=str, default='none', help='Solution repair function')
+    parser.add_argument('--shuffle-percentage', type=float, default=0.0,
+                       help='Per-task probability (0.0-1.0) of generating a shuffle (type=2, '
+                            'shelf-to-shelf) task in CRG. 0.0 disables shuffle generation. '
+                            'This is the 1.4-skeleton on/off switch; the proper rearrangement '
+                            'ratio balancer is roadmap section 3.2.')
     args = parser.parse_args()
     
     main(
@@ -591,5 +600,6 @@ if __name__=="__main__":
         sku_distribution_weight=args.sku_distribution_weight,
         agent_unallocated_penalty=args.agent_unallocated_penalty,
         solution_repair_detection_function=args.solution_repair_detection_function,
-        solution_repair_function=args.solution_repair_function
+        solution_repair_function=args.solution_repair_function,
+        shuffle_percentage=args.shuffle_percentage
     )

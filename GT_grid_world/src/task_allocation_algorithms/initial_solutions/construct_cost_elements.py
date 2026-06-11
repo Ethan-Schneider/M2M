@@ -4,6 +4,26 @@ from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 
+# Task type codes mirror those in case_request_generator.py / simulate.py:
+#   0 = outbound (warehouse -> driveway)
+#   1 = inbound  (driveway  -> warehouse)
+#   2 = shuffle  (warehouse -> warehouse)
+TASK_TYPE_OUTBOUND = 0
+TASK_TYPE_INBOUND = 1
+TASK_TYPE_SHUFFLE = 2
+
+# Task types whose pickup is a warehouse SKU instance (so the outbound-style
+# SKU-distribution cost over start_locs applies). The proper rearrangement
+# objective for type=2 is roadmap section 1.6; for the 1.4 skeleton we let
+# shuffle inherit the outbound cost so allocation produces finite values
+# instead of np.inf.
+WAREHOUSE_PICKUP_TASK_TYPES = frozenset({TASK_TYPE_OUTBOUND, TASK_TYPE_SHUFFLE})
+
+# Task types whose dropoff is a warehouse-empty cell (so the inbound-style
+# SKU-distribution cost over goal_locs applies). Same skeleton-vs-1.6 caveat.
+WAREHOUSE_DROPOFF_TASK_TYPES = frozenset({TASK_TYPE_INBOUND, TASK_TYPE_SHUFFLE})
+
+
 def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     """Calculate Manhattan distance between two locations."""
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
@@ -163,41 +183,35 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
     for n, task_id in enumerate(unallocated_task_ids):
         task_deadline_costs[n] = calculate_deadline_cost(J[task_id][2], current_time)
 
-    # 6. Build (N, Q) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
-    # print(f"Q: {Q}")
+    # 6. Build (N, Q) inbound-style SKU distribution cost matrix.
+    # Populated for tasks that drop off into the warehouse (inbound and
+    # shuffle). Defaults to np.inf elsewhere so the allocator skips invalid
+    # combos. Skeleton note for 1.4: shuffle reuses the inbound-style cost
+    # here as a placeholder; the dedicated rearrangement objective lands in
+    # roadmap section 1.6.
     inbound_sku_distribution_costs = np.full((N, Q), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
-        # print(f"Task io: {J[task_id][4]}")
-        if J[task_id][4] == 1: # inbound task
-            # if inbound task, iterate over all goal locations and calculate distance to each goal location in the task's goal locations
+        task_type = J[task_id][4]
+        if task_type in WAREHOUSE_DROPOFF_TASK_TYPES:
             for q in J[task_id][1]:
                 if q not in unusable_locs:
                     j = goal_loc_to_idx[q]
-                    # print(f"n: {n} \n q: {q} \n for {J[task_id][3]} and goal locs {goal_locs[q]}")
-                    # print(f"Inbound distribution cost: ")
                     inbound_sku_distribution_costs[n, j] = -1*G.query_sku_KD_trees(J[task_id][3], goal_locs[j], 1)[0]
-        # else do nothing
-    # print(f"Inbound sku distribution costs: {inbound_sku_distribution_costs}")
-    # if np.isinf(inbound_sku_distribution_costs).any():
-    #     print(f"Inbound Costs: {inbound_sku_distribution_costs}")
-    #     exit()
 
-    # 7. Build (N, P) sku distribution cost matrix (inf if task n is outbound, query sku KD tree for distance otherwise)
+    # 7. Build (N, P) outbound-style SKU distribution cost matrix.
+    # Populated for tasks that pick up from the warehouse (outbound and
+    # shuffle). Same skeleton-vs-1.6 caveat as above. fast_greedy currently
+    # routes any task with type != 1 through this matrix, so populating
+    # type=2 here is what keeps shuffle-task allocation cost finite.
     outbound_sku_distribution_costs = np.full((N, P), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
-        if J[task_id][4] == 0: # outbound task
-            # if outbound task, iterate over all start locations and calculate distance to each start location in the task's start locations
-            # print(len(J[task_id][0]))
+        task_type = J[task_id][4]
+        if task_type in WAREHOUSE_PICKUP_TASK_TYPES:
             for p in J[task_id][0]:
                 if p not in allocated_locs:
-                    # print("here")
                     i = start_loc_to_idx[p]
-                    # print(p)
-                    #get the second closest location
-                    # print(f"Outbound distribution cost")
+                    # Second-closest because the closest is the start cell itself.
                     outbound_sku_distribution_costs[n, i] = G.query_sku_KD_trees(J[task_id][3], start_locs[i], 2)[0][1]
-    # print(f"Outbound sku distribution costs: {outbound_sku_distribution_costs}")
-    # print(f"Outbound SKU Distribution: {outbound_sku_distribution_costs} with shape {outbound_sku_distribution_costs.shape}")
 
 
     # 8. Build vector of size (M) which includes the estimated time for the agent to complete the task sequence

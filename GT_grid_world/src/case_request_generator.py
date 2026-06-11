@@ -6,19 +6,34 @@ from .agent import AgentLoader
 from .inventory_manager.inventory import Inventory
 from .utils import *
 from .analysis.statistics import Stats
-    
+from .logging_config import get_logger
+
+_log = get_logger("crg")
+
+# Task type codes used throughout M2M:
+#   0 = outbound (warehouse -> driveway)
+#   1 = inbound  (driveway  -> warehouse)
+#   2 = shuffle  (warehouse -> warehouse, shelf-to-shelf rearrangement)
+TASK_TYPE_OUTBOUND = 0
+TASK_TYPE_INBOUND = 1
+TASK_TYPE_SHUFFLE = 2
+
+
 def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int, inbound_to_outbound: float, 
         last_task_id: int, max_task_number: int, inventory: Inventory,
         strategy: str = "uninformed_uniform", deadline_generation_method: str = "constant",
         deadline_offset: float = 30, improvement_task_assign_strategy: str = "c_lns",
-        initial_inventory : float = 25.0) -> Tuple[Dict[int, Tuple], int]:
+        initial_inventory : float = 25.0,
+        shuffle_percentage: float = 0.0) -> Tuple[Dict[int, Tuple], int]:
     """
     Case Request Generator that creates new tasks based on the current inventory state.
-    Each task is defined as (task_id, S_n, D_n, deadline) where:
+    Each task is defined as (task_id, S_n, D_n, deadline, sku_id, type) where:
     - S_n is the frozenset of possible start locations
     - D_n is the frozenset of possible destination locations
     - deadline is an integer (time by which the task should be completed)
-    
+    - sku_id identifies which SKU the task moves
+    - type is 0 (outbound), 1 (inbound), or 2 (shuffle / shelf-to-shelf)
+
     Args:
         S: Statistics object for tracking metrics
         t: Current timestep
@@ -29,15 +44,19 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
         last_task_id: ID of the last generated task
         max_task_number: Maximum number of tasks allowed
         inventory: Inventory system
-        strategy: Task generation strategy ("uninformed_uniform" or "informed_uniform")
-        deadline_generation_method: Method for generating deadlines ("constant" or other)
-    
+        strategy: Task generation strategy
+        deadline_generation_method: Method for generating deadlines
+        shuffle_percentage: Per-task probability of generating a shuffle (type=2) task
+            instead of an IB/OB task. 0.0 (default) disables shuffle generation. The
+            proper ratio balancer for rearrangement lives in roadmap section 3.2;
+            this flag is the 1.4-skeleton on/off switch.
+
     Returns:
-        Tuple containing:
-        - Set of new tasks (task_id, start_locations_frozenset, goal_locations_frozenset, deadline, sku_id, inbound/outbound)
-        - Updated last_task_id
+        Tuple containing the updated J, last_task_id, and lists of newly created
+        outbound and inbound task ids. Shuffle task ids are not returned in either
+        list (the ratio balancer in 3.2 will take ownership of that bookkeeping).
     """
-    
+
     outbound_tasks: list = []
     inbound_tasks: list = []
 
@@ -48,8 +67,26 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
     outbound_probability = 1 - inbound_probability
     tasks_to_generate = np.random.choice([0, 1], size=int(N), p=[outbound_probability, inbound_probability])
 
+    shuffle_percentage = float(np.clip(shuffle_percentage, 0.0, 1.0))
+
     if strategy == "uninformed_uniform":
         for task in tasks_to_generate:
+            if shuffle_percentage > 0.0 and random.random() < shuffle_percentage:
+                # Shuffle (type=2) doesn't have a meaningful "uninformed" SKU
+                # selection because it has to pick a SKU that already exists in
+                # the warehouse. Pick one uniformly at random from SKUs that
+                # currently have at least 2 instances so a non-degenerate move
+                # exists.
+                J, success, last_task_id = _generate_shuffle_task(
+                    deadline_generation_method, deadline_offset,
+                    sku_id=None, t=t, last_task_id=last_task_id,
+                    G=G, J=J, S=S,
+                )
+                if success:
+                    continue
+                # Fall through to IB/OB if shuffle generation failed (e.g. no
+                # SKU has >=2 instances). Don't double-roll the IB/OB die --
+                # the caller already chose between IB/OB for this slot.
             if task == 1:  # Inbound task
                 # Start locations are all driveway nodes
                 start_locations = frozenset(G.get_station_locations())
@@ -101,7 +138,8 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
         for task in tasks_to_generate:
             attempts = 0
             while True:
-                J, success, last_task_id = generate_task(deadline_generation_method, deadline_offset, sku_ids, weights, task, t, last_task_id, allocated_skus, G, J, S)
+                J, success, last_task_id = generate_task(deadline_generation_method, deadline_offset, sku_ids, weights, task, t, last_task_id, allocated_skus, G, J, S,
+                                                          shuffle_percentage=shuffle_percentage)
                 if success:
                     break
                 attempts += 1
@@ -140,7 +178,8 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
         for task in tasks_to_generate:
             attempts = 0
             while True:
-                J, success, last_task_id = generate_task(deadline_generation_method, deadline_offset, sku_ids, weights, task, t, last_task_id, allocated_skus, G, J, S)
+                J, success, last_task_id = generate_task(deadline_generation_method, deadline_offset, sku_ids, weights, task, t, last_task_id, allocated_skus, G, J, S,
+                                                          shuffle_percentage=shuffle_percentage)
                 if success:
                     break
                 attempts += 1
@@ -160,10 +199,23 @@ def CRG(S: Stats, t: int, J: Dict[int, Tuple], G: Graph, Rs: AgentLoader, N: int
     return J, last_task_id, outbound_tasks, inbound_tasks
 
 
-def generate_task(deadline_generation_method : str, deadline_offset : float, sku_ids, weights, task, t : int, last_task_id : int, allocated_skus : dict, G : Graph, J : set, S : Stats) -> bool:
-    # Select SKU based on tasking weights
-    sku_id = np.random.choice(sku_ids, p=weights)
-    
+def generate_task(deadline_generation_method : str, deadline_offset : float, sku_ids, weights, task, t : int, last_task_id : int, allocated_skus : dict, G : Graph, J : set, S : Stats,
+                  shuffle_percentage: float = 0.0) -> bool:
+    # Select SKU based on tasking weights. The chosen SKU is reused for both the
+    # IB/OB path and the shuffle short-circuit so the SKU mix matches the
+    # caller's tasking weights instead of being uniform across SKUs.
+    sku_id = int(np.random.choice(sku_ids, p=weights))
+
+    if shuffle_percentage > 0.0 and random.random() < shuffle_percentage:
+        J, success, last_task_id = _generate_shuffle_task(
+            deadline_generation_method, deadline_offset,
+            sku_id=sku_id, t=t, last_task_id=last_task_id,
+            G=G, J=J, S=S,
+        )
+        if success:
+            return J, True, last_task_id
+        # Fall through to IB/OB on failure (e.g. <2 instances of this SKU).
+
     if task == 1:  # Inbound task
         # Choose random start location from empty driveway locations
         available_start_locations = set(G.driveway.get_empty_locations())
@@ -239,6 +291,86 @@ def generate_task(deadline_generation_method : str, deadline_offset : float, sku
         return J, True, last_task_id
         
         
+def _generate_shuffle_task(deadline_generation_method: str, deadline_offset: float,
+                           sku_id, t: int, last_task_id: int,
+                           G: Graph, J: dict, S: Stats):
+    """
+    Generate a single shuffle (type=2, shelf-to-shelf) task and append it to J.
+
+    Picks a SKU that has at least one warehouse instance and at least one
+    empty warehouse cell. Both endpoints live in the warehouse: start_locs is
+    the frozenset of all current instances of the chosen SKU and goal_locs is
+    the frozenset of all empty warehouse cells. The allocator chooses which
+    specific (start, goal) pair to commit to.
+
+    The caller may pass ``sku_id=None`` to ask the helper to pick a SKU
+    uniformly at random from those with >=1 warehouse instance (used by the
+    "uninformed_uniform" strategy). If a specific ``sku_id`` is passed and that
+    SKU has no warehouse instances, the call returns success=False so the
+    caller can fall back to IB/OB.
+
+    Returns:
+        (J, success, last_task_id) -- mirrors generate_task's contract.
+    """
+    available_goal_locations = set(G.warehouse.get_empty_locations())
+    if not available_goal_locations:
+        # Warehouse is full. Shelf-to-shelf is impossible until something exits.
+        _log.debug("Shuffle skipped at t=%s: no empty warehouse cells", t)
+        return J, False, last_task_id
+
+    if sku_id is None:
+        # Caller wants us to pick a SKU. Restrict to SKUs with >=1 warehouse
+        # instance so the start_locs frozenset is non-empty.
+        candidate_skus = [
+            s for s in G.warehouse.get_all_skus().keys()
+            if G.warehouse.get_sku_instance_count(s) >= 1
+        ]
+        if not candidate_skus:
+            _log.debug("Shuffle skipped at t=%s: warehouse has no SKUs", t)
+            return J, False, last_task_id
+        sku_id = int(random.choice(candidate_skus))
+    else:
+        sku_id = int(sku_id)
+        if sku_id not in G.warehouse.get_all_skus():
+            # Caller specified a SKU the warehouse does not know about. Treat
+            # as "no shuffle possible for this slot" rather than raising; CRG
+            # callers fall through to IB/OB on False.
+            return J, False, last_task_id
+        if G.warehouse.get_sku_instance_count(sku_id) < 1:
+            return J, False, last_task_id
+
+    available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
+    if not available_start_locations:
+        return J, False, last_task_id
+
+    # Source must differ from goal. start_locs comes from warehouse-FULL cells,
+    # goal_locs comes from warehouse-EMPTY cells, so the two sets are disjoint
+    # by construction. Still, guard against the (impossible) overlap so a
+    # future change to either set can't silently produce degenerate tasks.
+    if available_start_locations & available_goal_locations:
+        raise AssertionError(
+            "Shuffle start_locs and goal_locs overlap; warehouse occupancy "
+            "bookkeeping is inconsistent"
+        )
+
+    deadline = get_deadline(t, deadline_generation_method, deadline_offset)
+    new_task_id = last_task_id + 1
+    J[new_task_id] = (
+        frozenset(available_start_locations),
+        frozenset(available_goal_locations),
+        deadline,
+        sku_id,
+        TASK_TYPE_SHUFFLE,
+    )
+    S.add_task_release(new_task_id, t)
+    S.add_task_deadline(new_task_id, deadline)
+    last_task_id = new_task_id
+    _log.debug("Generated shuffle task id=%s sku=%s |start|=%s |goal|=%s deadline=%s",
+               new_task_id, sku_id, len(available_start_locations),
+               len(available_goal_locations), deadline)
+    return J, True, last_task_id
+
+
 # Deadline generation
 def get_deadline(current_time: int, deadline_generation_method : str, deadline_offset : float) -> int:
     if deadline_generation_method == "constant":

@@ -102,11 +102,34 @@ def tiny_graph(small_test_map: Path, seeded_rng: int) -> Graph:
     Function-scoped so each test gets a fresh graph (mutation by pickup/dropoff
     in one test would otherwise leak into the next). The first call computes a
     distance matrix and caches it as a sibling ``*_distances.npy`` file.
+
+    ``initial_warehouse_capacity=0.0`` so existing tests that assume an empty
+    warehouse keep their behaviour. Tests that need a populated warehouse
+    should use ``populated_graph`` instead.
     """
     return Graph(
         num_robots=3,
         file_name=str(small_test_map),
         initial_warehouse_capacity=0.0,
+        num_skus=5,
+        weight_init_method="uniform",
+    )
+
+
+@pytest.fixture()
+def populated_graph(small_test_map: Path, seeded_rng: int) -> Graph:
+    """A ``Graph`` whose warehouse is 30% pre-filled with SKUs.
+
+    Use this fixture for tests that need both warehouse-full and
+    warehouse-empty cells (e.g. shuffle / shelf-to-shelf, cost-tensor
+    construction). 30% leaves enough room on both sides of the partition
+    that allocator-style assertions about non-empty start_locs and
+    non-empty goal_locs hold reliably.
+    """
+    return Graph(
+        num_robots=3,
+        file_name=str(small_test_map),
+        initial_warehouse_capacity=30.0,
         num_skus=5,
         weight_init_method="uniform",
     )
