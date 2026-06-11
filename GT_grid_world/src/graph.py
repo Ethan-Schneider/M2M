@@ -432,6 +432,42 @@ class Graph:
     def get_station_locations(self) -> list:
         """Returns list of inbound/outbound station locations (s) in the map."""
         return self.station_locations
+
+    def is_warehouse_aisle_location(self, loc: tuple) -> bool:
+        """True if ``loc`` is a warehouse aisle (shelf) cell.
+
+        Aisles in M2M maps are vertical corridors of ``e`` cells above the
+        driveway. This is a simple membership test against the cached
+        ``aisle_locations`` list.
+        """
+        return loc in self.aisle_locations
+
+    def is_driveway_location(self, loc: tuple) -> bool:
+        """True if ``loc`` is a driveway (station) cell.
+
+        On the current ``symbotic_2026`` branch the driveway is a single
+        physical region (one ``Inventory``). When the per-cell I/O direction
+        typing from ``local_task_reallocation`` lands, this helper will keep
+        its boolean semantics; finer-grained queries (inbound-cell vs
+        outbound-cell) will get their own helpers.
+        """
+        return loc in self.station_locations
+
+    def get_same_aisle_locations(self, loc: tuple) -> list:
+        """Return all warehouse aisle cells that share an aisle (column) with
+        ``loc``.
+
+        Aisles are vertical corridors so "same aisle" means "same column
+        index" *and* both cells must be in the warehouse aisle area. If
+        ``loc`` is not in an aisle, the empty list is returned. The result
+        includes ``loc`` itself when ``loc`` is in an aisle, which makes the
+        helper safe to use as an "is X potentially-same-aisle as Y" check via
+        ``X in graph.get_same_aisle_locations(Y)``.
+        """
+        if not self.is_warehouse_aisle_location(loc):
+            return []
+        column = loc[1]
+        return [a for a in self.aisle_locations if a[1] == column]
                     
     def __load_or_compute_distance_matrix(self, map_file: str) -> None:
         """Load the distance matrix from file if it exists, otherwise compute and save it.

@@ -1,9 +1,12 @@
-from typing import Tuple, Dict
+from typing import Optional, Tuple, Dict
 
 from .analysis.statistics import Stats
 from .graph import Graph
 from .agent import *
+from .logging_config import get_logger
 from .utils import *
+
+_log = get_logger("simulate")
 
 # Task type codes mirror those in case_request_generator.py:
 #   0 = outbound (warehouse -> driveway)
@@ -20,6 +23,124 @@ WAREHOUSE_PICKUP_TASK_TYPES = frozenset({TASK_TYPE_OUTBOUND, TASK_TYPE_SHUFFLE})
 # Task types whose dropoff happens in the warehouse (so warehouse-empty
 # changes affect their goal_locs).
 WAREHOUSE_DROPOFF_TASK_TYPES = frozenset({TASK_TYPE_INBOUND, TASK_TYPE_SHUFFLE})
+
+
+def _collect_global_allocation_snapshot(Rs):
+    """Return ``(allocated_task_ids, allocated_locs)`` across every agent's
+    task_sequence. Used by the dual-cycle helpers to avoid stealing a task
+    that the regular allocator already gave to another agent.
+    """
+    allocated_task_ids = set()
+    allocated_locs = set()
+    for ag in Rs.agents:
+        for task_tuple in ag.task_sequence:
+            allocated_task_ids.add(task_tuple[0])
+            allocated_locs.add(task_tuple[1])
+            allocated_locs.add(task_tuple[2])
+    return allocated_task_ids, allocated_locs
+
+
+def _find_aisle_dual_cycle_chain(
+    agent, completed_goal: Tuple[int, int], J: Dict[int, Tuple], Rs, G: Graph
+) -> Optional[Tuple]:
+    """Aisle dual cycling (IB -> OB).
+
+    The agent just dropped an inbound box at ``completed_goal`` (a warehouse
+    aisle cell). Look for an unallocated outbound (type=0) task whose pickup
+    is in the SAME aisle (same column) as ``completed_goal``. If one exists
+    and has a valid driveway dropoff cell, return a concrete
+    ``(task_id, chosen_start, chosen_goal, deadline)`` tuple ready to append
+    to ``agent.task_sequence``. Otherwise return ``None``.
+
+    The chosen ``(start, goal)`` minimises agent.state -> start + start ->
+    goal travel as a tiebreaker among eligible OB tasks. The proper
+    rearrangement objective for chaining decisions lives in roadmap 1.6 / 3.4;
+    this is the 1.5-skeleton heuristic.
+    """
+    if not G.is_warehouse_aisle_location(completed_goal):
+        return None
+    same_aisle_cells = set(G.get_same_aisle_locations(completed_goal))
+
+    allocated_task_ids, allocated_locs = _collect_global_allocation_snapshot(Rs)
+    driveway_empty = set(G.driveway.get_empty_locations())
+    warehouse_full = set(G.warehouse.get_full_locations())
+
+    best = None
+    best_cost = float("inf")
+    for task_id, (start_locs, goal_locs, deadline, _sku, type_) in J.items():
+        if task_id in allocated_task_ids:
+            continue
+        if type_ != TASK_TYPE_OUTBOUND:
+            continue
+        eligible_starts = [
+            s for s in start_locs
+            if s in same_aisle_cells and s in warehouse_full and s not in allocated_locs
+        ]
+        if not eligible_starts:
+            continue
+        eligible_goals = [
+            g for g in goal_locs if g in driveway_empty and g not in allocated_locs
+        ]
+        if not eligible_goals:
+            continue
+        chosen_start = min(eligible_starts, key=lambda s: G.get_distance(agent.state, s))
+        chosen_goal = min(eligible_goals, key=lambda g: G.get_distance(chosen_start, g))
+        cost = G.get_distance(agent.state, chosen_start) + G.get_distance(chosen_start, chosen_goal)
+        if cost < best_cost:
+            best_cost = cost
+            best = (task_id, chosen_start, chosen_goal, deadline)
+    return best
+
+
+def _find_driveway_dual_cycle_chain(
+    agent, completed_goal: Tuple[int, int], J: Dict[int, Tuple], Rs, G: Graph
+) -> Optional[Tuple]:
+    """Driveway dual cycling (OB -> IB at driveways).
+
+    The agent just dropped an outbound box at ``completed_goal`` (a driveway
+    cell). Look for an unallocated inbound (type=1) task whose pickup is at
+    any driveway cell that currently holds a pre-placed SKU. If one exists
+    and has a valid warehouse-empty dropoff cell, return a concrete
+    ``(task_id, chosen_start, chosen_goal, deadline)`` tuple. Otherwise return
+    ``None``.
+
+    On the current ``symbotic_2026`` branch the driveway is a single physical
+    region, so "same driveway" is trivially "any driveway cell". When the
+    per-cell I/O direction typing from ``local_task_reallocation`` lands
+    (DPS-style mixed layout), this helper will tighten the eligibility
+    filter to the matching subregion.
+    """
+    if not G.is_driveway_location(completed_goal):
+        return None
+
+    allocated_task_ids, allocated_locs = _collect_global_allocation_snapshot(Rs)
+    driveway_full = set(G.driveway.get_full_locations())
+    warehouse_empty = set(G.warehouse.get_empty_locations())
+
+    best = None
+    best_cost = float("inf")
+    for task_id, (start_locs, goal_locs, deadline, _sku, type_) in J.items():
+        if task_id in allocated_task_ids:
+            continue
+        if type_ != TASK_TYPE_INBOUND:
+            continue
+        eligible_starts = [
+            s for s in start_locs if s in driveway_full and s not in allocated_locs
+        ]
+        if not eligible_starts:
+            continue
+        eligible_goals = [
+            g for g in goal_locs if g in warehouse_empty and g not in allocated_locs
+        ]
+        if not eligible_goals:
+            continue
+        chosen_start = min(eligible_starts, key=lambda s: G.get_distance(agent.state, s))
+        chosen_goal = min(eligible_goals, key=lambda g: G.get_distance(chosen_start, g))
+        cost = G.get_distance(agent.state, chosen_start) + G.get_distance(chosen_start, chosen_goal)
+        if cost < best_cost:
+            best_cost = cost
+            best = (task_id, chosen_start, chosen_goal, deadline)
+    return best
 
 
 def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : int, sku_id : int) -> None:
@@ -66,7 +187,8 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
 
 
-def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
+def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int,
+             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False) -> Tuple[AgentLoader, set]:
     """
     Simulate the system for one timestep.
 
@@ -77,6 +199,14 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
         J (Dict[int, Tuple]): Dictionary of tasks
         map_name (str): Name of the map
         t (int): Current timestep
+        aisle_dual_cycle: When True, after an agent completes an inbound task
+            in the warehouse and would otherwise idle, search J for an
+            unallocated same-aisle outbound task and chain it onto
+            ``agent.task_sequence`` (1.5-skeleton dual cycling, IB -> OB).
+        driveway_dual_cycle: When True, after an agent completes an outbound
+            task at a driveway cell and would otherwise idle, search J for an
+            unallocated inbound task whose pickup is at any driveway cell and
+            chain it (1.5-skeleton dual cycling, OB -> IB).
 
     Returns:
         Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks
@@ -202,6 +332,32 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 J.pop(task_id)
                     
                 agent.task_sequence.pop(0)
+
+                # Dual-cycle hook (roadmap 1.5). If the agent would otherwise
+                # idle, look for a same-aisle / same-driveway opportunity to
+                # chain. ``inbound_task`` here is the just-completed task type
+                # (it's a legacy variable name -- the field stores 0/1/2). The
+                # rearrangement-chaining variant (IB -> Shuffle -> OB) lives
+                # in roadmap 3.1 and is intentionally not handled here.
+                if agent.task_sequence == []:
+                    chained_tuple: Optional[Tuple] = None
+                    if aisle_dual_cycle and inbound_task == TASK_TYPE_INBOUND:
+                        chained_tuple = _find_aisle_dual_cycle_chain(agent, goal_location, J, Rs, G)
+                        if chained_tuple is not None:
+                            _log.debug(
+                                "Aisle dual cycle (IB->OB) at t=%s: agent %s chained task %s after task %s",
+                                t, agent.id, chained_tuple[0], task_id,
+                            )
+                    elif driveway_dual_cycle and inbound_task == TASK_TYPE_OUTBOUND:
+                        chained_tuple = _find_driveway_dual_cycle_chain(agent, goal_location, J, Rs, G)
+                        if chained_tuple is not None:
+                            _log.debug(
+                                "Driveway dual cycle (OB->IB) at t=%s: agent %s chained task %s after task %s",
+                                t, agent.id, chained_tuple[0], task_id,
+                            )
+                    if chained_tuple is not None:
+                        agent.task_sequence.append(chained_tuple)
+
                 if agent.task_sequence == []:
                     agent.status = 0
                 else:

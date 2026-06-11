@@ -30,7 +30,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             solution_repair_detection_function: str = "none",
             solution_repair_function: str = "none",
             initial_inventory : float = 25.0,
-            shuffle_percentage: float = 0.0):
+            shuffle_percentage: float = 0.0,
+            aisle_dual_cycle: bool = False,
+            driveway_dual_cycle: bool = False):
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
@@ -296,7 +298,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, J = simulate.simulate(S, G, Rs, J, map, t)
+        Rs, J = simulate.simulate(
+            S, G, Rs, J, map, t,
+            aisle_dual_cycle=aisle_dual_cycle,
+            driveway_dual_cycle=driveway_dual_cycle,
+        )
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
@@ -357,7 +363,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          agent_unallocated_penalty: float = 0.0,
          solution_repair_detection_function: str = "none",
          solution_repair_function: str = "none",
-         shuffle_percentage: float = 0.0) -> None:
+         shuffle_percentage: float = 0.0,
+         aisle_dual_cycle: bool = False,
+         driveway_dual_cycle: bool = False) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -481,7 +489,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             solution_repair_detection_function=solution_repair_detection_function,
             solution_repair_function=solution_repair_function,
             initial_inventory=initial_inventory,
-            shuffle_percentage=shuffle_percentage
+            shuffle_percentage=shuffle_percentage,
+            aisle_dual_cycle=aisle_dual_cycle,
+            driveway_dual_cycle=driveway_dual_cycle,
     )
     tok = time.time()
     S.set_total_runtime(tok-tik)
@@ -565,6 +575,17 @@ if __name__=="__main__":
                             'shelf-to-shelf) task in CRG. 0.0 disables shuffle generation. '
                             'This is the 1.4-skeleton on/off switch; the proper rearrangement '
                             'ratio balancer is roadmap section 3.2.')
+    parser.add_argument('--aisle-dual-cycle', action='store_true',
+                       help='Enable aisle dual cycling (IB->OB chaining within the same '
+                            'warehouse aisle). When set, after an agent completes an inbound '
+                            'task it will immediately pick up a same-aisle outbound task if '
+                            'one is unallocated, instead of returning to the Free state. '
+                            'Default off so it can be ablated independently of rearrangement.')
+    parser.add_argument('--driveway-dual-cycle', action='store_true',
+                       help='Enable driveway dual cycling (OB->IB chaining at the driveway). '
+                            'When set, after an agent completes an outbound delivery at a '
+                            'driveway cell it will immediately pick up an unallocated inbound '
+                            'task whose pickup is at any driveway cell. Default off.')
     args = parser.parse_args()
     
     main(
@@ -601,5 +622,7 @@ if __name__=="__main__":
         agent_unallocated_penalty=args.agent_unallocated_penalty,
         solution_repair_detection_function=args.solution_repair_detection_function,
         solution_repair_function=args.solution_repair_function,
-        shuffle_percentage=args.shuffle_percentage
+        shuffle_percentage=args.shuffle_percentage,
+        aisle_dual_cycle=args.aisle_dual_cycle,
+        driveway_dual_cycle=args.driveway_dual_cycle,
     )
