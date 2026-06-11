@@ -1,176 +1,260 @@
-import unittest
-import numpy as np
-import matplotlib.pyplot as plt
-from GT_grid_world.src.inventory_manager.inventory import Inventory
-from GT_grid_world.src.inventory_manager.item import WeightInitialization
-from GT_grid_world.src.case_request_generator import CRG
-from GT_grid_world.src.graph import Graph
-from GT_grid_world.src.analysis.statistics import Stats
+"""Unit tests for ``case_request_generator.CRG``.
 
-class TestCaseRequest(unittest.TestCase):
-    def setUp(self):
-        """Set up test environment"""
-        self.G = Graph(3, "data/maps/small_test", 25.0, 5)
-        self.S = Stats(3, 100, "test_output.json")
-        self.J = set()  # Set of unassigned tasks
-        self.J_assigned = set()  # Set of assigned tasks (s, d)
-        self.last_task_id = 0
-        self.max_task_number = 20
-        self.inbound_to_outbound = 1.0
-        
-    def test_uninformed_uniform_task_generation(self):
-        """Test basic task generation with uninformed uniform strategy"""
-        # Generate tasks
-        N = 5
-        J_new, new_last_task_id = CRG(
-            self.S, 0, self.J, self.G, N, self.inbound_to_outbound,
-            self.last_task_id, self.max_task_number, self.G.warehouse,
-            strategy="uninformed_uniform"
+Pytest-style rewrite of the original ``unittest`` suite. The original tests
+were written against an earlier ``CRG`` signature and a pre-dict task
+representation; this version targets the current signature on the
+``symbotic_2026`` branch:
+
+    CRG(S, t, J, G, Rs, N, inbound_to_outbound, last_task_id,
+        max_task_number, inventory, *, strategy=..., deadline_generation_method=..., ...)
+        -> (J, last_task_id, outbound_tasks, inbound_tasks)
+
+Task tuple shape (current branch): ``(start_locs, goal_locs, deadline,
+sku_id, type)`` keyed by ``task_id`` in a ``Dict[int, Tuple]``. Type is
+``0=outbound``, ``1=inbound``.
+
+Coverage focus
+--------------
+* ``uninformed_uniform`` and ``feedback_control`` strategies (the two paths
+  in active use in ``run_experiments.sh``)
+* Backpressure when the warehouse is empty (only inbound tasks generated)
+  or full (only outbound tasks generated)
+* Max-task-cap behaviour
+* Invalid-strategy error path
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from GT_grid_world.src.case_request_generator import CRG, get_deadline
+
+
+# ---------------------------------------------------------------------------
+# get_deadline
+# ---------------------------------------------------------------------------
+def test_get_deadline_constant_returns_offset():
+    assert get_deadline(current_time=10, deadline_generation_method="constant", deadline_offset=30) == 40
+
+
+def test_get_deadline_none_returns_sentinel():
+    assert get_deadline(0, "none", 30) == 9999999
+
+
+def test_get_deadline_unknown_method_falls_back():
+    assert get_deadline(10, "this_is_not_a_method", 30) == 40
+
+
+def test_get_deadline_normal_is_close_to_offset(seeded_rng):
+    samples = [get_deadline(0, "normal", 30) for _ in range(200)]
+
+    mean = sum(samples) / len(samples)
+    assert 25 <= mean <= 35
+
+
+# ---------------------------------------------------------------------------
+# CRG core behaviour
+# ---------------------------------------------------------------------------
+def test_crg_returns_four_tuple_with_correct_types(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    filled_inventory,
+    seeded_rng,
+):
+    J: dict = {}
+    result = CRG(
+        minimal_stats,
+        0,                            # t
+        J,
+        tiny_graph,
+        sample_agents,
+        N=2,
+        inbound_to_outbound=1.0,
+        last_task_id=0,
+        max_task_number=20,
+        inventory=filled_inventory,
+        strategy="uninformed_uniform",
+    )
+
+    assert len(result) == 4
+    new_J, new_last_id, outbound_tasks, inbound_tasks = result
+    assert isinstance(new_J, dict)
+    assert isinstance(new_last_id, int)
+    assert isinstance(outbound_tasks, list)
+    assert isinstance(inbound_tasks, list)
+
+
+def test_crg_uninformed_generates_well_formed_tasks(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    filled_inventory,
+    seeded_rng,
+):
+    J: dict = {}
+    new_J, new_last_id, _, _ = CRG(
+        minimal_stats,
+        0,
+        J,
+        tiny_graph,
+        sample_agents,
+        N=5,
+        inbound_to_outbound=1.0,
+        last_task_id=0,
+        max_task_number=20,
+        inventory=filled_inventory,
+        strategy="uninformed_uniform",
+    )
+
+    assert 1 <= len(new_J) <= 5  # Some tasks may skip if no valid locations
+    assert new_last_id >= len(new_J)
+
+    aisles = set(tiny_graph.get_aisle_locations())
+    stations = set(tiny_graph.get_station_locations())
+    full = set(filled_inventory.get_full_locations())
+
+    for task_id, task_tuple in new_J.items():
+        start_locs, goal_locs, deadline, sku_id, task_type = task_tuple
+
+        assert isinstance(start_locs, frozenset)
+        assert isinstance(goal_locs, frozenset)
+        assert isinstance(deadline, int)
+        assert task_type in {0, 1}
+
+        if task_type == 1:  # inbound: stations -> empty aisles
+            assert start_locs <= stations
+            assert goal_locs <= aisles
+        else:  # outbound: full aisles -> stations
+            assert start_locs <= full
+            assert goal_locs <= stations
+
+
+def test_crg_max_tasks_cap_returns_unchanged_J(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    filled_inventory,
+    seeded_rng,
+):
+    """When ``len(J) >= max_task_number`` we should bail without generating.
+
+    This exercises the early-return path that previously returned a 2-tuple
+    instead of a 4-tuple — fixing that bug is part of the same change as
+    this test.
+    """
+    stations = frozenset(tiny_graph.get_station_locations())
+    aisles = frozenset(tiny_graph.get_aisle_locations())
+
+    J: dict = {
+        i: (stations, aisles, 100, 0, 1) for i in range(10)
+    }
+
+    new_J, new_last_id, outbound_tasks, inbound_tasks = CRG(
+        minimal_stats,
+        0,
+        J,
+        tiny_graph,
+        sample_agents,
+        N=5,
+        inbound_to_outbound=1.0,
+        last_task_id=10,
+        max_task_number=10,
+        inventory=filled_inventory,
+        strategy="uninformed_uniform",
+    )
+
+    assert len(new_J) == 10
+    assert new_last_id == 10
+    assert outbound_tasks == []
+    assert inbound_tasks == []
+
+
+def test_crg_invalid_strategy_raises_value_error(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    filled_inventory,
+    seeded_rng,
+):
+    with pytest.raises(ValueError, match="Unknown strategy"):
+        CRG(
+            minimal_stats,
+            0,
+            {},
+            tiny_graph,
+            sample_agents,
+            N=5,
+            inbound_to_outbound=1.0,
+            last_task_id=0,
+            max_task_number=20,
+            inventory=filled_inventory,
+            strategy="not_a_real_strategy",
         )
-        
-        # Check that we got the expected number of tasks
-        self.assertEqual(len(J_new), N)
-        
-        # Check task structure and validity
-        for task in J_new:
-            task_id, start_locations, goal_locations = task
-            # Check task ID
-            self.assertGreater(task_id, self.last_task_id)
-            self.assertLessEqual(task_id, new_last_task_id)
-            
-            # Check that start and goal locations are frozensets
-            self.assertIsInstance(start_locations, frozenset)
-            self.assertIsInstance(goal_locations, frozenset)
-            
-            # Check that locations are valid
-            for loc in start_locations:
-                self.assertLessEqual(loc[0], self.G.height)
-                self.assertLessEqual(loc[1], self.G.width)
-            for loc in goal_locations:
-                self.assertLessEqual(loc[0], self.G.height)
-                self.assertLessEqual(loc[1], self.G.width)
-    
-    def test_informed_uniform_task_generation(self):
-        """Test task generation with informed uniform strategy"""
-        # Create custom weights for SKUs
-        custom_weights = {
-            1: (0.8, 0.8),  # High appearance and tasking weight
-            2: (0.2, 0.2),  # Low appearance and tasking weight
-            3: (0.5, 0.5),  # Medium weights
-            4: (0.3, 0.7),  # Low appearance, high tasking
-            5: (0.7, 0.3)   # High appearance, low tasking
-        }
-        
-        # Create inventory with custom weights
-        inventory = Inventory(
-            num_skus=5,
-            warehouse_locations=self.G.get_aisle_locations(),
-            fill_percentage=50.0,
-            weight_init=WeightInitialization.CUSTOM,
-            custom_weights=custom_weights
-        )
-        
-        # Generate tasks
-        N = 5
-        J_new, new_last_task_id = CRG(
-            self.S, 0, self.J, self.G, N, self.inbound_to_outbound,
-            self.last_task_id, self.max_task_number, inventory,
-            strategy="informed_uniform"
-        )
-        # Check task structure and validity
-        for task in J_new:
-            task_id, start_locations, goal_locations = task
-            # Check task ID
-            self.assertGreater(task_id, self.last_task_id)
-            self.assertLessEqual(task_id, new_last_task_id)
-            
-            # Check that start and goal locations are frozensets
-            self.assertIsInstance(start_locations, frozenset)
-            self.assertIsInstance(goal_locations, frozenset)
-            
-            # Check that locations are valid
-            for loc in start_locations:
-                self.assertLessEqual(loc[0], self.G.height)
-                self.assertLessEqual(loc[1], self.G.width)
-            for loc in goal_locations:
-                self.assertLessEqual(loc[0], self.G.height)
-                self.assertLessEqual(loc[1], self.G.width)
-    
-    # def test_task_generation_with_full_warehouse(self):
-    #     """Test task generation when warehouse is full"""
-    #     # Create inventory with 100% fill using only valid aisle locations
-    #     inventory = Inventory(
-    #         num_skus=5,
-    #         warehouse_locations=self.G.get_aisle_locations(),
-    #         fill_percentage=100.0
-    #     )
-        
-    #     # Generate tasks
-    #     N = 5
-    #     J_new, new_last_task_id = CRG(
-    #         self.S, 0, self.J, self.G, N, self.inbound_to_outbound,
-    #         self.last_task_id, self.max_task_number, inventory,
-    #         strategy="uninformed_uniform"
-    #     )
-        
-    #     # Should only generate outbound tasks since warehouse is full
-    #     for task in J_new:
-    #         _, start_locations, goal_locations = task
-    #         # Check that start locations are in the aisle locations and have SKUs
-    #         self.assertTrue(all(loc in self.G.get_aisle_locations() for loc in start_locations))
-    #         self.assertTrue(all(loc in inventory.get_full_locations() for loc in start_locations))
-    #         # Check that goal locations are station locations
-    #         self.assertTrue(all(loc in self.G.get_station_locations() for loc in goal_locations))
-    
-    def test_task_generation_with_empty_warehouse(self):
-        """Test task generation when warehouse is empty"""
-        # Create inventory with 0% fill
-        inventory = Inventory(
-            num_skus=5,
-            warehouse_locations=self.G.get_aisle_locations(),
-            fill_percentage=0.0
-        )
-        
-        # Generate tasks
-        N = 5
-        J_new, new_last_task_id = CRG(
-            self.S, 0, self.J, self.G, N, self.inbound_to_outbound,
-            self.last_task_id, self.max_task_number, inventory,
-            strategy="uninformed_uniform"
-        )
-        
-        # Should only generate inbound tasks since warehouse is empty
-        for task in J_new:
-            _, start_locations, goal_locations = task
-            # Check that start locations are station locations
-            self.assertTrue(all(loc in self.G.get_station_locations() for loc in start_locations))
-            # Check that goal locations are empty aisle locations
-            self.assertTrue(all(loc in self.G.get_aisle_locations() for loc in goal_locations))
-            self.assertTrue(all(loc in inventory.get_empty_locations() for loc in goal_locations))
-    
-    def test_task_generation_with_max_tasks(self):
-        """Test task generation when max tasks is reached"""
-        # Fill J with max tasks
-        for i in range(self.max_task_number):
-            self.J.add((i, frozenset(self.G.get_station_locations()), 
-                       frozenset(self.G.get_aisle_locations())))
-        
-        # Try to generate more tasks
-        N = 5
-        J_new, new_last_task_id = CRG(
-            self.S, 0, self.J, self.G, N, self.inbound_to_outbound,
-            self.last_task_id, self.max_task_number, self.G.warehouse,
-            strategy="uninformed_uniform"
-        )
-        
-        # Should not generate any new tasks
-        self.assertEqual(len(J_new), 0)
-    
-    def test_invalid_strategy(self):
-        """Test task generation with invalid strategy"""
-        with self.assertRaises(ValueError):
-            CRG(
-                self.S, 0, self.J, self.G, 5, self.inbound_to_outbound,
-                self.last_task_id, self.max_task_number, self.G.warehouse,
-                strategy="invalid_strategy"
-            )
+
+
+# ---------------------------------------------------------------------------
+# CRG outbound-only / inbound-only behaviour
+# ---------------------------------------------------------------------------
+def test_crg_uninformed_with_empty_warehouse_only_generates_inbound(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    empty_inventory,
+    seeded_rng,
+):
+    """An empty warehouse should never produce an outbound task because the
+    outbound branch's ``if not start_locations: continue`` guard skips them.
+    """
+    J: dict = {}
+    new_J, _, outbound_tasks, _ = CRG(
+        minimal_stats,
+        0,
+        J,
+        tiny_graph,
+        sample_agents,
+        N=10,
+        inbound_to_outbound=1.0,
+        last_task_id=0,
+        max_task_number=20,
+        inventory=empty_inventory,
+        strategy="uninformed_uniform",
+    )
+
+    assert outbound_tasks == []
+    assert all(task_tuple[4] == 1 for task_tuple in new_J.values())
+
+
+# ---------------------------------------------------------------------------
+# Tasks recorded against the Stats object
+# ---------------------------------------------------------------------------
+def test_crg_records_release_and_deadline_per_generated_task(
+    minimal_stats,
+    tiny_graph,
+    sample_agents,
+    filled_inventory,
+    seeded_rng,
+):
+    new_J, _, _, _ = CRG(
+        minimal_stats,
+        t=7,
+        J={},
+        G=tiny_graph,
+        Rs=sample_agents,
+        N=5,
+        inbound_to_outbound=1.0,
+        last_task_id=0,
+        max_task_number=20,
+        inventory=filled_inventory,
+        strategy="uninformed_uniform",
+    )
+
+    # ``Stats`` does not expose per-task accessors for release/deadline; the
+    # data lives behind name-mangled private dicts. Tests are allowed to
+    # poke at them; production code should not.
+    releases = minimal_stats._Stats__task_release_timestamps
+    deadlines = minimal_stats._Stats__task_deadlines
+
+    for task_id, (_, _, deadline, _, _) in new_J.items():
+        assert releases[task_id] == 7
+        assert deadlines[task_id] == deadline

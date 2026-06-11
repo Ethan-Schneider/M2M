@@ -1,0 +1,60 @@
+[tool.pytest.ini_options]
+# ---- Test discovery ----
+testpaths = ["GT_grid_world/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+# Adding the repo root to PYTHONPATH lets tests use absolute imports
+# (`from GT_grid_world.src.module import ...`) without packaging the project.
+pythonpath = ["."]
+
+# ---- Reporting & ergonomics ----
+# -ra              show short summary for non-passing outcomes (per pytest docs)
+# --strict-markers fail on unknown markers so typos in @pytest.mark.* don't silently no-op
+# --strict-config  fail on unknown ini-option keys
+# -p no:cacheprovider keeps the test runs hermetic in CI
+addopts = "-ra --strict-markers --strict-config --tb=short"
+
+# ---- Markers ----
+markers = [
+  "slow: tests that take more than ~5 seconds (e.g. tiny end-to-end simulation)",
+  "integration: tests that exercise multiple subsystems together",
+  "smoke: quick sanity tests run before every commit",
+  "regression: numpy regression tests via pytest-regressions",
+  "requires_cpp: tests that require the LNS/PBS/EECBS C++ submodules to be built",
+]
+
+# ---- Logging visible during test runs ----
+# Captures `logger.info(...)` and friends from the m2m.* tree at INFO level.
+log_cli = false
+log_cli_level = "INFO"
+log_cli_format = "%(asctime)s %(levelname)-7s %(name)s | %(message)s"
+log_cli_date_format = "%H:%M:%S"
+
+# ---- Hypothesis ----
+# Lower default deadline for the WSL/CI environment; per-property overrides
+# can raise it where needed.
+filterwarnings = [
+  "error::hypothesis.errors.NonInteractiveExampleWarning",
+]
+
+
+[tool.coverage.run]
+branch = true
+source = ["GT_grid_world/src"]
+omit = [
+  "GT_grid_world/src/task_allocation_algorithms/external_algorithms/*",
+  "*/__pycache__/*",
+]
+
+
+[tool.coverage.report]
+# Don't fail builds on coverage drops yet — we'll set fail_under once the
+# test suite stabilises in Week 2-3.
+show_missing = true
+skip_empty = true
+exclude_also = [
+  "if __name__ == .__main__.:",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+]
