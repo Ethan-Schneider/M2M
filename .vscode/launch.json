@@ -1,0 +1,66 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false
+    },
+    {
+      "name": "M2M: GT_grid_world (small test)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/GT_grid_world/GT_grid_world.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false,
+      "args": [
+        "--seed", "0",
+        "--num-robots", "5",
+        "--time-horizon", "30",
+        "--max-tasks", "20",
+        "--task-gen-strategy", "feedback_control",
+        "--initial-task-assign-strategy", "fast_greedy",
+        "--improvement-task-assign-strategy", "c_lns",
+        "--path-planning-strategy", "pbs",
+        "--map", "data/maps/study_small_restricted",
+        "--frequency", "0.25",
+        "--inbound-outbound-ratio", "1.0",
+        "--num-skus", "10",
+        "--initial-inventory", "30.0",
+        "--weight-init-method", "uniform",
+        "--cost-calculation-method", "shortest_path",
+        "--deadline-generation-method", "normal",
+        "--deadline-offset", "60"
+      ]
+    },
+    {
+      "name": "Pytest: Current File",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["${file}", "-v", "-s", "--no-header"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false
+    },
+    {
+      "name": "Pytest: Full Suite",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["GT_grid_world/tests", "-v"],
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "justMyCode": false
+    }
+  ]
+}

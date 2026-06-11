@@ -1,0 +1,28 @@
+# Development and testing dependencies for the M2M proactive rearrangement project.
+# Install alongside requirements.txt:
+#   pip install -r requirements.txt -r requirements-dev.txt
+#
+# Versions match what was installed and verified in the .venv on 2026-06-11.
+# Bumping major versions should be done deliberately and re-verified.
+
+# --- Profiling and debugging ---
+scalene==2.3.0
+ipdb==0.13.13
+icecream==2.2.0
+snoop==0.6.0
+viztracer==1.1.1
+# debugpy is already pinned in requirements.txt
+
+# --- Experiment orchestration ---
+joblib==1.5.3
+hydra-core==1.3.3
+pingouin==0.6.1
+
+# --- Testing toolchain ---
+pytest==9.0.3
+pytest-cov==7.1.0
+pytest-mock==3.15.1
+pytest-xdist==3.8.0
+pytest-regressions==2.11.0
+hypothesis[numpy]==6.155.2
+freezegun==1.5.5
