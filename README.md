@@ -1,6 +1,6 @@
-# symbotic_tamp
+# M2M
 
-Task allocation and multi-agent path planning simulator for warehouse robotics, developed at Georgia Tech.
+Task allocation and multi-agent path planning simulator for warehouse robotics, developed at Georgia Tech. Paper was published in ICRA 2026: {[M2M](https://arxiv.org/pdf/2605.07835)} and was sponsored by [Symbotic](https://www.symbotic.com/).
 
 ---
 
