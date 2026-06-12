@@ -323,6 +323,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         
         # Log SKU locations per timestep
         S.append_sku_locations(G.warehouse, G.driveway, G.warehouse.get_all_skus().__len__())
+
+        # Roadmap 1.7: per-timestep SKU Spread metric (hierarchical entropy
+        # weighted by per-SKU count, clustered by aisle column).
+        S.append_sku_spread(G.warehouse, G.warehouse.get_all_skus().__len__(), G.get_aisle_locations())
         
         # Record agent statuses and goal locations for this timestep
         S.add_agent_statuses_and_goals(Rs)

@@ -1,0 +1,144 @@
+#!/bin/bash
+
+# M2M baseline experiment runner -- roadmap section 1.7 deliverable.
+#
+# Sweeps the M2M baseline (no rearrangement, no dual cycling) across the
+# inventory-density variants planned in roadmap 1.7 / plan section 6:
+#
+#   * densities      : 30%, 60%, 90%
+#   * agent counts   : 10, 25, 40
+#   * maps           : study_small_restricted (one to start; expand the
+#                      `maps` array to add more without changing structure)
+#
+# This is the M2M baseline condition only -- one of the four baselines in
+# the experimental matrix (M2M, LNS-PBS, CENTRAL, HBH+MLA*) and one of the
+# three conditions per baseline (baseline alone, +crM2M, +irM2M). The other
+# baselines and rearrangement conditions get their own scripts as those
+# implementations land in later phases.
+#
+# Sibling script `run_experiments.sh` is kept as the single-config example
+# / smoke runner; this script is the parameter-sweep entrypoint.
+#
+# Per-run output: `data/raw_data/<long-config-string>.json` containing all
+# per-timestep series including `sku_spread_per_timestep` (added in 1.7).
+
+# Init absolute path
+parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
+repo_root="$parent_path/.."
+
+# Create output directories if they don't exist
+mkdir -p "$repo_root/data/raw_data"
+mkdir -p "$repo_root/data/buffer_data"
+mkdir -p "$repo_root/data/videos"
+
+# ---------------------------------------------------------------------------
+# Sweep axes (roadmap 1.7)
+# ---------------------------------------------------------------------------
+# Inventory density variants (% fill of warehouse aisles at t=0).
+initial_inventory=(30.0 60.0 90.0)
+
+# Agent counts to sweep across.
+num_robots=(10 25 40)
+
+# Maps to sweep across. Add more entries here to widen the sweep.
+maps=("$repo_root/data/maps/study_small_restricted")
+
+# Random seeds. Keep this small while iterating; widen for the real run.
+seeds=(900)
+
+# ---------------------------------------------------------------------------
+# Fixed M2M-baseline parameters (no rearrangement, no dual cycling)
+# ---------------------------------------------------------------------------
+time_horizons=(60)
+max_tasks=(120)
+frequencies=(0.25)
+inbound_outbound_ratio=1.0
+num_skus=(30)
+weight_init_method="uniform"
+task_gen_strategy="feedback_control"
+initial_task_assign_strategy="fast_greedy"
+improvement_task_assign_strategy="c_lns"
+cost_calculation_method="shortest_path"
+path_planning_strategy="pbs"
+removal_operator="shaw"
+repair_operator="greedy"
+acceptance_function="simulated_annealing"
+T_0=1.0
+alpha=0.99
+deadline_generation_method="normal"
+deadline_offset=180
+output_intermediate_data=False
+intermediate_data_interval=4000
+base_cost_weight=1.0
+deadline_weight=0.0
+sku_distribution_weight=0.0
+agent_unallocated_penalty=5.0
+solution_repair_detection_function="none"
+solution_repair_function="none"
+shuffle_percentage=0.0       # baseline: no rearrangement tasks
+# Dual-cycling flags omitted -> default off (baseline condition).
+
+# ---------------------------------------------------------------------------
+# Sweep
+# ---------------------------------------------------------------------------
+for seed in "${seeds[@]}"; do
+    for map in "${maps[@]}"; do
+        for robots in "${num_robots[@]}"; do
+            for inventory in "${initial_inventory[@]}"; do
+                for T in "${time_horizons[@]}"; do
+                    for max_task in "${max_tasks[@]}"; do
+                        for frequency in "${frequencies[@]}"; do
+                            for num_sku in "${num_skus[@]}"; do
+                                echo "----------------------------------------"
+                                echo "M2M baseline sweep:"
+                                echo "  seed=$seed map=$(basename "$map")"
+                                echo "  robots=$robots density=${inventory}% T=$T"
+                                echo "  max_tasks=$max_task freq=$frequency num_skus=$num_sku"
+                                echo "----------------------------------------"
+
+                                python3 "$parent_path/GT_grid_world.py" \
+                                    --seed "$seed" \
+                                    --num-robots "$robots" \
+                                    --time-horizon "$T" \
+                                    --max-tasks "$max_task" \
+                                    --task-gen-strategy "$task_gen_strategy" \
+                                    --initial-task-assign-strategy "$initial_task_assign_strategy" \
+                                    --improvement-task-assign-strategy "$improvement_task_assign_strategy" \
+                                    --path-planning-strategy "$path_planning_strategy" \
+                                    --time-limit 86400 \
+                                    --initial-inventory "$inventory" \
+                                    --frequency "$frequency" \
+                                    --inbound-outbound-ratio "$inbound_outbound_ratio" \
+                                    --num-skus "$num_sku" \
+                                    --weight-init-method "$weight_init_method" \
+                                    --map "$map" \
+                                    --cost-calculation-method "$cost_calculation_method" \
+                                    --removal-operator "$removal_operator" \
+                                    --repair-operator "$repair_operator" \
+                                    --acceptance-function "$acceptance_function" \
+                                    --T-0 "$T_0" \
+                                    --alpha "$alpha" \
+                                    --deadline-generation-method "$deadline_generation_method" \
+                                    --deadline-offset "$deadline_offset" \
+                                    $( [ "$output_intermediate_data" = "True" ] && echo --output-intermediate-data ) \
+                                    --intermediate-data-interval "$intermediate_data_interval" \
+                                    --base-cost-weight "$base_cost_weight" \
+                                    --deadline-weight "$deadline_weight" \
+                                    --sku-distribution-weight "$sku_distribution_weight" \
+                                    --agent-unallocated-penalty "$agent_unallocated_penalty" \
+                                    --solution-repair-detection-function "$solution_repair_detection_function" \
+                                    --solution-repair-function "$solution_repair_function" \
+                                    --shuffle-percentage "$shuffle_percentage"
+
+                                # Optional: small delay between runs.
+                                sleep 1
+                            done
+                        done
+                    done
+                done
+            done
+        done
+    done
+done
+
+echo "M2M baseline sweep complete."

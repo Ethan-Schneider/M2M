@@ -5,6 +5,72 @@ from ..utils import *
 from .graphing import *
 from ..agent import *
 
+
+def compute_sku_spread(eta: np.ndarray) -> float:
+    """Hierarchical SKU-spread metric (entropy weighted by per-SKU count).
+
+    Roadmap section 1.7. Plan section 3.6 defines this as one of the three
+    primary metrics for the experimental matrix:
+
+        EZC = SUM_i N_i * H_i
+        where N_i  = sum over c of eta[i, c]   (total instances of SKU i)
+              H_i  = -SUM_c (eta[i, c] / N_i) * ln(eta[i, c] / N_i)
+                     (Shannon entropy of SKU i's spatial distribution)
+
+    The intuition: H_i alone tells you how spread-out SKU i is across the
+    chosen spatial clusters; weighting by N_i emphasises SKUs that have
+    more inventory (a single instance of a rare SKU contributes less to
+    overall warehouse health than a well-spread common SKU). Higher EZC
+    means the inventory is well-scattered; lower EZC means SKUs are
+    concentrated in a few clusters. EZC == 0 either when the inventory is
+    empty or when every SKU sits entirely in one cluster.
+
+    Parameters
+    ----------
+    eta : np.ndarray, shape (num_skus, num_clusters)
+        ``eta[i, c]`` is the number of instances of SKU ``i`` in spatial
+        cluster ``c``. Counts may be int or float. The cluster grouping is
+        the *caller's* choice -- ``Stats.append_sku_spread`` clusters by
+        warehouse aisle column, but a different grouping (rail, bay, ...)
+        could be substituted without changing this function.
+
+    Returns
+    -------
+    float
+        Always ``>= 0``. Returns ``0.0`` for empty matrices and for
+        all-empty inventory.
+
+    Notes
+    -----
+    The formula matches the EZC expression in plan section 3.6. It is *not*
+    copied from STAR (handoff sections 2 / 23: STAR's objective is
+    proprietary and is not the source of any math here); the entropy form
+    is standard Shannon entropy applied to per-SKU placement distributions.
+    """
+    eta = np.asarray(eta, dtype=np.float64)
+    if eta.size == 0 or eta.ndim != 2:
+        return 0.0
+
+    N = eta.sum(axis=1)
+    has_inventory = N > 0
+    if not has_inventory.any():
+        return 0.0
+
+    eta_active = eta[has_inventory]
+    N_active = N[has_inventory][:, None]
+
+    p = eta_active / N_active
+    # Mask zero entries BEFORE taking the log so we never compute log(0).
+    # log(1.0) = 0, and 0 * 0 = 0, so zero-probability cells contribute zero
+    # to the entropy sum -- the standard 0*log(0) := 0 convention, expressed
+    # without a divide-by-zero / log-of-zero RuntimeWarning.
+    p_safe = np.where(p > 0, p, 1.0)
+    plogp = p * np.log(p_safe)
+    H = -plogp.sum(axis=1)
+
+    return float((N_active.squeeze(-1) * H).sum())
+
+
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
@@ -159,6 +225,9 @@ class Stats:
         self.__sku_centroids_per_timestep = []
         # Locations of each SKU per timestep
         self.__sku_locations_per_timestep = []
+        # SKU Spread (hierarchical entropy) per timestep -- roadmap 1.7 / plan 3.6.
+        # Computed by ``append_sku_spread`` clustered by warehouse aisle column.
+        self.__sku_spread_per_timestep = []
         
         # SKU Agents carrying over time
         
@@ -762,6 +831,7 @@ class Stats:
             "overdue_task_completions": self.__overdue_task_completions,
             "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
             "sku_locations_per_timestep": self.__sku_locations_per_timestep,
+            "sku_spread_per_timestep": self.__sku_spread_per_timestep,
             "num_improved_assignments": self.__num_improved_assignments,
             "num_worse_assignments": self.__num_worse_assignments,
             "num_same_assignments": self.__num_same_assignments,
@@ -937,6 +1007,39 @@ class Stats:
                 centroid = None
             centroids.append(centroid)
         self.__sku_centroids_per_timestep.append(centroids)
+
+    def append_sku_spread(self, warehouse, num_skus, aisle_locations):
+        """Snapshot the warehouse SKU-spread metric for this timestep.
+
+        Builds the ``(num_skus, num_columns)`` count matrix ``eta`` from the
+        warehouse's current contents (clusters = warehouse aisle columns)
+        and calls ``compute_sku_spread``. Aisles in M2M maps are vertical
+        column corridors so "same aisle" = "same column index" -- this
+        matches the convention used by ``Graph.get_same_aisle_locations``.
+
+        Roadmap 1.7. Per-cluster grouping is fixed to "by aisle column" for
+        now to match the natural M2M warehouse layout; alternative
+        groupings (e.g. rail, multi-aisle bay) can be added as separate
+        helpers without changing the existing append path.
+
+        SKU IDs are 1-indexed in M2M's ``Inventory`` (``range(1, num_skus + 1)``).
+        """
+        if num_skus is None or num_skus <= 0 or not aisle_locations:
+            self.__sku_spread_per_timestep.append(0.0)
+            return
+
+        columns = sorted({loc[1] for loc in aisle_locations})
+        col_to_idx = {col: idx for idx, col in enumerate(columns)}
+
+        eta = np.zeros((num_skus, len(columns)), dtype=np.int64)
+        for sku_local in range(num_skus):
+            sku_id = sku_local + 1
+            for loc in warehouse.get_sku_instances(sku_id):
+                col = loc[1]
+                if col in col_to_idx:
+                    eta[sku_local, col_to_idx[col]] += 1
+
+        self.__sku_spread_per_timestep.append(compute_sku_spread(eta))
 
     def append_sku_locations(self, warehouse, driveway, num_skus):
         """Log the locations of each SKU for this timestep."""
