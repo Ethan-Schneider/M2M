@@ -4,6 +4,9 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
 from ...utils import manhattan_distance
+from ..initial_solutions.construct_cost_elements import (
+    per_task_type_sku_distribution_term,
+)
 
 import time
 
@@ -12,6 +15,8 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
                  method: str = "manhattan", J: Dict[int, Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  inbound_sku_distribution_costs: np.ndarray = None, outbound_sku_distribution_costs: np.ndarray = None,
+                 rearrangement_sku_distribution_costs: np.ndarray = None,
+                 task_deadline_costs: np.ndarray = None,
                  base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
                  agent_task_sequence_time: np.ndarray = None, current_time: int = 0, agent_task_sequence_limit: int = -1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
@@ -88,26 +93,31 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
 
-            # Calculate base costs with deadline and agent_task_sequence_time considerations
-            # deadline = J[idx_to_task_id[int(n)]][2]
-            # if deadline_weight > 0.0:
-            #     # If deadline has not passed
-            #     if deadline - current_time > 0:
-            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            #     # If deadline has passed
-            #     else:
-            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            # else:
-            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
+            # 1.6: base cost includes the agent's already-queued task time so a busy
+            # agent looks more expensive than an idle one at equal per-task cost.
+            base_costs = base_cost_weight * (
+                agent_costs[:, :, None]
+                + sg_costs[None, :, :]
+                + agent_task_sequence_time[:, None, None]
+            )
 
-            if sku_distribution_weight > 0:
-                # Add sku distribution costs
-                if J[idx_to_task_id[int(n)]][4] == 1:
-                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+            # 1.6: tardiness term as a per-task scalar broadcast across (M, P, Q).
+            if deadline_weight > 0.0 and task_deadline_costs is not None:
+                base_costs = base_costs + deadline_weight * task_deadline_costs[n]
+
+            # 1.6: per-task-type SKU-distribution placement quality (three-way dispatch).
+            if sku_distribution_weight > 0.0:
+                task_type = J[idx_to_task_id[int(n)]][4]
+                sku_term, axis = per_task_type_sku_distribution_term(
+                    task_type, n, valid_p, valid_q,
+                    inbound_sku_distribution_costs=inbound_sku_distribution_costs,
+                    outbound_sku_distribution_costs=outbound_sku_distribution_costs,
+                    rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
+                )
+                if axis == "goals":
+                    total_costs = base_costs + sku_distribution_weight * sku_term[None, None, :]
                 else:
-                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+                    total_costs = base_costs + sku_distribution_weight * sku_term[None, :, None]
             else:
                 total_costs = base_costs
             

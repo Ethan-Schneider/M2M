@@ -7,20 +7,22 @@ from ...agent import AgentLoader
 # Task type codes mirror those in case_request_generator.py / simulate.py:
 #   0 = outbound (warehouse -> driveway)
 #   1 = inbound  (driveway  -> warehouse)
-#   2 = shuffle  (warehouse -> warehouse)
+#   2 = shuffle  (warehouse -> warehouse) -- the M2M name for a rearrangement task
 TASK_TYPE_OUTBOUND = 0
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2
 
-# Task types whose pickup is a warehouse SKU instance (so the outbound-style
-# SKU-distribution cost over start_locs applies). The proper rearrangement
-# objective for type=2 is roadmap section 1.6; for the 1.4 skeleton we let
-# shuffle inherit the outbound cost so allocation produces finite values
-# instead of np.inf.
+# Task types whose pickup is a warehouse SKU instance. Used by simulate.py's
+# `_refresh_tasks_after_warehouse_change` to know which start_locs need to
+# be re-derived when warehouse occupancy changes. We *do not* use this set to
+# decide which SKU-distribution matrix to populate any more (1.6 split shuffle
+# out of the outbound matrix into its own rearrangement matrix), but the
+# physical-pickup-from-warehouse semantics it captures are unchanged.
 WAREHOUSE_PICKUP_TASK_TYPES = frozenset({TASK_TYPE_OUTBOUND, TASK_TYPE_SHUFFLE})
 
-# Task types whose dropoff is a warehouse-empty cell (so the inbound-style
-# SKU-distribution cost over goal_locs applies). Same skeleton-vs-1.6 caveat.
+# Task types whose dropoff is a warehouse-empty cell. Same comment as above:
+# kept for refresh-side bookkeeping; the cost matrices now branch by exact
+# task type rather than by membership in this set.
 WAREHOUSE_DROPOFF_TASK_TYPES = frozenset({TASK_TYPE_INBOUND, TASK_TYPE_SHUFFLE})
 
 
@@ -29,28 +31,80 @@ def manhattan_distance(loc1: Tuple[int, int], loc2: Tuple[int, int]) -> int:
     return abs(loc1[0] - loc2[0]) + abs(loc1[1] - loc2[1])
 
 def calculate_deadline_cost(deadline: int, current_time: int) -> int:
-    """
-    Calculate deadline-based urgency cost using piecewise function.
-    
-    Args:
-        deadline: Task deadline (integer timestep)
-        current_time: Current timestep
-    
-    Returns:
-        Positive integer cost based on deadline urgency
+    """Deadline-based urgency cost.
+
+    Piecewise linear (NOT quadratic, despite earlier docstring claims):
+
+    - ``time_until_deadline > 60``      -> 0 (no urgency yet)
+    - ``0 < time_until_deadline <= 60`` -> ``60 - time_until_deadline`` (linear ramp;
+      reaches 60 right at the deadline)
+    - ``time_until_deadline <= 0``      -> ``60 + |time_until_deadline|`` (continues
+      linearly past the deadline)
+
+    The 60-timestep window and the linear shape match Ethan's
+    ``local_task_reallocation`` design; the math here is ported, not
+    redesigned. Roadmap 1.6 wires this into the allocator's ``total_costs``
+    via the ``deadline_weight`` knob; the proper non-linear / per-task-type
+    tardiness shaping (if any) is left to a future iteration with Ethan.
     """
     time_until_deadline = deadline - current_time
-    
+
     if time_until_deadline > 60:
-        # Deadline is far in the future, no urgency cost
         return 0
     elif time_until_deadline > 0:
-        # Deadline is approaching, linear cost
-        return int(60 - time_until_deadline)  # Linear increase as deadline approaches
+        return int(60 - time_until_deadline)
     else:
-        # Deadline has passed, quadratic cost
         overdue_time = abs(time_until_deadline)
-        return int(60 + overdue_time)  # Quadratic penalty for overdue tasks
+        return int(60 + overdue_time)
+
+
+def per_task_type_sku_distribution_term(
+    task_type: int,
+    n: int,
+    valid_p: np.ndarray,
+    valid_q: np.ndarray,
+    *,
+    inbound_sku_distribution_costs: np.ndarray,
+    outbound_sku_distribution_costs: np.ndarray,
+    rearrangement_sku_distribution_costs: np.ndarray,
+) -> Tuple[np.ndarray, str]:
+    """Return the per-task-type SKU-distribution cost vector for task ``n``.
+
+    This is the single source of truth for the per-task-type objective dispatch
+    (roadmap section 1.6 / plan 3.4). Each task type pulls its placement-quality
+    term from a different matrix:
+
+    - ``TASK_TYPE_INBOUND``: use the inbound-style matrix indexed over goal cells.
+      Returns shape ``(|valid_q|,)`` and axis tag ``"goals"``.
+    - ``TASK_TYPE_OUTBOUND``: use the outbound-style matrix indexed over start
+      cells. Returns shape ``(|valid_p|,)`` and axis tag ``"starts"``.
+    - ``TASK_TYPE_SHUFFLE``: use the rearrangement matrix indexed over start
+      cells. The rearrangement matrix is currently a placeholder mirroring the
+      outbound formula because the proper rearrangement objective is TBD with
+      Ethan; the dispatch is named explicitly so a future math change lands
+      in *one* place. Returns shape ``(|valid_p|,)`` and axis tag ``"starts"``.
+
+    The caller is responsible for shape-broadcasting the vector against its
+    own ``base_costs`` tensor: ``"goals"`` broadcasts along the Q axis,
+    ``"starts"`` along the P axis.
+
+    Raises ``ValueError`` for unknown task types -- intentional: the
+    "uniform penalization problem" the per-task-type architecture exists to
+    solve (handoff section 13) means silently falling through to a default
+    matrix would be a regression.
+    """
+    if task_type == TASK_TYPE_INBOUND:
+        return inbound_sku_distribution_costs[n, valid_q], "goals"
+    if task_type == TASK_TYPE_OUTBOUND:
+        return outbound_sku_distribution_costs[n, valid_p], "starts"
+    if task_type == TASK_TYPE_SHUFFLE:
+        return rearrangement_sku_distribution_costs[n, valid_p], "starts"
+    raise ValueError(
+        f"Unknown task type {task_type!r} in per-task-type objective dispatch. "
+        f"Expected one of: {{TASK_TYPE_INBOUND={TASK_TYPE_INBOUND}, "
+        f"TASK_TYPE_OUTBOUND={TASK_TYPE_OUTBOUND}, "
+        f"TASK_TYPE_SHUFFLE={TASK_TYPE_SHUFFLE}}}."
+    )
 
 def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
@@ -183,47 +237,71 @@ def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, curr
     for n, task_id in enumerate(unallocated_task_ids):
         task_deadline_costs[n] = calculate_deadline_cost(J[task_id][2], current_time)
 
-    # 6. Build (N, Q) inbound-style SKU distribution cost matrix.
-    # Populated for tasks that drop off into the warehouse (inbound and
-    # shuffle). Defaults to np.inf elsewhere so the allocator skips invalid
-    # combos. Skeleton note for 1.4: shuffle reuses the inbound-style cost
-    # here as a placeholder; the dedicated rearrangement objective lands in
-    # roadmap section 1.6.
+    # 6. Build (N, Q) inbound-style SKU-distribution cost matrix.
+    # Populated for inbound tasks ONLY. Defaults to np.inf elsewhere so the
+    # per-task-type dispatch in `per_task_type_sku_distribution_term` plus
+    # the allocator's argmin will skip invalid combos. (1.6 split: shuffle
+    # used to be populated here too in 1.4 as a skeleton; it now has its
+    # own rearrangement matrix below.)
     inbound_sku_distribution_costs = np.full((N, Q), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
-        task_type = J[task_id][4]
-        if task_type in WAREHOUSE_DROPOFF_TASK_TYPES:
-            for q in J[task_id][1]:
-                if q not in unusable_locs:
-                    j = goal_loc_to_idx[q]
-                    inbound_sku_distribution_costs[n, j] = -1*G.query_sku_KD_trees(J[task_id][3], goal_locs[j], 1)[0]
+        if J[task_id][4] != TASK_TYPE_INBOUND:
+            continue
+        for q in J[task_id][1]:
+            if q in unusable_locs:
+                continue
+            j = goal_loc_to_idx[q]
+            inbound_sku_distribution_costs[n, j] = -1 * G.query_sku_KD_trees(J[task_id][3], goal_locs[j], 1)[0]
 
-    # 7. Build (N, P) outbound-style SKU distribution cost matrix.
-    # Populated for tasks that pick up from the warehouse (outbound and
-    # shuffle). Same skeleton-vs-1.6 caveat as above. fast_greedy currently
-    # routes any task with type != 1 through this matrix, so populating
-    # type=2 here is what keeps shuffle-task allocation cost finite.
+    # 7. Build (N, P) outbound-style SKU-distribution cost matrix.
+    # Populated for outbound tasks ONLY (1.6 split, see above).
     outbound_sku_distribution_costs = np.full((N, P), np.inf)
     for n, task_id in enumerate(unallocated_task_ids):
-        task_type = J[task_id][4]
-        if task_type in WAREHOUSE_PICKUP_TASK_TYPES:
-            for p in J[task_id][0]:
-                if p not in allocated_locs:
-                    i = start_loc_to_idx[p]
-                    # Second-closest because the closest is the start cell itself.
-                    outbound_sku_distribution_costs[n, i] = G.query_sku_KD_trees(J[task_id][3], start_locs[i], 2)[0][1]
+        if J[task_id][4] != TASK_TYPE_OUTBOUND:
+            continue
+        for p in J[task_id][0]:
+            if p in allocated_locs:
+                continue
+            i = start_loc_to_idx[p]
+            # Second-closest because the closest is the start cell itself.
+            outbound_sku_distribution_costs[n, i] = G.query_sku_KD_trees(J[task_id][3], start_locs[i], 2)[0][1]
 
+    # 7b. Build (N, P) rearrangement SKU-distribution cost matrix (type=2).
+    # PLACEHOLDER for the 1.6 deliverable: this matrix exists so the
+    # per-task-type dispatch has a dedicated branch for shuffle, but the
+    # math currently mirrors the outbound formula (second-nearest same-SKU
+    # neighbour distance) because the proper rearrangement objective is TBD
+    # with Ethan (handoff sections 2 & 13, plan section 3.4 -- "the
+    # rearrangement objective function math is TBD with Ethan; the
+    # infrastructure (per-type if-clauses, cost tensor construction) can be
+    # built now"). When Ethan's math lands, only the BODY of this loop
+    # changes; every consumer already routes type=2 through this matrix via
+    # `per_task_type_sku_distribution_term`.
+    rearrangement_sku_distribution_costs = np.full((N, P), np.inf)
+    for n, task_id in enumerate(unallocated_task_ids):
+        if J[task_id][4] != TASK_TYPE_SHUFFLE:
+            continue
+        for p in J[task_id][0]:
+            if p in allocated_locs:
+                continue
+            i = start_loc_to_idx[p]
+            rearrangement_sku_distribution_costs[n, i] = G.query_sku_KD_trees(J[task_id][3], start_locs[i], 2)[0][1]
 
-    # 8. Build vector of size (M) which includes the estimated time for the agent to complete the task sequence
+    # 8. Build vector of size (M) which includes the estimated time for the agent
+    # to complete its already-allocated task sequence. As of 1.6 this is added
+    # to base_costs so already-busy agents look more expensive than idle ones
+    # (plan 3.4: execution time accounting). The vector is updated in-place by
+    # `fast_greedy_allocation` after each batch assignment.
     agent_task_sequence_time = np.zeros(M)
     for m in range(M):
         if len(Rs.agents[m].task_sequence) == 0:
             continue
         agent_task_sequence_time[m] = G.get_distance(Rs.agents[m].state, Rs.agents[m].task_sequence[0][1])
         for i in range(1, len(Rs.agents[m].task_sequence)):
-            #add the distance between the goal of the previous task and the start of the current task
             agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[i-1][2], Rs.agents[m].task_sequence[i][1])
-            #add the distance between the start of the current task to the goal of the current task
             agent_task_sequence_time[m] += G.get_distance(Rs.agents[m].task_sequence[i][1], Rs.agents[m].task_sequence[i][2])
 
-    return agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time
+    return (agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask,
+            start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs,
+            inbound_sku_distribution_costs, outbound_sku_distribution_costs,
+            rearrangement_sku_distribution_costs, agent_task_sequence_time)

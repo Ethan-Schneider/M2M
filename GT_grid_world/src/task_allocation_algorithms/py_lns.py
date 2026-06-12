@@ -89,7 +89,11 @@ class LNS:
         self.cost_lookup = {}
         
         # Construct initial cost elements
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx,  self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method)
+        (self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask,
+         self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx,
+         self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs,
+         self.rearrangement_sku_distribution_costs, self.agent_task_sequence_time
+         ) = construct_cost_elements(self.J, self.Rs, self.G, self.current_time, self.cost_calculation_method)
         
     def run(self, t: int = None) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
         """
@@ -120,6 +124,7 @@ class LNS:
                                                                         self.task_goal_mask, cost_lookup=self.cost_lookup, task_deadline_costs=self.task_deadline_costs,
                                                                         inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
                                                                         outbound_sku_distribution_costs=self.outbound_sku_distribution_costs,
+                                                                        rearrangement_sku_distribution_costs=self.rearrangement_sku_distribution_costs,
                                                                         base_cost_weight=self.base_cost_weight,
                                                                         deadline_weight=self.deadline_weight,
                                                                         sku_distribution_weight=self.sku_distribution_weight,
@@ -203,6 +208,8 @@ class LNS:
                                                                          self.idx_to_task_id, temp_allocations, self.cost_calculation_method, self.J, temp_cost_lookup,
                                                                          inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
                                                                          outbound_sku_distribution_costs=self.outbound_sku_distribution_costs,
+                                                                         rearrangement_sku_distribution_costs=self.rearrangement_sku_distribution_costs,
+                                                                         task_deadline_costs=self.task_deadline_costs,
                                                                          base_cost_weight=self.base_cost_weight,
                                                                          deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
@@ -211,7 +218,12 @@ class LNS:
                 new_solution, temp_allocations, __, temp_cost_lookup = fast_SCF_repair(self.S, self.G, self.agent_start_cost_tensor, 
                                                                          self.start_goal_dist, self.task_start_mask, self.task_goal_mask, 
                                                                          temp_solution, self.start_locs, self.goal_locs, 
-                                                                         self.idx_to_task_id, temp_allocations, self.cost_calculation_method, temp_cost_lookup)
+                                                                         self.idx_to_task_id, temp_allocations, self.cost_calculation_method, temp_cost_lookup,
+                                                                         J=self.J,
+                                                                         inbound_sku_distribution_costs=self.inbound_sku_distribution_costs,
+                                                                         outbound_sku_distribution_costs=self.outbound_sku_distribution_costs,
+                                                                         rearrangement_sku_distribution_costs=self.rearrangement_sku_distribution_costs,
+                                                                         agent_task_sequence_time=self.agent_task_sequence_time)
             else:
                 print(f"ERROR: Unknown repair operator {self.repair_operator}, using greedy repair")
                 new_solution, temp_allocations, __, temp_cost_lookup = greedy_repair(self.S, self.G, self.agent_start_cost_tensor, self.start_goal_dist, 
@@ -322,7 +334,11 @@ class LNS:
             - goal_locs: List[Tuple[int, int]]
             - idx_to_task_id: Dict[int, int]
         """
-        self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx, self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs, self.agent_task_sequence_time = construct_cost_elements(
+        (self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask,
+         self.start_locs, self.goal_locs, self.idx_to_task_id, self.task_id_to_idx,
+         self.task_deadline_costs, self.inbound_sku_distribution_costs, self.outbound_sku_distribution_costs,
+         self.rearrangement_sku_distribution_costs, self.agent_task_sequence_time
+         ) = construct_cost_elements(
             self.J, current_solution, self.G, self.current_time, self.cost_calculation_method
         )
 
