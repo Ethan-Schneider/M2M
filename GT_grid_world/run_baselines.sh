@@ -11,7 +11,7 @@
 #                      `maps` array to add more without changing structure)
 #
 # This is the M2M baseline condition only -- one of the four baselines in
-# the experimental matrix (M2M, LNS-PBS, CENTRAL, HBH+MLA*) and one of the
+# the experimental matrix (M2M, LNS-PBS, TA-Hybrid, HBH+MLA*) and one of the
 # three conditions per baseline (baseline alone, +crM2M, +irM2M). The other
 # baselines and rearrangement conditions get their own scripts as those
 # implementations land in later phases.
@@ -26,10 +26,35 @@
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 repo_root="$parent_path/.."
 
+# Resolve interpreter: prefer the project venv's Python 3.12 if present.
+# (The system `python3` on some boxes resolves to 3.8, which is too old for
+# this codebase.)
+if [ -x "$repo_root/.venv/bin/python" ]; then
+    PY="$repo_root/.venv/bin/python"
+else
+    PY="python3"
+fi
+
 # Create output directories if they don't exist
 mkdir -p "$repo_root/data/raw_data"
 mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
+
+# ---------------------------------------------------------------------------
+# Wall-clock budget per condition (seconds).
+#
+# This is an exploratory baseline run, not a publication-grade sweep, and we
+# do not yet have GT compute resources, so each (seed, map, robots, density,
+# ...) tuple is capped at 10 minutes of wall-clock. The `--time-limit` flag
+# is enforced by `execute()` in GT_grid_world.py, which returns gracefully
+# after the current timestep completes; `main()` then writes save_data() so
+# per-timestep series (including sku_spread_per_timestep) are preserved.
+#
+# `time_horizons` is set high enough that the wall-clock cap is the binding
+# constraint across every condition; raise it further if any condition starts
+# finishing T timesteps inside the budget.
+# ---------------------------------------------------------------------------
+time_limit=600
 
 # ---------------------------------------------------------------------------
 # Sweep axes (roadmap 1.7)
@@ -49,7 +74,11 @@ seeds=(900)
 # ---------------------------------------------------------------------------
 # Fixed M2M-baseline parameters (no rearrangement, no dual cycling)
 # ---------------------------------------------------------------------------
-time_horizons=(60)
+# Set high so the 10-min wall-clock budget binds first across all conditions.
+# The 10-robot/30%-density smoke test ran ~1.3 s/timestep, so 10 min ~= 460
+# timesteps in the easiest case and fewer in heavier ones; 10000 leaves
+# plenty of headroom.
+time_horizons=(10000)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=1.0
@@ -96,7 +125,7 @@ for seed in "${seeds[@]}"; do
                                 echo "  max_tasks=$max_task freq=$frequency num_skus=$num_sku"
                                 echo "----------------------------------------"
 
-                                python3 "$parent_path/GT_grid_world.py" \
+                                "$PY" "$parent_path/GT_grid_world.py" \
                                     --seed "$seed" \
                                     --num-robots "$robots" \
                                     --time-horizon "$T" \
@@ -105,7 +134,7 @@ for seed in "${seeds[@]}"; do
                                     --initial-task-assign-strategy "$initial_task_assign_strategy" \
                                     --improvement-task-assign-strategy "$improvement_task_assign_strategy" \
                                     --path-planning-strategy "$path_planning_strategy" \
-                                    --time-limit 86400 \
+                                    --time-limit "$time_limit" \
                                     --initial-inventory "$inventory" \
                                     --frequency "$frequency" \
                                     --inbound-outbound-ratio "$inbound_outbound_ratio" \

@@ -553,8 +553,23 @@ class Stats:
             if task_id not in self.__completed_task_ids:
                 del self.__estimated_pickup_duration[task_id]
             
+    def return_actual_timesteps(self) -> int:
+        """Number of simulation timesteps actually completed.
+
+        Falls back to the configured horizon ``self.__T`` only when no
+        per-timestep snapshots have been recorded yet (e.g. zero-step runs).
+        Using the actual count keeps throughput meaningful when a run exits
+        early via the ``--time-limit`` wall-clock guard in
+        ``GT_grid_world.execute()``.
+        """
+        steps = len(self.__agent_statuses_per_timestep)
+        return steps if steps > 0 else self.__T
+
     def return_throughput(self):
-        return (len(self.__completed_task_ids)/self.__T)*60
+        steps = self.return_actual_timesteps()
+        if steps <= 0:
+            return 0.0
+        return (len(self.__completed_task_ids) / steps) * 60
             
     def return_sum_of_costs(self):
         return np.sum(list(self.__actual_distance.values()))/60
@@ -670,7 +685,7 @@ class Stats:
         
         
         print("===Throughout===")
-        print("Throughput: " + str((len(self.__completed_task_ids)/self.__T)*60) + " tasks/min")
+        print("Throughput: " + str(self.return_throughput()) + " tasks/min")
         
         print("===Sum of Costs===")
         print("Sum of Costs: " + str(np.sum(list(self.__actual_distance.values()))) + "s or " + str(np.sum(list(self.__actual_distance.values()))/60) + "min.")
@@ -779,7 +794,7 @@ class Stats:
             "solution_repair_detection_function": self.__solution_repair_detection_function,
             "solution_repair_function": self.__solution_repair_function,
             # Simulation results
-            "timesteps_completed": self.__T,
+            "timesteps_completed": self.return_actual_timesteps(),
             "total_completed_tasks": int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
             "completed_task_details": self.__completed_task_details,

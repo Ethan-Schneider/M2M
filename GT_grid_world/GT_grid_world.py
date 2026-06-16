@@ -334,17 +334,24 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         S.compute_unallocated_agents(Rs)
 
         global_tok = time.time()
-        
-        # if (global_tok - global_tik) >= time_limit:
-        #     return
-        
-        # exit()
-        
+
+        # Wall-clock budget: stop simulating further timesteps once the
+        # configured `time_limit` (seconds) has elapsed. The current step has
+        # already finished updating stats, so returning here is safe;
+        # `main()` still invokes `S.save_data()` after `execute()` returns,
+        # so per-timestep series for completed steps are preserved.
+        if (global_tok - global_tik) >= time_limit:
+            print(
+                f"[time-limit] Hit wall-clock budget ({time_limit}s) after "
+                f"timestep {t} (of T={T}); stopping early."
+            )
+            return
+
         # Output intermediate data if enabled
         if output_intermediate_data and t % intermediate_data_interval == 0:
             intermediate_output_file = S.get_output_file().replace(".json", f"_{t}.json")
             S.save_data(intermediate_output_file)
-        
+
     return
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
