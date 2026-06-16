@@ -43,6 +43,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections import defaultdict
@@ -52,7 +53,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 DENSITY_ORDER = [30.0, 60.0, 90.0]
-ROBOT_PALETTE = {10: "#1f77b4", 25: "#ff7f0e", 40: "#2ca02c"}
+# 10 / 25 / 40 are the LNS-PBS sweep's robot counts; 30 is the HBH+MLA*
+# baseline's robot count. Keeping all four in one palette means a future
+# cross-method overlay can reuse identical colours per robot count.
+ROBOT_PALETTE = {
+    10: "#1f77b4",
+    25: "#ff7f0e",
+    30: "#9467bd",
+    40: "#2ca02c",
+}
 
 # Map M2M's `improvement_task_assignment_strategy` to a human-readable
 # baseline label. `c_lns` routes through the `external_algorithms/lns/`
@@ -62,7 +71,31 @@ ROBOT_PALETTE = {10: "#1f77b4", 25: "#ff7f0e", 40: "#2ca02c"}
 METHOD_LABELS = {
     "c_lns": "LNS-PBS",
     "py_lns": "M2M (4D cost tensor + py_lns)",
+    "hbh_mla_star": "HBH+MLA*",
 }
+
+# Filename tags appended to every produced PNG when a single allocator's
+# runs are being plotted. Keeps the LNS-PBS visuals (`*_lns-pbs.png`) and
+# HBH+MLA* visuals (`*_hbh-mla.png`) clearly distinct in `data/figures/`
+# rather than overwriting each other on every regeneration. The user
+# explicitly flagged the previous unsuffixed naming as a confusion source.
+METHOD_FILE_TAGS = {
+    "c_lns": "lns-pbs",
+    "py_lns": "py-lns",
+    "hbh_mla_star": "hbh-mla",
+}
+
+
+def _color_for_robots(robots: int) -> str:
+    """Resolve a colour for ``robots`` falling back to the default cycle.
+
+    ``ROBOT_PALETTE`` covers the canonical robot counts; anything else
+    rolls through matplotlib's default ``Cn`` cycle so cross-method runs
+    that introduce new robot counts still render with stable colours.
+    """
+    if robots in ROBOT_PALETTE:
+        return ROBOT_PALETTE[robots]
+    return f"C{robots % 10}"
 
 
 def _set_paper_style() -> None:
@@ -257,19 +290,58 @@ def _rolling_mean_std(rate: np.ndarray, window: int) -> tuple[np.ndarray, np.nda
     return t, mean, std
 
 
-def plot_throughput_rolling(by_cond: dict, out_path: Path, method_label: str) -> None:
-    """Rolling tasks/min (mean +/- 1 std), window = 10% of total sim time.
+def _per_minute_throughput(
+    run: dict, bin_ticks: int = 60
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Bin per-tick completions into per-minute throughput samples.
 
-    Construction: per-tick instantaneous tasks/min = ``60 *
-    completions_at_tick`` (since 1 sim tick == 1 simulated second).
-    Rolling mean and population std are computed over the same centered
-    window. The +/- 1 sigma fill is clipped at zero so the band never
-    dips below the x-axis. Std band alpha is intentionally very low
-    (0.06) because the within-window std is large for a Bernoulli-ish
-    completion process and a heavier band visually overwhelms the means.
-    Axes are shared across density panels to make cross-density
-    comparison unambiguous.
+    Each bin is ``bin_ticks`` simulated seconds long (default 60 = one
+    simulated minute). The returned ``rate`` array is in tasks-per-minute
+    units already (``count_in_bin * 60.0 / bin_ticks``). The companion
+    ``centers`` array gives the simulation-tick at each bin's mid-point so
+    the curve sits at the correct x-position. Returning the binned series
+    is what makes the rolling-std band physically meaningful: std is the
+    minute-to-minute *jitter* of the throughput estimate, which is what a
+    stakeholder reading "throughput +/- 1 sigma" intuitively expects --
+    not the per-tick Bernoulli noise of "did exactly one task complete on
+    this individual tick."
     """
+    counts, n_ticks = _per_tick_completions(run)
+    if n_ticks == 0 or bin_ticks <= 0:
+        return np.zeros(0), np.zeros(0), 0
+    n_bins = n_ticks // bin_ticks
+    if n_bins == 0:
+        return np.zeros(0), np.zeros(0), 0
+    truncated = counts[: n_bins * bin_ticks]
+    binned = truncated.reshape(n_bins, bin_ticks).sum(axis=1).astype(float)
+    rate = binned * (60.0 / bin_ticks)
+    centers = np.arange(n_bins) * bin_ticks + bin_ticks / 2.0
+    return centers, rate, n_bins
+
+
+def plot_throughput_rolling(by_cond: dict, out_path: Path, method_label: str) -> None:
+    """Rolling tasks/min (mean +/- 1 std) over per-minute bins.
+
+    Construction:
+      1. Bin completions into 60-tick (= 1 simulated minute) buckets;
+         per-bin throughput is the bin count itself in tasks/min.
+      2. Compute centered rolling mean and population std *over the binned
+         series* (default window = 5 minutes, scaled down for short LNS-PBS
+         runs). This std measures minute-to-minute throughput jitter,
+         which is the meaningful single-seed variability metric. The
+         previous version computed std on the per-tick instantaneous rate
+         (``60 * count_at_tick``), which produced a Bernoulli-ish std of
+         50-100 tasks/min that swamped a true mean of ~130 -- visually
+         alarming but physically meaningless because every individual
+         tick can only contribute 0 or 60+ tasks/min.
+      3. ``+/- 1 sigma`` fill is clipped at zero so the band never dips
+         below the x-axis. Axes are shared across density panels.
+    """
+    # 5 simulated minutes is wide enough to smooth bin-level noise and
+    # narrow enough to still show ramp-up vs steady-state. For short LNS-
+    # PBS runs (~7 bins) we shrink the window so we still get a few
+    # samples out of the rolling stat.
+    DEFAULT_WINDOW_MINUTES = 5
     fig, axes = plt.subplots(1, 3, figsize=(13, 4), sharex=True, sharey=True)
     y_max = 0.0
     for ax, density in zip(axes, DENSITY_ORDER):
@@ -277,18 +349,23 @@ def plot_throughput_rolling(by_cond: dict, out_path: Path, method_label: str) ->
             run = by_cond.get((density, robots))
             if not run:
                 continue
-            counts, n_ticks = _per_tick_completions(run)
-            if n_ticks == 0:
+            centers, rate, n_bins = _per_minute_throughput(run)
+            if n_bins == 0:
                 continue
-            rate = counts.astype(float) * 60.0
-            window = _rolling_window(n_ticks)
-            t, mean, std = _rolling_mean_std(rate, window)
-            if t.size == 0:
-                continue
+            window = min(DEFAULT_WINDOW_MINUTES, max(2, n_bins // 3))
+            if n_bins < window:
+                # Fall back to plotting the raw per-minute series with no
+                # rolling smoothing; better than dropping the line entirely.
+                t = centers
+                mean = rate
+                std = np.zeros_like(rate)
+            else:
+                offset_idx, mean, std = _rolling_mean_std(rate, window)
+                t = centers[offset_idx[0] : offset_idx[0] + mean.size]
             color = ROBOT_PALETTE[robots]
             lower = np.clip(mean - std, 0.0, None)
             upper = mean + std
-            ax.fill_between(t, lower, upper, color=color, alpha=0.06, linewidth=0)
+            ax.fill_between(t, lower, upper, color=color, alpha=0.18, linewidth=0)
             ax.plot(t, mean, label=f"{robots} bots", color=color, lw=1.8)
             y_max = max(y_max, float(upper.max()))
         ax.set_title(_ax_title_density(density))
@@ -301,7 +378,7 @@ def plot_throughput_rolling(by_cond: dict, out_path: Path, method_label: str) ->
     _show_all_y_tick_labels(axes)
     fig.suptitle(
         f"Throughput (tasks / min) rolling mean +/- 1 std -- {method_label} baseline\n"
-        "window = 10% of total sim time; shared axes across density panels",
+        "1-minute bins; rolling window = min(5 min, n_bins/3); std = minute-to-minute jitter",
         fontsize=12,
         y=1.04,
     )
@@ -425,8 +502,8 @@ def plot_computation_time(by_cond: dict, out_path: Path, method_label: str) -> N
     fig.suptitle(
         f"Per-timestep computation time -- {method_label} baseline\n"
         "shared x and y axes across density panels (log y); "
-        "TA panel rendered with a 10 s ceiling -- one TA call at 90% / 25 bots "
-        "actually peaked at ~2050 s (LNS-PBS internal hang)",
+        "TA panel rendered with a 10 s ceiling for visual stability "
+        "(individual outlier ticks may exceed this)",
         fontsize=10,
         y=1.02,
     )
@@ -623,9 +700,88 @@ def plot_bot_utilization(by_cond: dict, out_path: Path, method_label: str) -> No
     plt.close(fig)
 
 
+def _outfile(out_dir: Path, basename: str, tag: str | None) -> Path:
+    """Build the output PNG path with an optional method tag suffix.
+
+    The unsuffixed legacy convention (``throughput_rolling.png``) is kept
+    as the fallback when no tag is in play; with a tag the produced file
+    becomes ``throughput_rolling_<tag>.png`` (e.g. ``..._lns-pbs.png``).
+    """
+    if not tag:
+        return out_dir / basename
+    stem, dot, ext = basename.rpartition(".")
+    return out_dir / f"{stem}_{tag}.{dot and ext or 'png'}"
+
+
+def _resolve_method_filter_and_tag(
+    runs: list[dict],
+    method_arg: str | None,
+    tag_override: str | None,
+) -> tuple[list[dict], str | None]:
+    """Apply the ``--method`` filter to ``runs`` and decide the tag suffix.
+
+    Tag resolution: explicit ``--tag`` always wins; otherwise the
+    requested ``--method`` (if any) drives the tag via
+    :data:`METHOD_FILE_TAGS`; otherwise we auto-detect a single-method
+    case and use that method's tag. A truly mixed-method invocation
+    leaves the tag unset, which falls back to the legacy unsuffixed
+    filenames (so older invocations of the script keep their behaviour).
+    """
+    if method_arg and method_arg != "all":
+        filtered = [
+            r for r in runs
+            if r.get("improvement_task_assignment_strategy") == method_arg
+        ]
+        chosen = method_arg
+    else:
+        filtered = runs
+        strategies = {
+            r.get("improvement_task_assignment_strategy") for r in filtered
+        }
+        strategies.discard(None)
+        chosen = next(iter(strategies)) if len(strategies) == 1 else None
+
+    if tag_override is not None:
+        return filtered, tag_override
+    if chosen is None:
+        return filtered, None
+    return filtered, METHOD_FILE_TAGS.get(chosen, chosen)
+
+
 def main(argv: list[str]) -> int:
-    raw = Path(argv[1]) if len(argv) > 1 else Path("data/raw_data")
-    out = Path(argv[2]) if len(argv) > 2 else Path("data/figures")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument(
+        "raw", nargs="?", default="data/raw_data",
+        help="Directory of run JSONs to load (default: data/raw_data).",
+    )
+    parser.add_argument(
+        "out", nargs="?", default="data/figures",
+        help="Directory where figures are written (default: data/figures).",
+    )
+    parser.add_argument(
+        "--method",
+        choices=["all", "c_lns", "py_lns", "hbh_mla_star"],
+        default=None,
+        help=(
+            "Filter loaded runs by the JSON's improvement_task_assignment_strategy. "
+            "When omitted, the script loads all runs and auto-detects the "
+            "filename tag iff every loaded run shares one allocator."
+        ),
+    )
+    parser.add_argument(
+        "--tag", type=str, default=None,
+        help=(
+            "Override the filename tag suffix. By default the tag is "
+            "looked up from METHOD_FILE_TAGS using either the --method "
+            "flag or the auto-detected single-method run set; pass empty "
+            "string to force the legacy unsuffixed filenames even when a "
+            "tag could be inferred."
+        ),
+    )
+    args = parser.parse_args(argv[1:])
+
+    raw = Path(args.raw)
+    out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
     runs = _load_runs(raw)
@@ -633,39 +789,52 @@ def main(argv: list[str]) -> int:
         print(f"No runs found in {raw}", file=sys.stderr)
         return 1
 
+    runs, tag = _resolve_method_filter_and_tag(runs, args.method, args.tag)
+    if not runs:
+        print(
+            f"No runs in {raw} matched --method={args.method!r}",
+            file=sys.stderr,
+        )
+        return 1
+
     by_cond = _index_by_condition(runs)
     method_label = _detect_method_label(runs)
+    tag_human = tag if tag else "(none -- legacy unsuffixed filenames)"
     print(
         f"Loaded {len(runs)} runs, {len(by_cond)} (density, robots) conditions; "
-        f"method = {method_label}."
+        f"method = {method_label}; filename tag = {tag_human}."
     )
 
     _set_paper_style()
 
-    plot_throughput_rolling(by_cond, out / "throughput_rolling.png", method_label)
-    plot_sku_spread(by_cond, out / "sku_spread_trajectories.png", method_label)
-    plot_bot_utilization(by_cond, out / "bot_utilization_trajectories.png", method_label)
-    plot_computation_time(by_cond, out / "computation_time_trajectories.png", method_label)
-    plot_cumulative_tardiness(by_cond, out / "cumulative_tardiness.png", method_label)
-    plot_cumulative_tardy_tasks(by_cond, out / "cumulative_tardy_tasks.png", method_label)
+    figures = [
+        ("throughput_rolling.png", plot_throughput_rolling),
+        ("sku_spread_trajectories.png", plot_sku_spread),
+        ("bot_utilization_trajectories.png", plot_bot_utilization),
+        ("computation_time_trajectories.png", plot_computation_time),
+        ("cumulative_tardiness.png", plot_cumulative_tardiness),
+        ("cumulative_tardy_tasks.png", plot_cumulative_tardy_tasks),
+    ]
+    written: list[Path] = []
+    for basename, fn in figures:
+        path = _outfile(out, basename, tag)
+        fn(by_cond, path, method_label)
+        written.append(path)
 
-    # Clean up superseded figures so stale outputs aren't accidentally
-    # presented alongside the current set.
+    # Clean up *truly* superseded figures so stale outputs aren't
+    # accidentally presented alongside the current set. Note: we only
+    # purge the two metrics we explicitly retired (heatmap + cumulative
+    # tasks) -- we do NOT purge unsuffixed legacy PNGs because a user
+    # mid-migration may legitimately have both unsuffixed (pre-tag) and
+    # tagged files in the same dir.
     for stale in ("throughput_heatmap.png", "cumulative_completed_tasks.png"):
         stale_path = out / stale
         if stale_path.exists():
             stale_path.unlink()
 
     print("Wrote:")
-    for name in (
-        "throughput_rolling.png",
-        "sku_spread_trajectories.png",
-        "bot_utilization_trajectories.png",
-        "computation_time_trajectories.png",
-        "cumulative_tardiness.png",
-        "cumulative_tardy_tasks.png",
-    ):
-        print(f"  {out / name}")
+    for path in written:
+        print(f"  {path}")
     return 0
 
 

@@ -19,6 +19,7 @@ Usage:
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -70,6 +71,7 @@ def summarise(path: Path) -> dict | None:
 METHOD_LABELS = {
     "c_lns": "LNS-PBS",
     "py_lns": "M2M (4D cost tensor + py_lns)",
+    "hbh_mla_star": "HBH+MLA*",
 }
 
 
@@ -92,12 +94,55 @@ def _detect_method_label(files: list[Path]) -> str:
     return "mixed (" + ", ".join(sorted(METHOD_LABELS.get(s, s) for s in strategies)) + ")"
 
 
+def _filter_by_strategy(files: list[Path], strategy: str) -> list[Path]:
+    """Keep only the JSONs whose ``improvement_task_assignment_strategy``
+    matches ``strategy``. Used by ``--method`` so the summary table can
+    isolate one allocator at a time when multiple are present in the
+    same ``raw_data/`` directory.
+    """
+    out: list[Path] = []
+    for p in files:
+        try:
+            with p.open() as f:
+                d = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if d.get("improvement_task_assignment_strategy") == strategy:
+            out.append(p)
+    return out
+
+
 def main(argv: list[str]) -> int:
-    root = Path(argv[1]) if len(argv) > 1 else Path("data/raw_data")
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument(
+        "root", nargs="?", default="data/raw_data",
+        help="Directory of run JSONs to load (default: data/raw_data).",
+    )
+    parser.add_argument(
+        "--method",
+        choices=["all", "c_lns", "py_lns", "hbh_mla_star"],
+        default="all",
+        help=(
+            "Restrict the summary to a single allocator's runs (matched on "
+            "the JSON's improvement_task_assignment_strategy field). "
+            "Default 'all' matches the historical behaviour of the script."
+        ),
+    )
+    args = parser.parse_args(argv[1:])
+
+    root = Path(args.root)
     files = sorted(root.glob("*.json"))
     if not files:
         print(f"No JSON outputs found in {root}", file=sys.stderr)
         return 1
+    if args.method != "all":
+        files = _filter_by_strategy(files, args.method)
+        if not files:
+            print(
+                f"No runs in {root} matched --method={args.method!r}",
+                file=sys.stderr,
+            )
+            return 1
 
     method_label = _detect_method_label(files)
     print(f"Method: {method_label}")

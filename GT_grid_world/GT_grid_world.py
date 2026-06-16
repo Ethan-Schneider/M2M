@@ -133,10 +133,18 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         #             Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
         #             break            
         
-        for agent in Rs.agents:
-            if agent.path_sequence == []:
-                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
-                break    
+        # HBH+MLA* (Grenouilleau et al., ICAPS 2019) is a coupled
+        # allocator + path planner: hbh_mla_star_call already populates
+        # ``agent.path_sequence`` for every agent it assigned, so calling
+        # the external ECBS/PBS router here would clobber those plans with
+        # a different (unreservation-aware) routing solution. Skip the
+        # external router for that strategy and let the MLA*-produced
+        # paths drive the simulator.
+        if improvement_task_assignment_strategy != "hbh_mla_star":
+            for agent in Rs.agents:
+                if agent.path_sequence == []:
+                    Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+                    break    
 
         tok = time.time()
         S.add_total_PF_time(tok-tik)
@@ -335,17 +343,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         global_tok = time.time()
 
-        # Wall-clock budget: stop simulating further timesteps once the
-        # configured `time_limit` (seconds) has elapsed. The current step has
-        # already finished updating stats, so returning here is safe;
-        # `main()` still invokes `S.save_data()` after `execute()` returns,
-        # so per-timestep series for completed steps are preserved.
-        if (global_tok - global_tik) >= time_limit:
-            print(
-                f"[time-limit] Hit wall-clock budget ({time_limit}s) after "
-                f"timestep {t} (of T={T}); stopping early."
-            )
-            return
+        # Note: the historical wall-clock guard that early-returned from
+        # this loop when ``global_tok - global_tik >= time_limit`` has
+        # been removed. Per-condition runtime is now controlled solely by
+        # ``--time-horizon`` (set by ``run_baselines.sh``); each run
+        # always executes exactly T simulated ticks regardless of how
+        # long that takes in wall-clock seconds. Mixing a wall-clock cap
+        # with ``--time-horizon`` produced runs of varying simulated
+        # lengths across (method, density, robots) cells, which made the
+        # baseline visuals impossible to compare apples-to-apples. The
+        # ``time_limit`` parameter and ``--time-limit`` CLI flag are
+        # preserved (defaulting to a sentinel ``999999``) so external
+        # scripts that still pass them are not broken; it just no longer
+        # does anything.
 
         # Output intermediate data if enabled
         if output_intermediate_data and t % intermediate_data_interval == 0:
@@ -533,8 +543,11 @@ if __name__=="__main__":
                        choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
-                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'none'],
-                       help='Task assignment strategy for improvement')
+                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'hbh_mla_star', 'none'],
+                       help='Task assignment strategy for improvement. '
+                            '"hbh_mla_star" implements Grenouilleau et al. (ICAPS 2019) '
+                            'HBH+MLA*: a coupled allocator + path planner that bypasses '
+                            'the external ECBS/PBS routing call.')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs', 'pbs'],
                        help='Path planning strategy')

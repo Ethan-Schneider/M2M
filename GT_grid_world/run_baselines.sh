@@ -41,20 +41,23 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # ---------------------------------------------------------------------------
-# Wall-clock budget per condition (seconds).
+# Per-condition simulated-time horizon (in simulation ticks; 1 tick == 1
+# simulated second).
 #
-# This is an exploratory baseline run, not a publication-grade sweep, and we
-# do not yet have GT compute resources, so each (seed, map, robots, density,
-# ...) tuple is capped at 10 minutes of wall-clock. The `--time-limit` flag
-# is enforced by `execute()` in GT_grid_world.py, which returns gracefully
-# after the current timestep completes; `main()` then writes save_data() so
-# per-timestep series (including sku_spread_per_timestep) are preserved.
+# Every condition runs for *exactly* ``T`` simulated ticks. There is
+# deliberately no wall-clock cap: mixing a wall-clock cap with the
+# simulated-time horizon used to produce runs of varying simulated lengths
+# across (method, density, robots) cells, which made the baseline visuals
+# impossible to compare apples-to-apples. Wall-clock runtime per condition
+# is whatever it takes the chosen (allocator, planner) stack to advance
+# ``T`` ticks; that varies a lot across methods (HBH+MLA* is roughly 50x
+# faster per tick than LNS-PBS on this map), but the resulting series
+# always span the same simulated time window.
 #
-# `time_horizons` is set high enough that the wall-clock cap is the binding
-# constraint across every condition; raise it further if any condition starts
-# finishing T timesteps inside the budget.
+# 600 ticks == 10 simulated minutes is the agreed exploratory horizon for
+# this initial sweep (single seed, single map, no GT compute resources
+# yet). Bump this for the publication-grade sweep.
 # ---------------------------------------------------------------------------
-time_limit=600
 
 # ---------------------------------------------------------------------------
 # Sweep axes (roadmap 1.7)
@@ -74,11 +77,10 @@ seeds=(900)
 # ---------------------------------------------------------------------------
 # Fixed M2M-baseline parameters (no rearrangement, no dual cycling)
 # ---------------------------------------------------------------------------
-# Set high so the 10-min wall-clock budget binds first across all conditions.
-# The 10-robot/30%-density smoke test ran ~1.3 s/timestep, so 10 min ~= 460
-# timesteps in the easiest case and fewer in heavier ones; 10000 leaves
-# plenty of headroom.
-time_horizons=(10000)
+# 600 simulation ticks per condition (== 10 simulated minutes). No wall-clock
+# cap: each run terminates exactly at this horizon regardless of how long the
+# chosen allocator takes per tick.
+time_horizons=(600)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=1.0
@@ -134,7 +136,6 @@ for seed in "${seeds[@]}"; do
                                     --initial-task-assign-strategy "$initial_task_assign_strategy" \
                                     --improvement-task-assign-strategy "$improvement_task_assign_strategy" \
                                     --path-planning-strategy "$path_planning_strategy" \
-                                    --time-limit "$time_limit" \
                                     --initial-inventory "$inventory" \
                                     --frequency "$frequency" \
                                     --inbound-outbound-ratio "$inbound_outbound_ratio" \

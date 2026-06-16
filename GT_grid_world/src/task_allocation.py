@@ -14,6 +14,7 @@ from .task_allocation_algorithms.py_lns_V2 import py_lns_call
 from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
 from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
 from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
+from .task_allocation_algorithms.hbh_mla_star import hbh_mla_star_call
 
 def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], initial_task_assignment_strategy : str, 
                    improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, 
@@ -49,6 +50,13 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
     elif improvement_task_assignment_strategy == "c_lns":
         return lns_call(S, G, map, Rs, J, t)
+    elif improvement_task_assignment_strategy == "hbh_mla_star":
+        # Coupled allocator + path planner per Grenouilleau, van Hoeve, Hooker
+        # (ICAPS 2019, pp. 181-185). HBH performs the assignment by calling
+        # MLA* per (agent, task) candidate; the same MLA* call writes the
+        # full path into agent.path_sequence so the external ECBS/PBS routing
+        # step is skipped in execute() when this strategy is selected.
+        return hbh_mla_star_call(S, G, Rs, J, t)
     elif improvement_task_assignment_strategy == "none":
         pass
     else:
