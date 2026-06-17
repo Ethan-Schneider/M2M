@@ -5,18 +5,13 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
 from ...utils import manhattan_distance
-from ..initial_solutions.construct_cost_elements import (
-    per_task_type_sku_distribution_term,
-)
 
 def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
                  start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]],
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
                  method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  J: Dict[int, Tuple] = None, inbound_sku_distribution_costs: np.ndarray = None, 
-                 outbound_sku_distribution_costs: np.ndarray = None,
-                 rearrangement_sku_distribution_costs: np.ndarray = None,
-                 base_cost_weight: float = 1.0, 
+                 outbound_sku_distribution_costs: np.ndarray = None, base_cost_weight: float = 1.0, 
                  deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
                  agent_task_sequence_time: np.ndarray = None, current_time: int = 0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
@@ -87,23 +82,13 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
             else:
                 base_costs = base_cost_weight*(agent_costs + sg_costs)
 
-            # 1.6: per-task-type SKU-distribution placement quality (three-way dispatch).
-            # NOTE: this allocator uses a negated-cost / argmax convention different
-            # from fast_greedy's argmin convention, and its `deadline_weight` branch
-            # above is on a different scale than `task_deadline_costs`. Unifying the
-            # two is a follow-up cleanup; 1.6 only updates the SKU-distribution side
-            # so the per-task-type matrices are routed consistently.
-            task_type = J[idx_to_task_id[int(n)]][4]
-            sku_term, axis = per_task_type_sku_distribution_term(
-                task_type, n, valid_p, valid_q,
-                inbound_sku_distribution_costs=inbound_sku_distribution_costs,
-                outbound_sku_distribution_costs=outbound_sku_distribution_costs,
-                rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
-            )
-            if axis == "goals":
-                total_costs = base_costs + sku_distribution_weight * sku_term[None, :]
+            # Add sku distribution costs
+            if J[idx_to_task_id[int(n)]][4] == 1:
+                inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
+                total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, :]
             else:
-                total_costs = base_costs + sku_distribution_weight * sku_term[:, None]
+                outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
+                total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[:, None]
 
             max_idx = np.argmax(total_costs)
             max_cost_m = total_costs.flat[max_idx]

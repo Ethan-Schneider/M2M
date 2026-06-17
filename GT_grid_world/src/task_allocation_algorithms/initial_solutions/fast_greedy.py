@@ -4,16 +4,11 @@ from typing import Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
-from .construct_cost_elements import (
-    construct_cost_elements,
-    manhattan_distance,
-    per_task_type_sku_distribution_term,
-)
+from .construct_cost_elements import construct_cost_elements, manhattan_distance
 
 def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
                          agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None, task_deadline_costs=None, inbound_sku_distribution_costs=None, 
-                         outbound_sku_distribution_costs=None, rearrangement_sku_distribution_costs=None,
-                         base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
+                         outbound_sku_distribution_costs=None, base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
                          agent_task_sequence_limit=-1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
@@ -96,37 +91,33 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             agent_costs = agent_start_cost_tensor[:, valid_p]
             sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
 
-            # Base execution-time cost: travel from each agent to a candidate start
-            # plus start-to-goal distance, plus the time the agent already owes for
-            # tasks earlier in its sequence (1.6: agent_task_sequence_time was computed
-            # but unused before; wired in now so already-busy agents look more
-            # expensive than idle ones at equal per-task cost).
-            base_costs = base_cost_weight * (
-                agent_costs[:, :, None]
-                + sg_costs[None, :, :]
-                + agent_task_sequence_time[:, None, None]
-            )
+            # Calculate base costs
+            # deadline = J[idx_to_task_id[int(n)]][2]
+            # if deadline_weight > 0.0:
+            #     # If deadline has not passed
+            #     if deadline - current_time > 0:
+            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            #         # base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :]) - deadline_weight*(deadline - (current_time - ((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])))
+            #     # If deadline has passed
+            #     else:
+            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
+            # else:
+            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
 
-            # Tardiness term (1.6): per-task scalar that broadcasts over (M, P, Q).
-            # Uses the precomputed `task_deadline_costs[n]` from
-            # `calculate_deadline_cost`, so changing the deadline shape only requires
-            # editing one helper rather than every allocator.
-            if deadline_weight > 0.0:
-                base_costs = base_costs + deadline_weight * task_deadline_costs[n]
+            # print(f"inbound_sku_distribution_costs: {inbound_sku_distribution_costs}")
+            # print(f"outbound sku distribution costs: {outbound_sku_distribution_costs}")
 
-            # Per-task-type SKU-distribution placement quality (1.6 dispatch helper).
-            if sku_distribution_weight > 0.0:
-                task_type = J[idx_to_task_id[int(n)]][4]
-                sku_term, axis = per_task_type_sku_distribution_term(
-                    task_type, n, valid_p, valid_q,
-                    inbound_sku_distribution_costs=inbound_sku_distribution_costs,
-                    outbound_sku_distribution_costs=outbound_sku_distribution_costs,
-                    rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
-                )
-                if axis == "goals":
-                    total_costs = base_costs + sku_distribution_weight * sku_term[None, None, :]
-                else:  # axis == "starts"
-                    total_costs = base_costs + sku_distribution_weight * sku_term[None, :, None]
+            if sku_distribution_weight > 0:
+                # If inbound task, add inbound sku distribution costs
+                if J[idx_to_task_id[int(n)]][4] == 1:
+                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
+                    # print(f"inbound sku costs: {inbound_sku_distribution_costs_n}")
+                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
+                # If outbound task, add outbound sku distribution costs
+                else:
+                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
+                    # print(f"outbound sku costs: {outbound_sku_distribution_costs_n}")
+                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
             else:
                 total_costs = base_costs
                 
@@ -268,11 +259,7 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
     total_allocation_time = 0.0
 
     construct_tik = time.time()
-    (agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask,
-     start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs,
-     inbound_sku_distribution_costs, outbound_sku_distribution_costs,
-     rearrangement_sku_distribution_costs, agent_task_sequence_time
-     ) = construct_cost_elements(J, Rs, G, current_time, method)
+    agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time = construct_cost_elements(J, Rs, G, current_time, method)
     total_construct_time += time.time() - construct_tik
 
     # print(f"Min cost agent-start cost: {np.min(agent_start_cost_tensor)}")
@@ -296,7 +283,6 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
         task_deadline_costs=task_deadline_costs,
         inbound_sku_distribution_costs=inbound_sku_distribution_costs,
         outbound_sku_distribution_costs=outbound_sku_distribution_costs,
-        rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
         base_cost_weight=base_cost_weight,
         deadline_weight=deadline_weight,
         sku_distribution_weight=sku_distribution_weight,
