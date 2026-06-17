@@ -222,6 +222,7 @@ def mla_star_search(
         ``ell == 1`` node first, the search would unnecessarily reserve
         ``pi1`` for the ``ell == 1`` agent path beyond the pickup tick.
     """
+    # Print all vertices and edges in the reservation table
     h_total = _manhattan(start, pi1) + _manhattan(pi1, pi2)
     if horizon is None:
         horizon = max(8, int(_DEFAULT_HORIZON_FACTOR * h_total) + 4)

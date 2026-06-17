@@ -2,7 +2,7 @@ import time
 import numpy as np
 import argparse
 
-from src import graph, simulate, task_allocation, case_request_generator, router, agent
+from src import graph, simulate, task_allocation, case_request_generator, import_schedule, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
 from src.task_allocation_algorithms.local_repair.exact_repair import HA_exact_repair
 from src.task_allocation_algorithms.repair_detection.backtracking import detect_backtracking
@@ -32,21 +32,45 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             initial_inventory : float = 25.0,
             shuffle_percentage: float = 0.0,
             aisle_dual_cycle: bool = False,
-            driveway_dual_cycle: bool = False):
+            driveway_dual_cycle: bool = False,
+            use_precomputed_schedule: bool = False,
+            schedule: np.ndarray = None,
+            run_until_schedule_complete: bool = False) -> int:
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
     last_task_id = 0
+    total_schedule_tasks = schedule.shape[0] if use_precomputed_schedule and schedule is not None else 0
     
     global_tik = time.time()
-    for t in range(T):
+    t = 0
+    while True:
+        if not run_until_schedule_complete and t >= T:
+            break
+
+        print(f"Number of tasks in system: {len(J)}")
+        if use_precomputed_schedule:
+            print(f"Number of tasks remaining in schedule: {schedule.shape[0]}")
+
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
         # Update Buffer 
         # B.add(Rs.get_agent_states(), t)
         
         print("=============================" + "Task Generation"+ "=============================")
-        if t%frequency == 0:
+        if use_precomputed_schedule:
+            tik = time.time()
+            J, __, __, schedule, last_task_id = import_schedule.add_tasks_from_schedule(
+                t,
+                schedule,
+                J,
+                S,
+                G,
+                last_task_id,
+            )
+            tok = time.time()
+            S.add_total_CRG_time(tok - tik)
+        elif t%frequency == 0:
             if len(J) < max_task_number:
                 if frequency >= 1.: 
                     N = 1
@@ -362,7 +386,20 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             intermediate_output_file = S.get_output_file().replace(".json", f"_{t}.json")
             S.save_data(intermediate_output_file)
 
-    return
+        if (
+            run_until_schedule_complete
+            and use_precomputed_schedule
+            and import_schedule.schedule_tasks_finished(
+                schedule, S, total_schedule_tasks
+            )
+        ):
+            print(f"All {total_schedule_tasks} schedule tasks completed at t={t}")
+            t += 1
+            break
+
+        t += 1
+
+    return t
 
 def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
          task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
@@ -386,7 +423,11 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          solution_repair_function: str = "none",
          shuffle_percentage: float = 0.0,
          aisle_dual_cycle: bool = False,
-         driveway_dual_cycle: bool = False) -> None:
+         driveway_dual_cycle: bool = False,
+         use_precomputed_schedule: bool = False,
+         schedule_file: str = None,
+         initial_inventory_file: str = None,
+         run_until_schedule_complete: bool = False) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -426,11 +467,25 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         solution_repair_function: Function to repair solution post allocation and motion planning
     """
     np.random.seed(seed)
+
+    if use_precomputed_schedule:
+        if not schedule_file or not initial_inventory_file:
+            raise ValueError(
+                "--use-precomputed-schedule requires both --schedule-file and --initial-inventory-file"
+            )
+
+    if run_until_schedule_complete and not use_precomputed_schedule:
+        raise ValueError(
+            "--run-until-schedule-complete requires --use-precomputed-schedule"
+        )
     
     stripped_map_name = map_name.split("/")[-1].replace(".json", "")
+    effective_task_generation_strategy = (
+        "precomputed_schedule" if use_precomputed_schedule else task_generation_strategy
+    )
     
-    output_file = f"data/raw_data/{T}_{task_generation_strategy}_{initial_inventory}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
-    buffer_file = f"data/buffer_data/{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
+    output_file = f"data/raw_data/{T}_{effective_task_generation_strategy}_{initial_inventory}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
+    buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
@@ -441,7 +496,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         cost_calculation_method=cost_calculation_method,
         seed=seed,
         max_tasks=max_number_tasks,
-        task_generation_strategy=task_generation_strategy,
+        task_generation_strategy=effective_task_generation_strategy,
         initial_task_assignment_strategy=initial_task_assignment_strategy,
         improvement_task_assignment_strategy=improvement_task_assignment_strategy,
         path_planning_strategy=path_planning_strategy,
@@ -469,7 +524,14 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         solution_repair_detection_function=solution_repair_detection_function,
         solution_repair_function=solution_repair_function
     )
-    G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
+    schedule = None
+    if use_precomputed_schedule:
+        schedule = import_schedule.import_schedule(schedule_file)
+        G = graph.Graph(num_robots, map_name, 0.0, num_skus, weight_init_method)
+        import_schedule.load_initial_inventory(initial_inventory_file, G)
+        print(f"Loaded precomputed schedule ({schedule.shape[0]} tasks) and initial inventory from file")
+    else:
+        G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
     # print(f"Number of full locations in warehouse: {len(G.warehouse.get_full_locations())}")
     # exit()
@@ -486,7 +548,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     
     tik = time.time()
     # Execute online algorithm
-    execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
+    simulated_timesteps = execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
             case_request_strategy=task_generation_strategy, 
             max_task_number=max_number_tasks, 
             initial_task_assignment_strategy=initial_task_assignment_strategy, 
@@ -513,13 +575,19 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             shuffle_percentage=shuffle_percentage,
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
+            use_precomputed_schedule=use_precomputed_schedule,
+            schedule=schedule,
+            run_until_schedule_complete=run_until_schedule_complete,
     )
+    if run_until_schedule_complete:
+        S.set_simulation_time(simulated_timesteps)
+        print(f"Simulated {simulated_timesteps} timesteps (run until schedule complete)")
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
     S.save_data()
     
-    folder_name = f"{T}_{task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
+    folder_name = f"{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     if output_graphs:
         S.output_graphs(folder_name)
     
@@ -610,6 +678,16 @@ if __name__=="__main__":
                             'When set, after an agent completes an outbound delivery at a '
                             'driveway cell it will immediately pick up an unallocated inbound '
                             'task whose pickup is at any driveway cell. Default off.')
+    parser.add_argument('--use-precomputed-schedule', action='store_true',
+                       help='Load tasks from a precomputed schedule file and skip CRG. '
+                            'Requires --schedule-file and --initial-inventory-file.')
+    parser.add_argument('--schedule-file', type=str, default=None,
+                       help='Path to precomputed schedule text file (task_id, time, sku_id, type)')
+    parser.add_argument('--initial-inventory-file', type=str, default=None,
+                       help='Path to precomputed initial inventory text file (sku_id, row, col)')
+    parser.add_argument('--run-until-schedule-complete', action='store_true',
+                       help='Run until all precomputed schedule tasks are completed instead '
+                            'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
     args = parser.parse_args()
     
     main(
@@ -649,4 +727,8 @@ if __name__=="__main__":
         shuffle_percentage=args.shuffle_percentage,
         aisle_dual_cycle=args.aisle_dual_cycle,
         driveway_dual_cycle=args.driveway_dual_cycle,
+        use_precomputed_schedule=args.use_precomputed_schedule,
+        schedule_file=args.schedule_file,
+        initial_inventory_file=args.initial_inventory_file,
+        run_until_schedule_complete=args.run_until_schedule_complete,
     )
