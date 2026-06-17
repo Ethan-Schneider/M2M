@@ -172,6 +172,35 @@ class ReservationTable:
         # strictly before that.
         return earliest - 1
 
+    def latest_other_use_at(
+        self, loc: Loc, ignore_agent: Optional[int] = None
+    ) -> int:
+        """Highest absolute time at which some *other* agent's reservation
+        references ``loc`` (vertex visit or edge endpoint). Returns ``-1`` if
+        no other agent has any reservation at ``loc``.
+
+        This is the bound a planner must clear when it wants to terminate a
+        new path at ``loc`` permanently: arriving *strictly after* this time
+        guarantees the cell is unoccupied by every previously committed path
+        from then on. Without this check, MLA*'s ordinary "vertex reserved
+        at arrival t?" gate misses the case where another agent's already-
+        committed path passes through ``loc`` at some time > arrival t,
+        producing a vertex collision the moment the new (now permanently
+        parked) agent is still sitting there.
+        """
+        latest = -1
+        for (vt, vloc), ag in self._vertex.items():
+            if ag == ignore_agent:
+                continue
+            if vloc == loc and vt > latest:
+                latest = vt
+        for (et, e_to, _e_from), ag in self._edge.items():
+            if ag == ignore_agent:
+                continue
+            if e_to == loc and et > latest:
+                latest = et
+        return latest
+
 
 def mla_star_search(
     G,
@@ -227,6 +256,19 @@ def mla_star_search(
         horizon = max(8, int(_DEFAULT_HORIZON_FACTOR * h_total) + 4)
 
     t_max_pickup = reservations.t_max_at(pi1, ignore_agent=agent_id)
+    # The new path will be committed with ``is_permanent_terminal=True``
+    # (the agent sits at pi2 once the path runs out, until the next HBH
+    # tick reassigns it). Therefore pi2 must be free at *every* timestep
+    # at or after the arrival time -- not just at the arrival timestep
+    # itself. Without this gate MLA* happily terminates a new path at a
+    # cell that some already-committed path passes through later, and
+    # the moment the parked agent is still sitting there the simulator
+    # records a vertex collision (observed pattern: agent A's path
+    # passes through cell C at t1 < t2 ; agent B's new plan terminates
+    # at C at some t in [t1, t2-1] ; A walks back through C at t2 and
+    # collides with B who's still parked).
+    pi2_min_arrival = reservations.latest_other_use_at(pi2, ignore_agent=agent_id) + 1
+    pi2_t_max = reservations.t_max_at(pi2, ignore_agent=agent_id)
 
     nodes: List[_Node] = []
     open_heap: List[_PQItem] = []
@@ -291,13 +333,52 @@ def mla_star_search(
 
         # Algorithm 1 line: "if ell == 1 and p_n == pi1 then create n' with
         # same g and label 2; add to Q". We do *not* expand n further here.
+        #
+        # Time-alignment subtlety: the simulator interprets ``path[i]``
+        # as "agent at this cell at time ``current_t + 1 + i``", whereas
+        # the search's node at g means "agent at state at time
+        # ``current_t + g``". The reconstruction returns
+        # ``[n.state for n in pruned[1:]]``, so pruned[1] must have g=1
+        # (path[0] at time current_t+1), pruned[2] must have g=2, etc.
+        # In the *normal* case (start != pi1) the first popped child of
+        # the root is at g=1, the flip lands at the same g as its
+        # parent, and pruned ends up time-aligned. But when ``start ==
+        # pi1`` the very first pop is the start node at g=0, so a naive
+        # same-g flip yields a flipped node at g=0 -- which after
+        # ``_reconstruct``'s special handling collapsed at the same g
+        # would make path[0] appear at time current_t (off by one
+        # relative to the simulator's interpretation). Every subsequent
+        # vertex check during expansion would then be off by the same
+        # one tick, and MLA* would plan paths that collide with
+        # already-reserved cells one tick later than the search
+        # believed. We avoid the off-by-one by advancing g on the
+        # flipped node when (and only when) start == pi1 and we're
+        # flipping at g=0: that simulates the implicit one-tick wait at
+        # the pickup that the simulator will execute (popping path[0]
+        # leaves the agent at pi1 and fires the status=1->2 transition)
+        # and lines path-time up with search-time for everything
+        # downstream.
         if node.label == 1 and node.state == pi1:
-            push(node.state, 2, node.g, item.node_idx)
+            flip_g = node.g + 1 if (start == pi1 and node.g == 0) else node.g
+            push(node.state, 2, flip_g, item.node_idx)
             continue
 
         # Algorithm 1 line: "if ell == 2 and p_n == pi2 then return path".
+        # Extended: the returned path is committed with
+        # ``is_permanent_terminal=True``, so we additionally require pi2 to
+        # be safe to occupy permanently from the arrival time onwards
+        # (no other agent's reservation references pi2 at any t >=
+        # arrival, and no other agent's permanent terminates at pi2). If
+        # the cell isn't safe yet, we keep expanding so the search
+        # naturally finds a later arrival (via waits or detours) that
+        # clears the existing reservations.
         if node.label == 2 and node.state == pi2:
-            return _reconstruct(nodes, item.node_idx, start)
+            arrival_t = current_t + node.g
+            if arrival_t >= pi2_min_arrival and (
+                pi2_t_max is None or arrival_t <= pi2_t_max
+            ):
+                return _reconstruct(nodes, item.node_idx, start)
+            # else: not safe to terminate yet; fall through to expand.
 
         if node.g >= horizon:
             continue
@@ -346,22 +427,12 @@ def _reconstruct(nodes: List[_Node], goal_idx: int, start: Loc) -> List[Loc]:
     which we detect by a parent-child pair whose g-value is identical (a
     proper move increments g, the flip does not).
 
-    Special case (start == pi1). When the agent is already at the pickup
-    when the search begins, the label flip happens at i=1 with both nodes
-    sharing the start cell. Replacing the start node would drop pi1 out
-    of the final ``pruned[1:]`` slice, which means the caller's
-    ``agent.path_sequence`` would never contain pi1; the M2M simulator
-    only flips ``status=1 -> 2`` when ``agent.state == pickup`` *after a
-    path advance*, so the agent would walk straight past the pickup
-    without registering it and stay stuck in status=1 forever (this was
-    observed in 30-bot study_small_restricted runs producing complete
-    deadlock by ~tick 600). To preserve correctness in that case we
-    *append* the flipped node rather than replacing, which yields a path
-    that begins with pi1 as an explicit one-step "wait at pickup" so the
-    simulator sees the pickup and fires the transition. The non-trivial
-    label flips deeper in the path are still collapsed because the parent
-    we'd be replacing is the actual movement-into-pi1 node, which is
-    redundant with the immediately-following flipped node at the same g.
+    The case where the agent is already at pi1 when the search begins
+    (``start == pi1``) is handled inside ``mla_star_search`` itself: the
+    label flip at g=0 is suppressed so the search must perform at least
+    one wait/move (advancing g) before it can flip. That makes the
+    collapsing rule below uniformly correct -- pi1 lands in the returned
+    path at the right time index without any special case here.
     """
     chain: List[_Node] = []
     idx: Optional[int] = goal_idx
@@ -372,15 +443,7 @@ def _reconstruct(nodes: List[_Node], goal_idx: int, start: Loc) -> List[Loc]:
     pruned: List[_Node] = [chain[0]]
     for i in range(1, len(chain)):
         if chain[i].g == chain[i - 1].g:
-            # Label flip. Normally collapse to keep the path tight; but if
-            # the parent we'd be replacing is the start cell (i==1) and
-            # both nodes share state, the flipped node IS the pickup and
-            # dropping it via ``pruned[1:]`` later would silently break
-            # the simulator's pickup transition. Append in that one case.
-            if i == 1 and chain[0].state == chain[1].state:
-                pruned.append(chain[i])
-            else:
-                pruned[-1] = chain[i]
+            pruned[-1] = chain[i]
         else:
             pruned.append(chain[i])
     return [n.state for n in pruned[1:]]
@@ -407,6 +470,13 @@ def mla_star_single_goal(
     h = _manhattan(start, goal)
     if horizon is None:
         horizon = max(8, int(_DEFAULT_HORIZON_FACTOR * h) + 4)
+
+    # Same permanent-termination safety gate as the two-goal variant: see
+    # the comment in ``mla_star_search``.
+    goal_min_arrival = (
+        reservations.latest_other_use_at(goal, ignore_agent=agent_id) + 1
+    )
+    goal_t_max = reservations.t_max_at(goal, ignore_agent=agent_id)
 
     nodes: List[_Node] = []
     open_heap: List[_PQItem] = []
@@ -447,7 +517,11 @@ def mla_star_single_goal(
             continue
         closed.add(ck)
         if node.state == goal:
-            return _reconstruct(nodes, item.node_idx, start)
+            arrival_t = current_t + node.g
+            if arrival_t >= goal_min_arrival and (
+                goal_t_max is None or arrival_t <= goal_t_max
+            ):
+                return _reconstruct(nodes, item.node_idx, start)
         if node.g >= horizon:
             continue
         absolute_t = current_t + node.g + 1

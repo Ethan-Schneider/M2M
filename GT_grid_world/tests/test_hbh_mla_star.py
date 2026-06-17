@@ -136,6 +136,97 @@ class TestHBHAssignment:
         assert isinstance(out, tuple) and len(out) == 3
 
 
+class TestCollisionFreeness:
+    """Regression coverage for the multi-agent reservation invariants.
+
+    The HBH driver must produce a set of agent paths that, when stepped
+    through tick-by-tick, never place two agents at the same cell at the
+    same time. The bug we hit in the 30%/30-bot/600-tick HBH baseline was
+    that idle free agents were only reserved at the *current* tick, so
+    later-planned agents' MLA* searches happily routed through their
+    cells in any future tick. The first concrete vertex collision in that
+    run was at simulator tick 4 (agent 19 idle at (19,22), agent 20
+    walked into the cell on its first move from (19,23)).
+
+    These tests verify the invariant at the scale ``populated_graph``
+    affords; the integrated baseline is the larger soak test.
+    """
+
+    def _no_two_agents_share_a_cell_simultaneously(self, Rs, t0: int):
+        """Step every agent's planned path forward and assert no collision.
+
+        For each tick ``t in [t0, t0 + max_path_len]`` compute every
+        agent's predicted state; assert no two agents share that state.
+        """
+        max_len = max(len(ag.path_sequence) for ag in Rs.agents) if Rs.agents else 0
+        # tick 0 is "current state", subsequent ticks consume one path
+        # entry each. For agents whose path is shorter than max_len, hold
+        # them at their last cell (matches the simulator's behaviour when
+        # ``path_sequence`` runs out).
+        for k in range(max_len + 1):
+            seen = {}
+            for ag in Rs.agents:
+                if k == 0:
+                    loc = ag.state
+                else:
+                    if k - 1 < len(ag.path_sequence):
+                        loc = ag.path_sequence[k - 1]
+                    elif ag.path_sequence:
+                        loc = ag.path_sequence[-1]
+                    else:
+                        loc = ag.state
+                assert loc not in seen, (
+                    f"vertex collision at relative tick {k}: agents "
+                    f"{seen[loc]} and {ag.id} both at {loc}"
+                )
+                seen[loc] = ag.id
+
+    def test_paths_from_single_hbh_call_are_collision_free(
+        self, minimal_stats, populated_graph, sample_agents
+    ):
+        tasks = _build_simple_tasks(populated_graph)
+        Rs, _, _ = hbh_mla_star_call(
+            S=minimal_stats, G=populated_graph, Rs=sample_agents,
+            J=tasks, t=0,
+        )
+        self._no_two_agents_share_a_cell_simultaneously(Rs, t0=0)
+
+    def test_idle_agent_cell_blocks_other_agents_through_planning(
+        self, minimal_stats, populated_graph, sample_agents
+    ):
+        """If agent 0 sits idle at a cell with no task, any other agent
+        planned in the same HBH call must not include that cell in its
+        path at any future tick. This is exactly the invariant that the
+        ``is_permanent_terminal=True`` fix in the rebuild loop preserves.
+        """
+        # Force agent 0 to have no task at all (idle, status=0, no path).
+        # The other two agents are free and will be planned by HBH below.
+        idle_cell = sample_agents.agents[0].state
+        tasks = _build_simple_tasks(populated_graph)
+        Rs, _, _ = hbh_mla_star_call(
+            S=minimal_stats, G=populated_graph, Rs=sample_agents,
+            J=tasks, t=0,
+        )
+        # Find agent 0 (the idle one). It may have been pushed off by the
+        # endpoint-clearing pass if it happens to sit on a pickup cell;
+        # if so, this scenario doesn't exercise the bug and we skip.
+        idle_ag = Rs.get_agent(0)
+        if idle_ag.path_sequence:
+            pytest.skip(
+                "agent 0 was pushed off its cell by endpoint clearing; "
+                "this run doesn't exercise the idle-agent invariant"
+            )
+        # Nobody else's planned path may visit ``idle_cell`` at any tick.
+        for ag in Rs.agents:
+            if ag.id == 0:
+                continue
+            for step_idx, loc in enumerate(ag.path_sequence):
+                assert loc != idle_cell, (
+                    f"agent {ag.id} routed through idle agent 0's cell "
+                    f"{idle_cell} at relative tick {step_idx + 1}"
+                )
+
+
 class TestDispatchWiring:
     """The strategy must be reachable through the ``TaskAllocation`` entry
     point. This test guards against future refactors silently dropping the

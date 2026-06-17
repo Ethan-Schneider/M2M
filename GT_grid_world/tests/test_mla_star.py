@@ -151,6 +151,48 @@ class TestMLAStarBasics:
         # Length is h(start, pi1) + h(pi1, pi2) + 1 wait at pi1 = 0 + 6 + 1.
         assert len(path) == 7
 
+    def test_start_equals_pickup_path_time_aligned_with_reservation(self):
+        # Regression test for the start==pi1 *off-by-one* time bug. With
+        # the bug, the search's g-values were one tick ahead of the
+        # path's actual time semantics (path[i] is at simulator time
+        # current_t + 1 + i, not current_t + i), so MLA* checked the
+        # wrong vertex at every step and returned paths that collided
+        # with already-reserved cells one tick later than the search
+        # believed it was looking. Concretely: another agent is reserved
+        # at cell (3, 5) at simulator time t=4. Our agent starts at
+        # (3, 3) which IS pi1, with pi2=(3, 7). The path must arrive
+        # at (3, 5) at simulator time t=5, NOT t=4 (the buggy
+        # implementation produced t=4, conflicting with the reservation).
+        G = _FakeGraph(10, 10)
+        rt = ReservationTable()
+        # Reserve cell (3, 5) at absolute time 4 (one earlier than our
+        # natural arrival time of 5 with the off-by-one fix in place).
+        rt.reserve_path(
+            agent_id=99, start_loc=(3, 5),
+            path=[],
+            start_t=4,
+            is_permanent_terminal=False,
+        )
+        start = (3, 3)
+        path = mla_star_search(
+            G=G, start=start, pi1=start, pi2=(3, 7),
+            reservations=rt, current_t=0, agent_id=1,
+        )
+        assert path is not None
+        # path[0] = pi1 (the implicit wait at pickup)        -> time 1
+        # path[1] = first move toward delivery                -> time 2
+        # path[2] = (3, 5)? It must NOT be (3, 5) at time 4
+        # because (4, (3,5)) is reserved by agent 99.
+        # Verify: path[i] must not equal (3, 5) at index i==3 (time 4),
+        # but is allowed at any other index.
+        for i, loc in enumerate(path):
+            absolute_t = 0 + 1 + i  # current_t + 1 + i
+            if loc == (3, 5):
+                assert absolute_t != 4, (
+                    f"MLA* placed agent 1 at (3,5) at time {absolute_t} "
+                    f"colliding with agent 99's reservation at t=4"
+                )
+
 
 # ---------------------------------------------------------------------------
 # Paper Case 1: pickup is another agent's terminal node
