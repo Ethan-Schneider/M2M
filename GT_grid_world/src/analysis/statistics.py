@@ -490,6 +490,9 @@ class Stats:
     
     def set_total_runtime(self, time : float) -> None:
         self.__total_runtime = time
+
+    def set_simulation_time(self, simulation_time: int) -> None:
+        self.__T = int(simulation_time)
         
     def add_total_CRG_time(self, time : float) -> None:
         self.__CRG_time.append(time)

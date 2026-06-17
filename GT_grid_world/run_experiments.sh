@@ -12,12 +12,12 @@ mkdir -p "$repo_root/data/videos"
 # Define arrays of parameters to test
 seeds=(900)
 num_robots=(40)
-time_horizons=(60)
+time_horizons=(600)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
 num_skus=(30)
-initial_inventory=(60.0)
+initial_inventory=(30.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
@@ -40,6 +40,22 @@ sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
+
+# Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
+use_precomputed_schedule=true
+schedule_file="$repo_root/data/schedules/schedule_20.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/schedule_20_init_inventory.txt"
+run_until_schedule_complete=true
+
+precomputed_args=()
+if [ "$use_precomputed_schedule" = true ]; then
+    precomputed_args+=(--use-precomputed-schedule)
+    precomputed_args+=(--schedule-file "$schedule_file")
+    precomputed_args+=(--initial-inventory-file "$initial_inventory_file")
+    if [ "$run_until_schedule_complete" = true ]; then
+        precomputed_args+=(--run-until-schedule-complete)
+    fi
+fi
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -73,6 +89,12 @@ for seed in "${seeds[@]}"; do
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
                         echo "  Solution Repair Detection Function: $solution_repair_detection_function"
                         echo "  Solution Repair Function: $solution_repair_function"
+                        echo "  Use Precomputed Schedule: $use_precomputed_schedule"
+                        if [ "$use_precomputed_schedule" = true ]; then
+                            echo "  Schedule File: $schedule_file"
+                            echo "  Initial Inventory File: $initial_inventory_file"
+                            echo "  Run Until Schedule Complete: $run_until_schedule_complete"
+                        fi
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -106,7 +128,8 @@ for seed in "${seeds[@]}"; do
                             --sku-distribution-weight "$sku_distribution_weight" \
                             --agent-unallocated-penalty "$agent_unallocated_penalty" \
                             --solution-repair-detection-function "$solution_repair_detection_function" \
-                            --solution-repair-function "$solution_repair_function"
+                            --solution-repair-function "$solution_repair_function" \
+                            "${precomputed_args[@]}"
 
                         # Optional: Add a small delay between runs
                         sleep 1

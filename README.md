@@ -29,6 +29,8 @@ pip install -r requirements.txt
 
 Key packages include `numpy`, `scipy`, `pandas`, `matplotlib`, `pybind11`, and `statsmodels`.
 
+numpy, scipy, pandas, matplotlib, pybind11, pybind11[global], statsmodels, pyyaml, sortedcontainers, munkres, 
+
 ### C++ Requirements
 
 The C++ submodules (LNS, C-LNS, PBS, EECBS) require the following system libraries:
@@ -36,6 +38,8 @@ The C++ submodules (LNS, C-LNS, PBS, EECBS) require the following system librari
 ```bash
 # Ubuntu / Debian
 sudo apt-get install cmake build-essential libeigen3-dev libboost-all-dev
+
+sudo apt-get install libdlib-dev
 ```
 
 - **CMake** >= 2.6
