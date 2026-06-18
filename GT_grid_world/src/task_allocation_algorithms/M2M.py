@@ -427,7 +427,7 @@ class LNS:
                 total_cost -= G.get_distance(agent.task_sequence[i][2], agent.task_sequence[i+1][1])
         return total_cost
     
-def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
+def M2M_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",
                 removal_operator: str = "worst", repair_operator: str = "greedy", t: int = None,
@@ -437,7 +437,7 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
                 sku_distribution_weight: float = 0.0,
                 agent_unallocated_penalty: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
-    Call the LNS algorithm with given parameters.
+    Call the M2M algorithm with given parameters.
     
     Args:
         S: Statistics object

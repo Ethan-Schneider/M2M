@@ -9,6 +9,7 @@ from src.task_allocation_algorithms.repair_detection.backtracking import detect_
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
+from src.reallocation_tasks.generate_reallocation_tasks import generate_reallocation_tasks
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -35,7 +36,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             driveway_dual_cycle: bool = False,
             use_precomputed_schedule: bool = False,
             schedule: np.ndarray = None,
-            run_until_schedule_complete: bool = False) -> int:
+            run_until_schedule_complete: bool = False,
+            W: int = 300,
+            B: int = 60) -> int:
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
@@ -68,6 +71,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 G,
                 last_task_id,
             )
+
+            # Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
+            # print(f"Number of reallocation tasks: {len(Ta)}")
+            # # for task_id, task in Ta.items():
+            # #     print(f"Reallocation task {task_id}: {task}")
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
@@ -427,7 +435,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          use_precomputed_schedule: bool = False,
          schedule_file: str = None,
          initial_inventory_file: str = None,
-         run_until_schedule_complete: bool = False) -> None:
+         run_until_schedule_complete: bool = False,
+         W: int = 300,
+         B: int = 60) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -578,6 +588,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             use_precomputed_schedule=use_precomputed_schedule,
             schedule=schedule,
             run_until_schedule_complete=run_until_schedule_complete,
+            W=W,
+            B=B,
     )
     if run_until_schedule_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -608,10 +620,10 @@ if __name__=="__main__":
                        choices=['informed_uniform', 'uninformed_uniform', 'feedback_control'],
                        help='Task generation strategy')
     parser.add_argument('--initial-task-assign-strategy', type=str, required=True,
-                       choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
+                       choices=['cost_matrix', 'random', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
-                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'hbh_mla_star', 'none'],
+                       choices=['M2M', 'c_lns', 'c_rmca', 'hbh_mla_star', 'none'],
                        help='Task assignment strategy for improvement. '
                             '"hbh_mla_star" implements Grenouilleau et al. (ICAPS 2019) '
                             'HBH+MLA*: a coupled allocator + path planner that bypasses '
@@ -688,6 +700,8 @@ if __name__=="__main__":
     parser.add_argument('--run-until-schedule-complete', action='store_true',
                        help='Run until all precomputed schedule tasks are completed instead '
                             'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
+    parser.add_argument('--W', type=int, default=300, help='Lookahead window')
+    parser.add_argument('--B', type=int, default=60, help='Lookahead beginning')
     args = parser.parse_args()
     
     main(
@@ -731,4 +745,6 @@ if __name__=="__main__":
         schedule_file=args.schedule_file,
         initial_inventory_file=args.initial_inventory_file,
         run_until_schedule_complete=args.run_until_schedule_complete,
+        W=args.W,
+        B=args.B,
     )
