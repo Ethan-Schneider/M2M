@@ -34,9 +34,10 @@ def _remove_tasks_from_schedule(schedule: NDArray, added_rows: List[NDArray]) ->
     mask = np.ones(schedule.shape[0], dtype=bool)
     for row in added_rows:
         matches = np.all(schedule == row, axis=1)
-        if not np.any(matches):
+        remaining_matches = np.flatnonzero(matches & mask)
+        if remaining_matches.size == 0:
             continue
-        mask[np.argmax(matches)] = False
+        mask[remaining_matches[0]] = False
     remaining = schedule[mask]
     if remaining.size == 0:
         return np.empty((0, 4), dtype=int)
@@ -129,11 +130,12 @@ def add_tasks_from_schedule(
 
 def schedule_tasks_finished(
     schedule: NDArray,
+    J: dict,
     S: Stats,
     total_schedule_tasks: int,
 ) -> bool:
-    """True when every schedule task has been released and completed."""
-    if schedule.size > 0:
+    """True when every schedule task has been released, completed, and ``J`` is empty."""
+    if schedule.size > 0 or len(J) > 0:
         return False
     completed_ids = set(S.get_completed_task_ids())
     return len(completed_ids) >= total_schedule_tasks

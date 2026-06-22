@@ -187,8 +187,8 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
 
 
-def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int,
-             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False) -> Tuple[AgentLoader, set]:
+def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a : Dict[int, Tuple], map_name : str, t : int,
+             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False) -> Tuple[AgentLoader, Dict[int, Tuple]]:
     """
     Simulate the system for one timestep.
 
@@ -209,7 +209,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
             chain it (1.5-skeleton dual cycling, OB -> IB).
 
     Returns:
-        Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks
+        Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks and rearrangement tasks
     """
 
     # Update state of robots
@@ -306,9 +306,14 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 goal_location = task[2]
                 deadline = task[3]
                 
-                deadline = J[task_id][2]
-                sku_id = J[task_id][3]
-                inbound_task = J[task_id][4]
+                if task_id in J_a:
+                    deadline = J_a[task_id][2]
+                    sku_id = J_a[task_id][3]
+                    inbound_task = J_a[task_id][4]
+                else:
+                    deadline = J[task_id][2]
+                    sku_id = J[task_id][3]
+                    inbound_task = J[task_id][4]
 
                 if sku_id != agent.get_sku_id_carrying():
                     raise ValueError(f"Agent {agent.id} carrying sku {agent.get_sku_id_carrying()} but task {task_id} requires sku {sku_id} ... Exiting")
@@ -326,10 +331,31 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                     pass
                 agent.set_sku_id_carrying(None)
 
-                S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
-                S.update_service_time(task_id, t)
-                
-                J.pop(task_id)
+                if inbound_task == TASK_TYPE_SHUFFLE:
+                    S.add_completed_rearrangement_task_id(
+                        task_id,
+                        t,
+                        start_location,
+                        goal_location,
+                        int(deadline),
+                        int(sku_id),
+                        int(inbound_task),
+                    )
+                else:
+                    S.add_completed_task_id(
+                        task_id,
+                        t,
+                        start_location,
+                        goal_location,
+                        int(deadline),
+                        int(sku_id),
+                        int(inbound_task),
+                    )
+                    S.update_service_time(task_id, t)
+                if task_id in J_a:
+                    J_a.pop(task_id)
+                else:
+                    J.pop(task_id)
                     
                 agent.task_sequence.pop(0)
 
@@ -382,4 +408,4 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                     if t <= 100:
                         S.append_early_task_ids(new_task_id)
                         
-    return Rs, J
+    return Rs, J, J_a

@@ -6,6 +6,18 @@ from .graphing import *
 from ..agent import *
 
 
+def _json_safe_location(loc):
+    """Convert task locations to JSON-serializable lists."""
+    if isinstance(loc, frozenset):
+        if len(loc) == 1:
+            loc = next(iter(loc))
+        else:
+            return [list(x) if isinstance(x, tuple) else x for x in sorted(loc)]
+    if isinstance(loc, tuple):
+        return list(loc)
+    return loc
+
+
 def compute_sku_spread(eta: np.ndarray) -> float:
     """Hierarchical SKU-spread metric (entropy weighted by per-SKU count).
 
@@ -192,6 +204,9 @@ class Stats:
             
         self.__completed_task_ids = []
         self.__completed_task_details = {}  # task_id -> (start_location, goal_location)
+        self.__completed_rearrangement_task_ids = []
+        self.__rearrangement_task_completion_timestamps = {}  # task_id -> timestep
+        self.__completed_rearrangement_task_details = {}  # task_id -> (start, goal, deadline, sku, type)
         self.__completed_to_pickup_task_ids = []
         
         # Runtime Stastics: 
@@ -471,6 +486,34 @@ class Stats:
         
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
+
+    def add_completed_rearrangement_task_id(
+        self,
+        task_id: int,
+        timestep: int,
+        start_location: tuple = None,
+        goal_location: tuple = None,
+        deadline: int = None,
+        sku_id: int = None,
+        task_type: int = None,
+    ) -> None:
+        """Record completion of a rearrangement (shuffle) task."""
+        self.__completed_rearrangement_task_ids.append(int(task_id))
+        self.__rearrangement_task_completion_timestamps[task_id] = int(timestep)
+        if start_location is not None and goal_location is not None:
+            self.__completed_rearrangement_task_details[task_id] = (
+                _json_safe_location(start_location),
+                _json_safe_location(goal_location),
+                deadline,
+                sku_id,
+                task_type,
+            )
+
+    def get_completed_rearrangement_task_ids(self) -> list:
+        return self.__completed_rearrangement_task_ids
+
+    def get_total_completed_rearrangement_tasks(self) -> int:
+        return len(self.__completed_rearrangement_task_ids)
             
     # ====================== Completed To-Pickup Task Id Functions
     
@@ -801,6 +844,14 @@ class Stats:
             "total_completed_tasks": int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
             "completed_task_details": self.__completed_task_details,
+            "total_completed_rearrangement_tasks": int(
+                len(self.__completed_rearrangement_task_ids)
+            ),
+            "completed_rearrangement_tasks": self.__completed_rearrangement_task_ids,
+            "completed_rearrangement_task_details": self.__completed_rearrangement_task_details,
+            "rearrangement_task_completion_timestamps": (
+                self.__rearrangement_task_completion_timestamps
+            ),
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,

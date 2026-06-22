@@ -10,9 +10,9 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(900)
+seeds=(2600)
 num_robots=(40)
-time_horizons=(600)
+time_horizons=(250)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
@@ -21,7 +21,7 @@ initial_inventory=(30.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="c_lns"
+improvement_task_assign_strategy="M2M"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
 map="$repo_root/data/maps/study_small_restricted"
@@ -40,11 +40,13 @@ sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
+W=240
+B=30
 
 # Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
 use_precomputed_schedule=true
-schedule_file="$repo_root/data/schedules/schedule_20.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/schedule_20_init_inventory.txt"
+schedule_file="$repo_root/data/schedules/schedule_10.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/schedule_10_init_inventory.txt"
 run_until_schedule_complete=true
 
 precomputed_args=()
@@ -90,6 +92,8 @@ for seed in "${seeds[@]}"; do
                         echo "  Solution Repair Detection Function: $solution_repair_detection_function"
                         echo "  Solution Repair Function: $solution_repair_function"
                         echo "  Use Precomputed Schedule: $use_precomputed_schedule"
+                        echo "  Lookahead Window (W): $W"
+                        echo "  Lookahead Beginning (B): $B"
                         if [ "$use_precomputed_schedule" = true ]; then
                             echo "  Schedule File: $schedule_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
@@ -129,6 +133,8 @@ for seed in "${seeds[@]}"; do
                             --agent-unallocated-penalty "$agent_unallocated_penalty" \
                             --solution-repair-detection-function "$solution_repair_detection_function" \
                             --solution-repair-function "$solution_repair_function" \
+                            --W "$W" \
+                            --B "$B" \
                             "${precomputed_args[@]}"
 
                         # Optional: Add a small delay between runs

@@ -10,6 +10,9 @@ from src.task_allocation_algorithms.repair_detection.duration_difference import 
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
 from src.reallocation_tasks.generate_reallocation_tasks import generate_reallocation_tasks
+from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
+from src.reallocation_tasks.optimal_insertion import optimal_insertion
+from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -39,10 +42,15 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             run_until_schedule_complete: bool = False,
             W: int = 300,
             B: int = 60) -> int:
-    # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
+    # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
     J = {}
 
+    # Initilize empty dict of rearrangement tasks defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
+    # Rearrangement tasks only added when committed to an agent's task sequence
+    J_a = {}
+
     last_task_id = 0
+    last_rearrangement_task_id = 100000
     total_schedule_tasks = schedule.shape[0] if use_precomputed_schedule and schedule is not None else 0
     
     global_tik = time.time()
@@ -101,6 +109,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tik = time.time()
 
         print("=============================" + "Task Allocation"+ "=============================")
+        if improvement_task_assignment_strategy == "hbh_mla_star" and J:
+            resolve_open_task_locations(J, G, Rs)
+        if len(J) > 0:
+            print(f"Printout a task in the system: {J[list(J.keys())[0]]}")
         # Check if all tasks are allocated, if so, skip
         total = 0
         for agent in Rs.agents:
@@ -141,7 +153,20 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # print(f"Inbound tasks allocated: {inbound_tasks_allocated}")
         # print(f"Initial outbound tasks: {initial_outbound_tasks}")
         # print(f"Initial inbound tasks: {initial_inbound_tasks}")
-        
+
+        print("=============================" +"MILP Insertion"+ "=============================")
+        tik = time.time()
+        Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
+        tok = time.time()
+        print(f"Generate reallocation tasks time: {tok - tik} for {len(Ta)}")
+        tik = time.time()
+        # Rs, _ = optimal_insertion(G, Rs, Ta, J, lambda_=1.0, mu=1.0, t0=t)
+        Rs, J_a = solve_insertion(Ta, Rs, G, J, J_a, lambda_= 1.5, next_rearrangement_task_id=last_rearrangement_task_id)
+        if J_a:
+            last_rearrangement_task_id = max(J_a.keys())
+        tok = time.time()
+        print(f"MILP Insertion time: {tok - tik}")
+        # exit(0)
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
         
@@ -338,8 +363,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, J = simulate.simulate(
-            S, G, Rs, J, map, t,
+        Rs, J, J_a = simulate.simulate(
+            S, G, Rs, J, J_a, map, t,
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
         )
@@ -398,10 +423,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             run_until_schedule_complete
             and use_precomputed_schedule
             and import_schedule.schedule_tasks_finished(
-                schedule, S, total_schedule_tasks
+                schedule, J, S, total_schedule_tasks
             )
         ):
             print(f"All {total_schedule_tasks} schedule tasks completed at t={t}")
+            print(f"Current tasks in system: {len(J)}")
+            print(f"Current tasks in schedule: {schedule.shape[0]}")
             t += 1
             break
 
