@@ -26,3 +26,16 @@ pytest-xdist==3.8.0
 pytest-regressions==2.11.0
 hypothesis[numpy]==6.155.2
 freezegun==1.5.5
+
+# --- Comparator-specific solvers ---
+# elkai wraps LKH-3 (Helsgaun 2017), the TSP solver TA-Hybrid uses for its
+# task-assignment stage (Liu, Ma, Li, Koenig, AAMAS 2019 -- Section 3.2).
+# networkx (>=3.0) is already pulled in by other deps; we keep it as the
+# fallback MCMF backend for the AMAPF solve (paper Section 5.4) but
+# default to OR-tools when available.
+elkai==2.0.1
+# OR-tools' SimpleMinCostFlow is the production MCMF backend for the
+# Group-2 AMAPF solve. Cost-scaling push-relabel (C++); empirically
+# ~100-1000x faster than ``networkx.max_flow_min_cost`` on the AMAPF
+# graphs we generate at study_small_restricted scale.
+ortools==9.15.6755

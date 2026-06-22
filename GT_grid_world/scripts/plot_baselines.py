@@ -72,6 +72,7 @@ METHOD_LABELS = {
     "c_lns": "LNS-PBS",
     "py_lns": "M2M (4D cost tensor + py_lns)",
     "hbh_mla_star": "HBH+MLA*",
+    "ta_hybrid": "TA-Hybrid",
 }
 
 # Filename tags appended to every produced PNG when a single allocator's
@@ -83,6 +84,7 @@ METHOD_FILE_TAGS = {
     "c_lns": "lns-pbs",
     "py_lns": "py-lns",
     "hbh_mla_star": "hbh-mla",
+    "ta_hybrid": "ta-hybrid",
 }
 
 
@@ -760,7 +762,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--method",
-        choices=["all", "c_lns", "py_lns", "hbh_mla_star"],
+        choices=["all", "c_lns", "py_lns", "hbh_mla_star", "ta_hybrid"],
         default=None,
         help=(
             "Filter loaded runs by the JSON's improvement_task_assignment_strategy. "

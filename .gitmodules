@@ -8,3 +8,6 @@
 [submodule "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns"]
 	path = GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns
 	url = https://github.com/Ethan-Schneider/LNS.git
+[submodule "GT_grid_world/src/path_finding_algorithms/external_algorithms/MAPF-ICBS"]
+	path = GT_grid_world/src/path_finding_algorithms/external_algorithms/MAPF-ICBS
+	url = https://github.com/gloriyo/MAPF-ICBS.git

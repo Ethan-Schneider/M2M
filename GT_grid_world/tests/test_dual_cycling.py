@@ -1,19 +1,21 @@
-"""Unit and integration tests for dual cycling (roadmap section 1.5).
+"""Unit and integration tests for dual cycling.
+
+Dual cycling has been moved out of ``simulate.py`` into the allocation
+pipeline (``task_allocation_algorithms.dual_cycle_allocation``). Pairing now
+happens *after* the inner allocator (``fast_greedy``, ``c_lns``, ``py_lns``,
+...) returns and *before* path planning, so chained IB->OB / OB->IB tails
+participate in routing on the same tick they're created.
 
 Covers:
 
 * Graph aisle / driveway membership helpers (``is_warehouse_aisle_location``,
   ``is_driveway_location``, ``get_same_aisle_locations``).
-* The two ``_find_*_dual_cycle_chain`` helpers in ``simulate.py`` -- positive
-  match, negative match (different aisle / no driveway SKU), already-allocated
-  rejection, wrong completed-task-type rejection.
-* End-to-end: the dual-cycle hook fires inside ``simulate()`` only when the
-  matching CLI flag is on, and never when the flag is off.
-
-The tests use the ``populated_graph`` fixture (30%-filled warehouse) so both
-warehouse-full and warehouse-empty cells are available, which the dual-cycle
-chain finder needs in order to pick valid start / goal cells for the chained
-task.
+* The two ``_find_*_dual_cycle_chain`` helpers in
+  ``dual_cycle_allocation.py`` -- positive match, different-aisle / no-SKU
+  rejection, already-allocated rejection, wrong endpoint-type rejection.
+* End-to-end: ``apply_dual_cycle_pairing`` chains an OB onto an IB tail
+  when the aisle flag is on, chains an IB onto an OB tail when the
+  driveway flag is on, and is a no-op when both are off.
 """
 
 from __future__ import annotations
@@ -21,14 +23,19 @@ from __future__ import annotations
 import pytest
 
 from GT_grid_world.src.agent import Agent, AgentLoader
-from GT_grid_world.src.simulate import (
+from GT_grid_world.src.task_allocation_algorithms.dual_cycle_allocation import (
     TASK_TYPE_INBOUND,
     TASK_TYPE_OUTBOUND,
-    TASK_TYPE_SHUFFLE,
+    _collect_global_allocation_snapshot,
     _find_aisle_dual_cycle_chain,
     _find_driveway_dual_cycle_chain,
-    simulate,
+    apply_dual_cycle_pairing,
 )
+
+# Type=2 (shuffle / rearrangement) is referenced in some tuple-shape negative
+# tests below; reuse the simulate-side constant since both sides agree on
+# the wire value.
+TASK_TYPE_SHUFFLE = 2
 
 
 # ---------------------------------------------------------------------------
@@ -73,9 +80,9 @@ def test_get_same_aisle_locations_empty_for_non_aisle(populated_graph):
 # ---------------------------------------------------------------------------
 # Aisle dual cycle: _find_aisle_dual_cycle_chain
 # ---------------------------------------------------------------------------
-def _make_loader_with_agent(state):
-    agent = Agent(agent_id=0, state=state)
-    return AgentLoader([agent]), agent
+def _empty_snapshot():
+    """Convenience: no other agent has any task allocated yet."""
+    return set(), set()
 
 
 def test_aisle_dc_finds_same_column_outbound(populated_graph):
@@ -92,7 +99,6 @@ def test_aisle_dc_finds_same_column_outbound(populated_graph):
     ]
     assert same_column_full, "fixture should expose at least one full cell in this aisle"
 
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     J = {
         42: (
             frozenset(same_column_full),
@@ -102,8 +108,11 @@ def test_aisle_dc_finds_same_column_outbound(populated_graph):
             TASK_TYPE_OUTBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_aisle_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_aisle_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is not None
     task_id, chosen_start, chosen_goal, deadline = result
@@ -125,7 +134,6 @@ def test_aisle_dc_rejects_different_aisle_outbound(populated_graph):
     if not other_column_full:
         pytest.skip("populated_graph happens to have all full cells in one column")
 
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     J = {
         42: (
             frozenset(other_column_full),
@@ -133,15 +141,19 @@ def test_aisle_dc_rejects_different_aisle_outbound(populated_graph):
             100, 1, TASK_TYPE_OUTBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_aisle_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_aisle_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
 
 def test_aisle_dc_skips_already_allocated_task(populated_graph):
     """If the candidate OB task is already in some other agent's task_sequence,
-    the chain finder must not re-assign it."""
+    the chain finder must not re-assign it. The caller is responsible for
+    populating the snapshot from the live ``Rs``."""
     completed_goal = next(
         a for a in populated_graph.aisle_locations
         if a in populated_graph.warehouse.get_full_locations()
@@ -154,11 +166,6 @@ def test_aisle_dc_skips_already_allocated_task(populated_graph):
     chosen_start = same_column_full[0]
     chosen_goal = list(populated_graph.driveway.get_empty_locations())[0]
 
-    main_agent = Agent(agent_id=0, state=completed_goal)
-    other_agent = Agent(agent_id=1, state=(17, 0))
-    other_agent.task_sequence = [(42, chosen_start, chosen_goal, 100)]
-    Rs = AgentLoader([main_agent, other_agent])
-
     J = {
         42: (
             frozenset(same_column_full),
@@ -166,17 +173,21 @@ def test_aisle_dc_skips_already_allocated_task(populated_graph):
             100, 1, TASK_TYPE_OUTBOUND,
         ),
     }
+    # Simulate that some other agent has already committed to task 42.
+    allocated_task_ids = {42}
+    allocated_locs = {chosen_start, chosen_goal}
 
-    result = _find_aisle_dual_cycle_chain(main_agent, completed_goal, J, Rs, populated_graph)
+    result = _find_aisle_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
 
 def test_aisle_dc_returns_none_when_completed_goal_not_aisle(populated_graph):
-    """The aisle DC hook must no-op if the just-completed dropoff isn't a
-    warehouse aisle cell (e.g., it was actually an OB drop at a driveway)."""
+    """The aisle DC finder must no-op if the tour endpoint isn't a warehouse
+    aisle cell (e.g., it was actually an OB drop at a driveway)."""
     completed_goal = populated_graph.station_locations[0]
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     full_cells = list(populated_graph.warehouse.get_full_locations())
     J = {
         42: (
@@ -185,8 +196,11 @@ def test_aisle_dc_returns_none_when_completed_goal_not_aisle(populated_graph):
             100, 1, TASK_TYPE_OUTBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_aisle_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_aisle_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
@@ -203,7 +217,6 @@ def test_aisle_dc_ignores_inbound_and_shuffle_tasks(populated_graph):
         loc for loc in populated_graph.warehouse.get_full_locations()
         if loc[1] == column
     ]
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     J = {
         1: (
             frozenset(populated_graph.driveway.get_empty_locations()),
@@ -216,8 +229,11 @@ def test_aisle_dc_ignores_inbound_and_shuffle_tasks(populated_graph):
             100, 1, TASK_TYPE_SHUFFLE,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_aisle_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_aisle_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
@@ -232,7 +248,6 @@ def test_driveway_dc_finds_inbound_with_driveway_sku(populated_graph):
     populated_graph.driveway.add_sku_instance(1, driveway_loc_for_pickup)
 
     completed_goal = populated_graph.station_locations[0]
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     J = {
         7: (
             frozenset({driveway_loc_for_pickup}),
@@ -240,8 +255,11 @@ def test_driveway_dc_finds_inbound_with_driveway_sku(populated_graph):
             150, 1, TASK_TYPE_INBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_driveway_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_driveway_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is not None
     task_id, chosen_start, chosen_goal, deadline = result
@@ -255,7 +273,6 @@ def test_driveway_dc_returns_none_when_no_sku_at_pickup(populated_graph):
     """If the IB task's pickup driveway cell is empty, no chain can be made."""
     completed_goal = populated_graph.station_locations[0]
     empty_driveway = populated_graph.station_locations[1]
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     J = {
         7: (
             frozenset({empty_driveway}),
@@ -263,17 +280,19 @@ def test_driveway_dc_returns_none_when_no_sku_at_pickup(populated_graph):
             150, 1, TASK_TYPE_INBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_driveway_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_driveway_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
 
 def test_driveway_dc_returns_none_when_completed_goal_not_driveway(populated_graph):
-    """The driveway DC hook must no-op if the just-completed dropoff isn't a
+    """The driveway DC finder must no-op if the tour endpoint isn't a
     driveway cell."""
     completed_goal = populated_graph.aisle_locations[0]
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     populated_graph.driveway.add_sku_instance(1, populated_graph.station_locations[0])
     J = {
         7: (
@@ -282,8 +301,11 @@ def test_driveway_dc_returns_none_when_completed_goal_not_driveway(populated_gra
             150, 1, TASK_TYPE_INBOUND,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_driveway_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_driveway_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
@@ -291,7 +313,6 @@ def test_driveway_dc_returns_none_when_completed_goal_not_driveway(populated_gra
 def test_driveway_dc_ignores_outbound_and_shuffle_tasks(populated_graph):
     completed_goal = populated_graph.station_locations[0]
     populated_graph.driveway.add_sku_instance(1, populated_graph.station_locations[1])
-    Rs, agent = _make_loader_with_agent(state=completed_goal)
     full_cells = list(populated_graph.warehouse.get_full_locations())
     J = {
         1: (
@@ -305,97 +326,60 @@ def test_driveway_dc_ignores_outbound_and_shuffle_tasks(populated_graph):
             100, 1, TASK_TYPE_SHUFFLE,
         ),
     }
+    allocated_task_ids, allocated_locs = _empty_snapshot()
 
-    result = _find_driveway_dual_cycle_chain(agent, completed_goal, J, Rs, populated_graph)
+    result = _find_driveway_dual_cycle_chain(
+        completed_goal, completed_goal, J, allocated_task_ids, allocated_locs, populated_graph
+    )
 
     assert result is None
 
 
 # ---------------------------------------------------------------------------
-# Integration: simulate() honors the on/off flags and chains the next task
+# Integration: apply_dual_cycle_pairing chains tails when the flag is on
 # ---------------------------------------------------------------------------
-def _setup_ib_dropoff_state(populated_graph, minimal_stats, *, sku=1):
-    """Place an agent in the delivery phase of an IB task at a warehouse
-    aisle cell. Returns ``(Rs, agent, ib_task_id, drop_loc, J)``.
+def _make_loader_with_agent(state):
+    agent = Agent(agent_id=0, state=state)
+    return AgentLoader([agent]), agent
+
+
+def _agent_with_ib_tail(populated_graph, ib_task_id=100):
+    """Agent has just been assigned (by the allocator) an inbound task that
+    drops off at a warehouse aisle cell. ``apply_dual_cycle_pairing`` should
+    chain a same-aisle OB onto its tail when the aisle flag is on.
+
+    Returns ``(Rs, agent, J, ib_drop_loc, ib_pickup_loc)``.
     """
     drop_loc = next(
         a for a in populated_graph.aisle_locations
         if a in populated_graph.warehouse.get_empty_locations()
     )
     pickup_loc = populated_graph.station_locations[0]
-    populated_graph.driveway.add_sku_instance(sku, pickup_loc)
+    populated_graph.driveway.add_sku_instance(1, pickup_loc)
 
-    ib_task_id = 100
-    deadline = 100
     J = {
         ib_task_id: (
             frozenset({pickup_loc}),
             frozenset({drop_loc}),
-            deadline, sku, TASK_TYPE_INBOUND,
+            100, 1, TASK_TYPE_INBOUND,
         ),
     }
-    minimal_stats.add_task_release(ib_task_id, 0)
-    minimal_stats.add_task_deadline(ib_task_id, deadline)
-    minimal_stats.add_actual_distance(ib_task_id)
-    minimal_stats.add_actual_pickup_distance(ib_task_id)
-    minimal_stats.add_actual_duration(ib_task_id)
-    minimal_stats.add_actual_pickup_duration(ib_task_id)
 
-    agent = Agent(agent_id=0, state=drop_loc)
-    agent.status = 2
-    agent.task_sequence = [(ib_task_id, pickup_loc, drop_loc, deadline)]
-    agent.path_sequence = []
-    agent.set_sku_id_carrying(sku)
-    Rs = AgentLoader([agent])
-    populated_graph.set_occupied(drop_loc, True)
-    return Rs, agent, ib_task_id, drop_loc, J
+    Rs, agent = _make_loader_with_agent(state=pickup_loc)
+    agent.status = 1
+    agent.task_sequence = [(ib_task_id, pickup_loc, drop_loc, 100)]
+    return Rs, agent, J, drop_loc, pickup_loc
 
 
-def test_simulate_aisle_dual_cycle_chains_when_flag_on(populated_graph, minimal_stats, seeded_rng):
-    """With ``aisle_dual_cycle=True``, completing an IB at an aisle cell that
-    has a same-aisle OB candidate in J must leave the agent with that OB
-    chained onto its task_sequence (status=1, ready to pick it up)."""
-    Rs, agent, ib_task_id, drop_loc, J = _setup_ib_dropoff_state(populated_graph, minimal_stats)
-
-    column = drop_loc[1]
-    same_column_full = [
-        loc for loc in populated_graph.warehouse.get_full_locations()
-        if loc[1] == column
-    ]
-    if not same_column_full:
-        pytest.skip("populated_graph has no full cells in the IB drop's aisle")
-    ob_task_id = 200
-    ob_deadline = 200
-    J[ob_task_id] = (
-        frozenset(same_column_full),
-        frozenset(populated_graph.driveway.get_empty_locations()),
-        ob_deadline, 2, TASK_TYPE_OUTBOUND,
-    )
-    minimal_stats.add_task_release(ob_task_id, 0)
-    minimal_stats.add_task_deadline(ob_task_id, ob_deadline)
-
-    Rs, J = simulate(
-        minimal_stats, populated_graph, Rs, J, "small_test", t=0,
-        aisle_dual_cycle=True, driveway_dual_cycle=False,
-    )
-
-    assert ib_task_id not in J, "IB task should be popped after dropoff"
-    assert ob_task_id in J, "OB task remains in J until simulate completes it"
-    assert agent.status == 1, "agent should be in pickup phase of the chained OB"
-    assert len(agent.task_sequence) == 1, "exactly one chained task on the sequence"
-    chained = agent.task_sequence[0]
-    assert chained[0] == ob_task_id
-    assert chained[1][1] == column, "chained pickup must be in the same aisle"
-
-
-def test_simulate_aisle_dual_cycle_does_not_chain_when_flag_off(
+def test_apply_pairing_chains_aisle_ob_when_flag_on(
     populated_graph, minimal_stats, seeded_rng
 ):
-    """With ``aisle_dual_cycle=False``, the same setup must leave the agent
-    idle (status=0) instead of chaining the OB."""
-    Rs, agent, ib_task_id, drop_loc, J = _setup_ib_dropoff_state(populated_graph, minimal_stats)
+    """Agent's tail is an IB ending at a warehouse aisle cell. With
+    ``aisle_dual_cycle=True`` and a same-aisle OB available in J,
+    ``apply_dual_cycle_pairing`` must append that OB onto the tail."""
+    Rs, agent, J, ib_drop_loc, ib_pickup_loc = _agent_with_ib_tail(populated_graph)
 
-    column = drop_loc[1]
+    column = ib_drop_loc[1]
     same_column_full = [
         loc for loc in populated_graph.warehouse.get_full_locations()
         if loc[1] == column
@@ -408,23 +392,56 @@ def test_simulate_aisle_dual_cycle_does_not_chain_when_flag_off(
         frozenset(populated_graph.driveway.get_empty_locations()),
         200, 2, TASK_TYPE_OUTBOUND,
     )
-    minimal_stats.add_task_release(ob_task_id, 0)
-    minimal_stats.add_task_deadline(ob_task_id, 200)
 
-    Rs, J = simulate(
-        minimal_stats, populated_graph, Rs, J, "small_test", t=0,
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
+        aisle_dual_cycle=True, driveway_dual_cycle=False,
+    )
+
+    assert len(agent.task_sequence) == 2, "OB should be chained onto the IB tail"
+    head_id, _, _, _ = agent.task_sequence[0]
+    tail_id, tail_start, tail_goal, _ = agent.task_sequence[1]
+    assert head_id == 100
+    assert tail_id == ob_task_id
+    assert tail_start[1] == column, "chained pickup must be in the same aisle"
+    assert tail_goal in populated_graph.driveway.get_empty_locations()
+
+
+def test_apply_pairing_does_not_chain_when_aisle_flag_off(
+    populated_graph, minimal_stats, seeded_rng
+):
+    """Same setup as above but with ``aisle_dual_cycle=False``: the agent's
+    task_sequence must be untouched."""
+    Rs, agent, J, ib_drop_loc, _ = _agent_with_ib_tail(populated_graph)
+
+    column = ib_drop_loc[1]
+    same_column_full = [
+        loc for loc in populated_graph.warehouse.get_full_locations()
+        if loc[1] == column
+    ]
+    if not same_column_full:
+        pytest.skip("populated_graph has no full cells in the IB drop's aisle")
+    ob_task_id = 200
+    J[ob_task_id] = (
+        frozenset(same_column_full),
+        frozenset(populated_graph.driveway.get_empty_locations()),
+        200, 2, TASK_TYPE_OUTBOUND,
+    )
+
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
         aisle_dual_cycle=False, driveway_dual_cycle=False,
     )
 
-    assert ib_task_id not in J
-    assert ob_task_id in J, "OB stays unallocated when the flag is off"
-    assert agent.status == 0, "agent should be idle when dual cycling is disabled"
-    assert agent.task_sequence == []
+    assert len(agent.task_sequence) == 1, "no chaining when both flags are off"
 
 
-def _setup_ob_dropoff_state(populated_graph, minimal_stats, *, sku=1):
-    """Place an agent in the delivery phase of an OB task at a driveway cell.
-    Returns ``(Rs, agent, ob_task_id, drop_loc, J)``.
+def _agent_with_ob_tail(populated_graph, ob_task_id=100):
+    """Agent has been assigned an outbound that drops off at a driveway cell.
+    ``apply_dual_cycle_pairing`` should chain a same-driveway IB onto its
+    tail when the driveway flag is on.
+
+    Returns ``(Rs, agent, J, ob_drop_loc, ob_pickup_loc, ob_sku)``.
     """
     pickup_loc = next(
         a for a in populated_graph.aisle_locations
@@ -433,69 +450,27 @@ def _setup_ob_dropoff_state(populated_graph, minimal_stats, *, sku=1):
     pickup_sku = populated_graph.warehouse.get_sku_at_location(pickup_loc).sku_id
     drop_loc = populated_graph.station_locations[0]
 
-    ob_task_id = 100
-    deadline = 100
     J = {
         ob_task_id: (
             frozenset({pickup_loc}),
             frozenset({drop_loc}),
-            deadline, pickup_sku, TASK_TYPE_OUTBOUND,
+            100, pickup_sku, TASK_TYPE_OUTBOUND,
         ),
     }
-    minimal_stats.add_task_release(ob_task_id, 0)
-    minimal_stats.add_task_deadline(ob_task_id, deadline)
-    minimal_stats.add_actual_distance(ob_task_id)
-    minimal_stats.add_actual_pickup_distance(ob_task_id)
-    minimal_stats.add_actual_duration(ob_task_id)
-    minimal_stats.add_actual_pickup_duration(ob_task_id)
 
-    agent = Agent(agent_id=0, state=drop_loc)
-    agent.status = 2
-    agent.task_sequence = [(ob_task_id, pickup_loc, drop_loc, deadline)]
-    agent.path_sequence = []
-    agent.set_sku_id_carrying(pickup_sku)
-    Rs = AgentLoader([agent])
-    populated_graph.set_occupied(drop_loc, True)
-    return Rs, agent, ob_task_id, drop_loc, J
+    Rs, agent = _make_loader_with_agent(state=pickup_loc)
+    agent.status = 1
+    agent.task_sequence = [(ob_task_id, pickup_loc, drop_loc, 100)]
+    return Rs, agent, J, drop_loc, pickup_loc, pickup_sku
 
 
-def test_simulate_driveway_dual_cycle_chains_when_flag_on(
+def test_apply_pairing_chains_driveway_ib_when_flag_on(
     populated_graph, minimal_stats, seeded_rng
 ):
-    """OB delivery at a driveway cell with a pending IB whose pickup is at
-    another driveway cell holding a SKU should chain that IB."""
-    Rs, agent, ob_task_id, drop_loc, J = _setup_ob_dropoff_state(populated_graph, minimal_stats)
-
-    ib_pickup = populated_graph.station_locations[1]
-    populated_graph.driveway.add_sku_instance(3, ib_pickup)
-    ib_task_id = 200
-    ib_deadline = 200
-    J[ib_task_id] = (
-        frozenset({ib_pickup}),
-        frozenset(populated_graph.warehouse.get_empty_locations()),
-        ib_deadline, 3, TASK_TYPE_INBOUND,
-    )
-    minimal_stats.add_task_release(ib_task_id, 0)
-    minimal_stats.add_task_deadline(ib_task_id, ib_deadline)
-
-    Rs, J = simulate(
-        minimal_stats, populated_graph, Rs, J, "small_test", t=0,
-        aisle_dual_cycle=False, driveway_dual_cycle=True,
-    )
-
-    assert ob_task_id not in J
-    assert ib_task_id in J
-    assert agent.status == 1
-    assert len(agent.task_sequence) == 1
-    chained = agent.task_sequence[0]
-    assert chained[0] == ib_task_id
-    assert chained[1] == ib_pickup, "chained IB must pick up at the driveway with the pre-placed SKU"
-
-
-def test_simulate_driveway_dual_cycle_does_not_chain_when_flag_off(
-    populated_graph, minimal_stats, seeded_rng
-):
-    Rs, agent, ob_task_id, drop_loc, J = _setup_ob_dropoff_state(populated_graph, minimal_stats)
+    """Agent's tail is an OB ending at a driveway cell. With
+    ``driveway_dual_cycle=True`` and a driveway IB available in J,
+    ``apply_dual_cycle_pairing`` must append that IB onto the tail."""
+    Rs, agent, J, _, _, _ = _agent_with_ob_tail(populated_graph)
 
     ib_pickup = populated_graph.station_locations[1]
     populated_graph.driveway.add_sku_instance(3, ib_pickup)
@@ -505,15 +480,108 @@ def test_simulate_driveway_dual_cycle_does_not_chain_when_flag_off(
         frozenset(populated_graph.warehouse.get_empty_locations()),
         200, 3, TASK_TYPE_INBOUND,
     )
-    minimal_stats.add_task_release(ib_task_id, 0)
-    minimal_stats.add_task_deadline(ib_task_id, 200)
 
-    Rs, J = simulate(
-        minimal_stats, populated_graph, Rs, J, "small_test", t=0,
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
+        aisle_dual_cycle=False, driveway_dual_cycle=True,
+    )
+
+    assert len(agent.task_sequence) == 2
+    head_id, _, _, _ = agent.task_sequence[0]
+    tail_id, tail_start, tail_goal, _ = agent.task_sequence[1]
+    assert head_id == 100
+    assert tail_id == ib_task_id
+    assert tail_start == ib_pickup, "chained IB must pick up at the driveway with the pre-placed SKU"
+    assert tail_goal in populated_graph.warehouse.get_empty_locations()
+
+
+def test_apply_pairing_does_not_chain_when_driveway_flag_off(
+    populated_graph, minimal_stats, seeded_rng
+):
+    Rs, agent, J, _, _, _ = _agent_with_ob_tail(populated_graph)
+
+    ib_pickup = populated_graph.station_locations[1]
+    populated_graph.driveway.add_sku_instance(3, ib_pickup)
+    ib_task_id = 200
+    J[ib_task_id] = (
+        frozenset({ib_pickup}),
+        frozenset(populated_graph.warehouse.get_empty_locations()),
+        200, 3, TASK_TYPE_INBOUND,
+    )
+
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
         aisle_dual_cycle=False, driveway_dual_cycle=False,
     )
 
-    assert ob_task_id not in J
-    assert ib_task_id in J
-    assert agent.status == 0
+    assert len(agent.task_sequence) == 1
+
+
+def test_apply_pairing_idle_agent_not_chained(populated_graph, minimal_stats):
+    """An agent with empty task_sequence (allocator gave them no work) must
+    be left alone -- there's no tail to chain onto."""
+    Rs, agent = _make_loader_with_agent(state=populated_graph.station_locations[0])
+    populated_graph.driveway.add_sku_instance(1, populated_graph.station_locations[1])
+    J = {
+        1: (
+            frozenset({populated_graph.station_locations[1]}),
+            frozenset(populated_graph.warehouse.get_empty_locations()),
+            100, 1, TASK_TYPE_INBOUND,
+        ),
+    }
+
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
+        aisle_dual_cycle=True, driveway_dual_cycle=True,
+    )
+
     assert agent.task_sequence == []
+
+
+def test_apply_pairing_other_agents_committed_block_chain(
+    populated_graph, minimal_stats
+):
+    """If another agent already has the candidate OB committed in their
+    own task_sequence, ``apply_dual_cycle_pairing`` must not re-allocate
+    it onto a same-aisle IB tail of a second agent."""
+    Rs, ib_agent, J, ib_drop_loc, _ = _agent_with_ib_tail(populated_graph)
+
+    column = ib_drop_loc[1]
+    same_column_full = [
+        loc for loc in populated_graph.warehouse.get_full_locations()
+        if loc[1] == column
+    ]
+    if not same_column_full:
+        pytest.skip("populated_graph has no full cells in the IB drop's aisle")
+    chosen_start = same_column_full[0]
+    chosen_goal = list(populated_graph.driveway.get_empty_locations())[0]
+
+    other_agent = Agent(agent_id=1, state=(chosen_start[0], chosen_start[1]))
+    other_agent.task_sequence = [(200, chosen_start, chosen_goal, 200)]
+    Rs.agents.append(other_agent)
+
+    J[200] = (
+        frozenset(same_column_full),
+        frozenset(populated_graph.driveway.get_empty_locations()),
+        200, 2, TASK_TYPE_OUTBOUND,
+    )
+
+    apply_dual_cycle_pairing(
+        minimal_stats, populated_graph, Rs, J, t=0,
+        aisle_dual_cycle=True, driveway_dual_cycle=False,
+    )
+
+    assert len(ib_agent.task_sequence) == 1, "OB already taken by other agent must not chain"
+
+
+def test_collect_global_allocation_snapshot_aggregates_all_agents():
+    a0 = Agent(agent_id=0, state=(0, 0))
+    a0.task_sequence = [(1, (5, 5), (6, 6), 100)]
+    a1 = Agent(agent_id=1, state=(0, 1))
+    a1.task_sequence = [(2, (7, 7), (8, 8), 100), (3, (9, 9), (10, 10), 100)]
+    Rs = AgentLoader([a0, a1])
+
+    task_ids, locs = _collect_global_allocation_snapshot(Rs)
+
+    assert task_ids == {1, 2, 3}
+    assert locs == {(5, 5), (6, 6), (7, 7), (8, 8), (9, 9), (10, 10)}

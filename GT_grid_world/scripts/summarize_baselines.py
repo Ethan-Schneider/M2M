@@ -72,6 +72,7 @@ METHOD_LABELS = {
     "c_lns": "LNS-PBS",
     "py_lns": "M2M (4D cost tensor + py_lns)",
     "hbh_mla_star": "HBH+MLA*",
+    "ta_hybrid": "TA-Hybrid",
 }
 
 
@@ -120,7 +121,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--method",
-        choices=["all", "c_lns", "py_lns", "hbh_mla_star"],
+        choices=["all", "c_lns", "py_lns", "hbh_mla_star", "ta_hybrid"],
         default="all",
         help=(
             "Restrict the summary to a single allocator's runs (matched on "

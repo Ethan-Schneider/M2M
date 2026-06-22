@@ -9,6 +9,7 @@ from src.task_allocation_algorithms.repair_detection.backtracking import detect_
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
+from src.reallocation_tasks.generate_reallocation_tasks import generate_reallocation_tasks
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -30,17 +31,27 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             solution_repair_detection_function: str = "none",
             solution_repair_function: str = "none",
             initial_inventory : float = 25.0,
-            shuffle_percentage: float = 0.0,
             aisle_dual_cycle: bool = False,
             driveway_dual_cycle: bool = False,
             use_precomputed_schedule: bool = False,
             schedule: np.ndarray = None,
-            run_until_schedule_complete: bool = False) -> int:
+            run_until_schedule_complete: bool = False,
+            W: int = 300,
+            B: int = 60) -> int:
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
 
     last_task_id = 0
     total_schedule_tasks = schedule.shape[0] if use_precomputed_schedule and schedule is not None else 0
+    # TA-Hybrid materialises the FULL task pool once at t=0 to run TSP
+    # (paper Section 3 + materialize_schedule). ``schedule`` itself is
+    # mutated by ``add_tasks_from_schedule`` -- released rows are removed
+    # in place -- so we hold an immutable snapshot of the original
+    # schedule and pass *that* to TaskAllocation for the ta_hybrid
+    # branch. Other allocators keep using the live (shrinking) schedule.
+    original_schedule = (
+        schedule.copy() if use_precomputed_schedule and schedule is not None else None
+    )
     
     global_tik = time.time()
     t = 0
@@ -60,6 +71,16 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         print("=============================" + "Task Generation"+ "=============================")
         if use_precomputed_schedule:
             tik = time.time()
+            # TA-Hybrid pre-commits to deterministic (lowest-(row, col))
+            # inbound driveway pickup cells in its task-assignment stage
+            # via ``materialize_schedule``. Force the schedule loader to
+            # use the same rule so the cells in ``agent.task_sequence``
+            # actually match the cells the simulator populates with the
+            # SKU at release time. Other allocators keep the legacy
+            # random selection (default ``deterministic=False``).
+            _deterministic_release = (
+                improvement_task_assignment_strategy == "ta_hybrid"
+            )
             J, __, __, schedule, last_task_id = import_schedule.add_tasks_from_schedule(
                 t,
                 schedule,
@@ -67,7 +88,17 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
+                deterministic=_deterministic_release,
             )
+
+            # Lookahead-driven proactive rearrangement (roadmap 3.x): consume
+            # ``schedule`` over a [t+B, t+W] window and emit reallocation
+            # tasks tau=(C_i, r_i, d_i, sigma_i). Wired up but kept silent
+            # here -- the task pool ``J_r`` is consumed by the
+            # rearrangement-aware allocator path which is still being
+            # integrated; uncomment once the consumer lands.
+            # Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
+            # print(f"Number of reallocation tasks: {len(Ta)}")
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
@@ -85,8 +116,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                                                                                                 inbound_to_outbound_ratio, last_task_id, max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
-                                                                                                  initial_inventory,
-                                                                                                  shuffle_percentage=shuffle_percentage)
+                                                                                                  initial_inventory)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
             
@@ -98,9 +128,23 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         for agent in Rs.agents:
             total += len(agent.task_sequence)
             
-        if total < max_task_number:
+        if total < max_task_number or improvement_task_assignment_strategy == "ta_hybrid":
+            # TA-Hybrid must be called every tick (not gated on task
+            # backlog) so the outer driver can detect group transitions
+            # and replan even when no new tasks are unallocated. Other
+            # allocators keep the legacy "skip when everything is
+            # already assigned" optimisation.
+            # For ta_hybrid we pass the ORIGINAL (un-consumed) schedule
+            # so the driver's TSP sees the full task pool and produces
+            # schedule_row_index values that line up with the task ids
+            # ``add_tasks_from_schedule`` assigns over time.
+            schedule_for_alloc = (
+                original_schedule
+                if improvement_task_assignment_strategy == "ta_hybrid"
+                else schedule
+            )
             print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty)
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty, schedule=schedule_for_alloc, aisle_dual_cycle=aisle_dual_cycle, driveway_dual_cycle=driveway_dual_cycle)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -157,14 +201,15 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         #             Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
         #             break            
         
-        # HBH+MLA* (Grenouilleau et al., ICAPS 2019) is a coupled
-        # allocator + path planner: hbh_mla_star_call already populates
-        # ``agent.path_sequence`` for every agent it assigned, so calling
-        # the external ECBS/PBS router here would clobber those plans with
-        # a different (unreservation-aware) routing solution. Skip the
-        # external router for that strategy and let the MLA*-produced
-        # paths drive the simulator.
-        if improvement_task_assignment_strategy != "hbh_mla_star":
+        # HBH+MLA* (Grenouilleau et al., ICAPS 2019) and TA-Hybrid
+        # (Liu et al., AAMAS 2019) are both coupled allocator + path
+        # planner methods: their TaskAllocation hooks already populate
+        # ``agent.path_sequence`` for every agent they replanned, so
+        # calling the external ECBS/PBS router here would clobber those
+        # plans with a different (unreservation-aware) routing solution.
+        # Skip the external router for these strategies and let the
+        # native MAPF-aware paths drive the simulator.
+        if improvement_task_assignment_strategy not in ("hbh_mla_star", "ta_hybrid"):
             for agent in Rs.agents:
                 if agent.path_sequence == []:
                     Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
@@ -330,11 +375,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, J = simulate.simulate(
-            S, G, Rs, J, map, t,
-            aisle_dual_cycle=aisle_dual_cycle,
-            driveway_dual_cycle=driveway_dual_cycle,
-        )
+        Rs, J = simulate.simulate(S, G, Rs, J, map, t)
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
@@ -421,13 +462,14 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          agent_unallocated_penalty: float = 0.0,
          solution_repair_detection_function: str = "none",
          solution_repair_function: str = "none",
-         shuffle_percentage: float = 0.0,
          aisle_dual_cycle: bool = False,
          driveway_dual_cycle: bool = False,
          use_precomputed_schedule: bool = False,
          schedule_file: str = None,
          initial_inventory_file: str = None,
-         run_until_schedule_complete: bool = False) -> None:
+         run_until_schedule_complete: bool = False,
+         W: int = 300,
+         B: int = 60) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -478,6 +520,21 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         raise ValueError(
             "--run-until-schedule-complete requires --use-precomputed-schedule"
         )
+
+    if improvement_task_assignment_strategy == "ta_hybrid":
+        if not use_precomputed_schedule:
+            raise ValueError(
+                "--improvement-task-assign-strategy ta_hybrid is an "
+                "offline algorithm and requires --use-precomputed-schedule."
+            )
+        if aisle_dual_cycle or driveway_dual_cycle:
+            raise ValueError(
+                "--improvement-task-assign-strategy ta_hybrid is "
+                "incompatible with dual-cycling (--aisle-dual-cycle / "
+                "--driveway-dual-cycle): the TSP plan is the sole "
+                "source of truth for task ordering. Disable dual-cycling "
+                "or pick a different allocator."
+            )
     
     stripped_map_name = map_name.split("/")[-1].replace(".json", "")
     effective_task_generation_strategy = (
@@ -572,12 +629,13 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             solution_repair_detection_function=solution_repair_detection_function,
             solution_repair_function=solution_repair_function,
             initial_inventory=initial_inventory,
-            shuffle_percentage=shuffle_percentage,
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
             use_precomputed_schedule=use_precomputed_schedule,
             schedule=schedule,
             run_until_schedule_complete=run_until_schedule_complete,
+            W=W,
+            B=B,
     )
     if run_until_schedule_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -611,11 +669,15 @@ if __name__=="__main__":
                        choices=['cost_matrix', 'random', 'greedy', 'randomized_greedy', 'FCF', 'max_regret_FC', 'randomized_max_regret_FC', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
-                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'hbh_mla_star', 'none'],
+                       choices=['py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'hbh_mla_star', 'ta_hybrid', 'none'],
                        help='Task assignment strategy for improvement. '
                             '"hbh_mla_star" implements Grenouilleau et al. (ICAPS 2019) '
                             'HBH+MLA*: a coupled allocator + path planner that bypasses '
-                            'the external ECBS/PBS routing call.')
+                            'the external ECBS/PBS routing call. '
+                            '"ta_hybrid" implements Liu, Ma, Li, Koenig (AAMAS 2019) '
+                            'TA-Hybrid: offline TSP-based task assignment paired with '
+                            'ICBS (Group 1) + time-extended min-cost max-flow (Group 2) '
+                            'path planning. Requires --use-precomputed-schedule.')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs', 'pbs'],
                        help='Path planning strategy')
@@ -662,11 +724,6 @@ if __name__=="__main__":
     parser.add_argument('--agent-unallocated-penalty', type=float, default=0.0, help='Penalty for unallocated agents')
     parser.add_argument('--solution-repair-detection-function', type=str, default='none', help='Solution repair detection function')
     parser.add_argument('--solution-repair-function', type=str, default='none', help='Solution repair function')
-    parser.add_argument('--shuffle-percentage', type=float, default=0.0,
-                       help='Per-task probability (0.0-1.0) of generating a shuffle (type=2, '
-                            'shelf-to-shelf) task in CRG. 0.0 disables shuffle generation. '
-                            'This is the 1.4-skeleton on/off switch; the proper rearrangement '
-                            'ratio balancer is roadmap section 3.2.')
     parser.add_argument('--aisle-dual-cycle', action='store_true',
                        help='Enable aisle dual cycling (IB->OB chaining within the same '
                             'warehouse aisle). When set, after an agent completes an inbound '
@@ -688,6 +745,16 @@ if __name__=="__main__":
     parser.add_argument('--run-until-schedule-complete', action='store_true',
                        help='Run until all precomputed schedule tasks are completed instead '
                             'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
+    parser.add_argument('--W', type=int, default=300,
+                       help='Lookahead window length (timesteps). Reallocation tasks are '
+                            'generated by considering future scheduled tasks released in '
+                            '[t+B, t+W]. Only used when a precomputed schedule drives task '
+                            'release.')
+    parser.add_argument('--B', type=int, default=60,
+                       help='Lookahead window beginning offset (timesteps). Skips the first '
+                            'B timesteps after now when scanning the schedule for reallocation '
+                            'task candidates, to avoid generating proactive moves for tasks '
+                            'that release too imminently.')
     args = parser.parse_args()
     
     main(
@@ -724,11 +791,12 @@ if __name__=="__main__":
         agent_unallocated_penalty=args.agent_unallocated_penalty,
         solution_repair_detection_function=args.solution_repair_detection_function,
         solution_repair_function=args.solution_repair_function,
-        shuffle_percentage=args.shuffle_percentage,
         aisle_dual_cycle=args.aisle_dual_cycle,
         driveway_dual_cycle=args.driveway_dual_cycle,
         use_precomputed_schedule=args.use_precomputed_schedule,
         schedule_file=args.schedule_file,
         initial_inventory_file=args.initial_inventory_file,
         run_until_schedule_complete=args.run_until_schedule_complete,
+        W=args.W,
+        B=args.B,
     )

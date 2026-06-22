@@ -63,8 +63,18 @@ def add_tasks_from_schedule(
     G: Graph,
     last_task_id: int,
     sku_id_offset: int = SCHEDULE_SKU_ID_OFFSET,
+    deterministic: bool = False,
 ) -> Tuple[Dict[int, Tuple], List[int], List[int], NDArray, int]:
-    """Append due schedule tasks (release_time <= current_time) into ``J``."""
+    """Append due schedule tasks (release_time <= current_time) into ``J``.
+
+    ``deterministic`` makes the inbound driveway-cell selection
+    reproducible: the lowest-(row, col) *empty* driveway cell is
+    picked instead of ``random.choice``. Under TA-Hybrid the
+    driver re-syncs each agent's pre-committed pickup cell to the
+    cell actually chosen here once the task lands in ``J``. Default
+    ``False`` preserves the legacy random-cell behaviour for every
+    other allocator.
+    """
     tasks_to_try = _due_schedule_tasks(schedule, current_time)
 
     outbound_tasks: List[int] = []
@@ -87,7 +97,10 @@ def add_tasks_from_schedule(
             if not available_start_locations or not available_goal_locations:
                 continue
 
-            chosen_start_location = random.choice(list(available_start_locations))
+            if deterministic:
+                chosen_start_location = min(available_start_locations)
+            else:
+                chosen_start_location = random.choice(list(available_start_locations))
             G.driveway.add_sku_instance(sku_id, chosen_start_location)
 
             last_task_id += 1
