@@ -1,4 +1,5 @@
 import time
+import os
 import numpy as np
 import argparse
 
@@ -9,10 +10,14 @@ from src.task_allocation_algorithms.repair_detection.backtracking import detect_
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
-from src.reallocation_tasks.generate_reallocation_tasks import generate_reallocation_tasks
+from src.reallocation_tasks.generate_reallocation_tasks import (
+    generate_reallocation_tasks,
+    merge_reallocation_tasks_into_J,
+)
 from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
-from src.reallocation_tasks.optimal_insertion import optimal_insertion
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
+
+REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion")
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -41,7 +46,14 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             schedule: np.ndarray = None,
             run_until_schedule_complete: bool = False,
             W: int = 300,
-            B: int = 60) -> int:
+            B: int = 60,
+            lambda_: float = 1.5,
+            reallocation_task_method: str = "none") -> int:
+    if reallocation_task_method not in REALLOCATION_TASK_METHODS:
+        raise ValueError(
+            f"Unknown reallocation_task_method {reallocation_task_method!r}; "
+            f"expected one of {REALLOCATION_TASK_METHODS}"
+        )
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
     J = {}
 
@@ -154,19 +166,69 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # print(f"Initial outbound tasks: {initial_outbound_tasks}")
         # print(f"Initial inbound tasks: {initial_inbound_tasks}")
 
-        print("=============================" +"MILP Insertion"+ "=============================")
-        tik = time.time()
-        Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
-        tok = time.time()
-        print(f"Generate reallocation tasks time: {tok - tik} for {len(Ta)}")
-        tik = time.time()
-        # Rs, _ = optimal_insertion(G, Rs, Ta, J, lambda_=1.0, mu=1.0, t0=t)
-        Rs, J_a = solve_insertion(Ta, Rs, G, J, J_a, lambda_= 1.5, next_rearrangement_task_id=last_rearrangement_task_id)
-        if J_a:
-            last_rearrangement_task_id = max(J_a.keys())
-        tok = time.time()
-        print(f"MILP Insertion time: {tok - tik}")
-        # exit(0)
+        if (
+            reallocation_task_method != "none"
+            and use_precomputed_schedule
+            and schedule is not None
+        ):
+            print("=============================" + "Reallocation Tasks" + "=============================")
+            tik = time.time()
+            Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
+            generation_time = time.time() - tik
+            S.log_reallocation_tasks_generated(t, len(Ta))
+            S.log_reallocation_generation_time(t, generation_time)
+            tok = time.time()
+            print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
+
+            if reallocation_task_method == "insertion":
+                tik = time.time()
+                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time = solve_insertion(
+                    Ta,
+                    Rs,
+                    G,
+                    J,
+                    J_a,
+                    lambda_=lambda_,
+                    next_rearrangement_task_id=last_rearrangement_task_id,
+                )
+                S.log_reallocation_tasks_chosen(t, num_chosen)
+                S.log_reallocation_milp_binary_vars(t, num_binary_vars)
+                S.log_reallocation_milp_construct_time(t, construct_time)
+                S.log_reallocation_milp_solve_time(t, solve_time)
+                if J_a:
+                    last_rearrangement_task_id = max(J_a.keys())
+                tok = time.time()
+                print(
+                    f"MILP insertion time: {tok - tik:.4f}s "
+                    f"(construct: {construct_time:.4f}s, solve: {solve_time:.4f}s, "
+                    f"{num_binary_vars} binary vars, {num_chosen} tasks chosen)"
+                )
+            elif reallocation_task_method == "simultaneous":
+                tik = time.time()
+                last_task_id = merge_reallocation_tasks_into_J(Ta, J, G, last_task_id)
+                Rs, _, _ = task_allocation.TaskAllocation(
+                    S,
+                    G,
+                    Rs,
+                    J,
+                    initial_task_assignment_strategy,
+                    improvement_task_assignment_strategy,
+                    map,
+                    t,
+                    cost_calculation_method,
+                    removal_operator,
+                    repair_operator,
+                    acceptance_function,
+                    T_0,
+                    alpha,
+                    base_cost_weight,
+                    deadline_weight,
+                    sku_distribution_weight,
+                    agent_unallocated_penalty,
+                )
+                tok = time.time()
+                print(f"Simultaneous reallocation allocation time: {tok - tik}")
+
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
         
@@ -464,7 +526,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          initial_inventory_file: str = None,
          run_until_schedule_complete: bool = False,
          W: int = 300,
-         B: int = 60) -> None:
+         B: int = 60,
+         lambda_: float = 1.5,
+         reallocation_task_method: str = "none") -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -505,6 +569,12 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     """
     np.random.seed(seed)
 
+    if reallocation_task_method not in REALLOCATION_TASK_METHODS:
+        raise ValueError(
+            f"Unknown reallocation_task_method {reallocation_task_method!r}; "
+            f"expected one of {REALLOCATION_TASK_METHODS}"
+        )
+
     if use_precomputed_schedule:
         if not schedule_file or not initial_inventory_file:
             raise ValueError(
@@ -520,8 +590,21 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     effective_task_generation_strategy = (
         "precomputed_schedule" if use_precomputed_schedule else task_generation_strategy
     )
-    
-    output_file = f"data/raw_data/{T}_{effective_task_generation_strategy}_{initial_inventory}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
+    schedule_stem = (
+        os.path.splitext(os.path.basename(schedule_file))[0]
+        if schedule_file
+        else "none"
+    )
+
+    output_file = (
+        f"data/raw_data/{T}_{effective_task_generation_strategy}_"
+        f"{reallocation_task_method}_{lambda_}_{schedule_stem}_"
+        f"{initial_inventory}_{initial_task_assignment_strategy}_"
+        f"{improvement_task_assignment_strategy}_{path_planning_strategy}_"
+        f"{stripped_map_name}_{num_robots}_{max_number_tasks}_"
+        f"{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_"
+        f"{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
+    )
     buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
@@ -559,7 +642,12 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         sku_distribution_weight=sku_distribution_weight,
         agent_unallocated_penalty=agent_unallocated_penalty,
         solution_repair_detection_function=solution_repair_detection_function,
-        solution_repair_function=solution_repair_function
+        solution_repair_function=solution_repair_function,
+        schedule_name=schedule_stem,
+        W=W,
+        B=B,
+        lambda_=lambda_,
+        reallocation_task_method=reallocation_task_method,
     )
     schedule = None
     if use_precomputed_schedule:
@@ -617,6 +705,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             run_until_schedule_complete=run_until_schedule_complete,
             W=W,
             B=B,
+            lambda_=lambda_,
+            reallocation_task_method=reallocation_task_method,
     )
     if run_until_schedule_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -729,6 +819,19 @@ if __name__=="__main__":
                             'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
     parser.add_argument('--W', type=int, default=300, help='Lookahead window')
     parser.add_argument('--B', type=int, default=60, help='Lookahead beginning')
+    parser.add_argument(
+        '--lambda_',
+        type=float,
+        default=1.5,
+        help='Detour penalty weight for rearrangement insertion (irM2M)',
+    )
+    parser.add_argument(
+        '--reallocation-task-method',
+        type=str,
+        default='none',
+        choices=list(REALLOCATION_TASK_METHODS),
+        help='Rearrangement task integration method: none, simultaneous (crM2M), or insertion (irM2M).',
+    )
     args = parser.parse_args()
     
     main(
@@ -774,4 +877,6 @@ if __name__=="__main__":
         run_until_schedule_complete=args.run_until_schedule_complete,
         W=args.W,
         B=args.B,
+        lambda_=args.lambda_,
+        reallocation_task_method=args.reallocation_task_method,
     )

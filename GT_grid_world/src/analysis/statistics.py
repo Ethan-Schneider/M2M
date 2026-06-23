@@ -93,7 +93,10 @@ class Stats:
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
                  base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
-                 agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None) -> None:
+                 agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None,
+                 schedule_name: str = None, W: int = None, B: int = None,
+                 lambda_: float = None,
+                 reallocation_task_method: str = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -128,6 +131,11 @@ class Stats:
         self.__agent_unallocated_penalty = agent_unallocated_penalty
         self.__solution_repair_detection_function = solution_repair_detection_function
         self.__solution_repair_function = solution_repair_function
+        self.__schedule_name = schedule_name
+        self.__W = W
+        self.__B = B
+        self.__lambda_ = lambda_
+        self.__reallocation_task_method = reallocation_task_method
 
         self.__num_improved_assignments = 0
         self.__num_worse_assignments = 0
@@ -207,6 +215,12 @@ class Stats:
         self.__completed_rearrangement_task_ids = []
         self.__rearrangement_task_completion_timestamps = {}  # task_id -> timestep
         self.__completed_rearrangement_task_details = {}  # task_id -> (start, goal, deadline, sku, type)
+        self.__reallocation_tasks_generated_per_timestep = {}  # t -> len(Ta)
+        self.__reallocation_tasks_chosen_per_timestep = {}  # t -> MILP-selected insertions
+        self.__reallocation_generation_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_construct_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_solve_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_binary_vars_per_timestep = {}  # t -> count
         self.__completed_to_pickup_task_ids = []
         
         # Runtime Stastics: 
@@ -514,6 +528,48 @@ class Stats:
 
     def get_total_completed_rearrangement_tasks(self) -> int:
         return len(self.__completed_rearrangement_task_ids)
+
+    def log_reallocation_tasks_generated(self, t: int, count: int) -> None:
+        """Record how many reallocation tasks were generated at timestep t."""
+        self.__reallocation_tasks_generated_per_timestep[int(t)] = int(count)
+
+    def log_reallocation_tasks_chosen(self, t: int, count: int) -> None:
+        """Record how many reallocation tasks were selected by the insertion MILP at t."""
+        self.__reallocation_tasks_chosen_per_timestep[int(t)] = int(count)
+
+    def log_reallocation_generation_time(self, t: int, elapsed: float) -> None:
+        """Record wall time to generate reallocation tasks at timestep t."""
+        self.__reallocation_generation_time_per_timestep[int(t)] = float(elapsed)
+
+    def log_reallocation_milp_construct_time(self, t: int, elapsed: float) -> None:
+        """Record wall time to build the insertion MILP at timestep t."""
+        self.__reallocation_milp_construct_time_per_timestep[int(t)] = float(elapsed)
+
+    def log_reallocation_milp_solve_time(self, t: int, elapsed: float) -> None:
+        """Record wall time to solve the insertion MILP at timestep t."""
+        self.__reallocation_milp_solve_time_per_timestep[int(t)] = float(elapsed)
+
+    def log_reallocation_milp_binary_vars(self, t: int, count: int) -> None:
+        """Record number of binary variables in the insertion MILP at timestep t."""
+        self.__reallocation_milp_binary_vars_per_timestep[int(t)] = int(count)
+
+    def get_reallocation_tasks_generated_per_timestep(self) -> dict:
+        return self.__reallocation_tasks_generated_per_timestep
+
+    def get_reallocation_tasks_chosen_per_timestep(self) -> dict:
+        return self.__reallocation_tasks_chosen_per_timestep
+
+    def get_reallocation_generation_time_per_timestep(self) -> dict:
+        return self.__reallocation_generation_time_per_timestep
+
+    def get_reallocation_milp_construct_time_per_timestep(self) -> dict:
+        return self.__reallocation_milp_construct_time_per_timestep
+
+    def get_reallocation_milp_solve_time_per_timestep(self) -> dict:
+        return self.__reallocation_milp_solve_time_per_timestep
+
+    def get_reallocation_milp_binary_vars_per_timestep(self) -> dict:
+        return self.__reallocation_milp_binary_vars_per_timestep
             
     # ====================== Completed To-Pickup Task Id Functions
     
@@ -839,6 +895,11 @@ class Stats:
             "agent_unallocated_penalty": self.__agent_unallocated_penalty,
             "solution_repair_detection_function": self.__solution_repair_detection_function,
             "solution_repair_function": self.__solution_repair_function,
+            "schedule_name": self.__schedule_name,
+            "W": self.__W,
+            "B": self.__B,
+            "lambda_": self.__lambda_,
+            "reallocation_task_method": self.__reallocation_task_method,
             # Simulation results
             "timesteps_completed": self.return_actual_timesteps(),
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -851,6 +912,24 @@ class Stats:
             "completed_rearrangement_task_details": self.__completed_rearrangement_task_details,
             "rearrangement_task_completion_timestamps": (
                 self.__rearrangement_task_completion_timestamps
+            ),
+            "reallocation_tasks_generated_per_timestep": (
+                self.__reallocation_tasks_generated_per_timestep
+            ),
+            "reallocation_tasks_chosen_per_timestep": (
+                self.__reallocation_tasks_chosen_per_timestep
+            ),
+            "reallocation_generation_time_per_timestep": (
+                self.__reallocation_generation_time_per_timestep
+            ),
+            "reallocation_milp_construct_time_per_timestep": (
+                self.__reallocation_milp_construct_time_per_timestep
+            ),
+            "reallocation_milp_solve_time_per_timestep": (
+                self.__reallocation_milp_solve_time_per_timestep
+            ),
+            "reallocation_milp_binary_vars_per_timestep": (
+                self.__reallocation_milp_binary_vars_per_timestep
             ),
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,

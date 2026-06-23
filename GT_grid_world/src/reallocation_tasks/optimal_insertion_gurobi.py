@@ -2,25 +2,42 @@
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from typing import Dict, List, Optional, Set, Tuple
 
 import gurobipy as gp
 from gurobipy import GRB
 
+TASK_TYPE_INBOUND = 1
+TASK_TYPE_SHUFFLE = 2
+
+# Inserted rearrangement tasks use ids in this range to avoid colliding with
+# real schedule / CRG task ids.
+REARRANGEMENT_TASK_ID_BASE = 1_000_000_000
+
 from ..agent import AgentLoader
 from ..graph import Graph
-from .optimal_insertion import (
-    REARRANGEMENT_TASK_ID_BASE,
-    TASK_TYPE_SHUFFLE,
-    _next_rearrangement_task_id,
-    _task_direction,
-)
 
 Location = Tuple[int, int]
 ReallocationTask = Tuple[Set[Location], float, float, int]
 InsertionKey = Tuple[int, int, Location, Location, int, int]
 # (task_key, candidate_idx, start, goal, agent_idx, position)
+
+def _task_direction(task_id: int, J: Dict[int, Tuple]) -> str:
+    type_ = J[task_id][4]
+    return "in" if type_ == TASK_TYPE_INBOUND else "out"
+
+def _next_rearrangement_task_id(
+    J: Dict[int, Tuple],
+    next_task_id: Optional[int],
+) -> int:
+    if next_task_id is not None:
+        return max(next_task_id, REARRANGEMENT_TASK_ID_BASE)
+    rearrangement_ids = [k for k in J if k >= REARRANGEMENT_TASK_ID_BASE]
+    if rearrangement_ids:
+        return max(rearrangement_ids) + 1
+    return REARRANGEMENT_TASK_ID_BASE
 
 def benefit(G: Graph, s, g, Rs: AgentLoader) -> float:
     dummy_location = Rs.agents[0].home
@@ -109,12 +126,19 @@ def solve_insertion(
     lambda_: float = 1.0,
     t0: float = 0.0,
     next_rearrangement_task_id: Optional[int] = None,
-) -> Tuple[AgentLoader, Dict[int, Tuple]]:
-    """Build, solve, and apply the rearrangement insertion MILP with Gurobi."""
+) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float]:
+    """Build, solve, and apply the rearrangement insertion MILP with Gurobi.
+
+    Returns:
+        Modified agent loader, updated rearrangement task dict, number of
+        insertions chosen by the optimizer, number of binary variables in the
+        MILP, construction time (seconds), and solve time (seconds).
+    """
     del t0  # used by commented completion-time / deadline blocks
     if not tasks_a:
-        return Rs.copy(), J_a
+        return Rs.copy(), J_a, 0, 0, 0.0, 0.0
 
+    construct_tik = time.time()
     V_alloc = collect_V_alloc(Rs)
 
     mdl = gp.Model("rearrangement_insertion")
@@ -179,8 +203,8 @@ def solve_insertion(
                                 name=f"z_{n}_{k}_{s}_{g}_{a}_{i}",
                             )
 
-    if not z:
-        return Rs.copy(), J_a
+    num_binary_vars = len(z)
+    print(f"Insertion MILP: {num_binary_vars} binary variables added to optimizer")
 
     mdl.ModelSense = GRB.MAXIMIZE
 
@@ -203,13 +227,21 @@ def solve_insertion(
     for slot, vs in g6.items():
         mdl.addConstr(gp.quicksum(vs) <= 1, f"C6_{slot[0]}_{slot[1]}")
 
+    construct_time = time.time() - construct_tik
+
+    if not z:
+        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, 0.0
+
+    solve_tik = time.time()
     mdl.optimize()
+    solve_time = time.time() - solve_tik
 
     if mdl.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-        return Rs.copy(), J_a
+        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, solve_time
 
     chosen = {key: var.X for key, var in z.items() if var.X > 0.5}
+    num_chosen = len(chosen)
     Rs_modified, J_a = apply_insertions(
         tasks_a, Rs, G, chosen, J, J_a, next_rearrangement_task_id=next_rearrangement_task_id
     )
-    return Rs_modified, J_a
+    return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time

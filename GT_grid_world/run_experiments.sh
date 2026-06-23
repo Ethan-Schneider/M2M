@@ -10,13 +10,13 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(2600)
+seeds=(0)
 num_robots=(40)
-time_horizons=(250)
+time_horizons=(1000)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
-num_skus=(30)
+num_skus=(50)
 initial_inventory=(30.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
@@ -40,14 +40,16 @@ sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
-W=240
+W=600
 B=30
+lambda_=1.0
+reallocation_task_method="insertion"
 
 # Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
 use_precomputed_schedule=true
-schedule_file="$repo_root/data/schedules/schedule_10.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/schedule_10_init_inventory.txt"
-run_until_schedule_complete=true
+schedule_file="$repo_root/data/schedules/sparse_schedule_1_hour.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/sparse_schedule_1_hour_init_inventory.txt"
+run_until_schedule_complete=false
 
 precomputed_args=()
 if [ "$use_precomputed_schedule" = true ]; then
@@ -94,6 +96,8 @@ for seed in "${seeds[@]}"; do
                         echo "  Use Precomputed Schedule: $use_precomputed_schedule"
                         echo "  Lookahead Window (W): $W"
                         echo "  Lookahead Beginning (B): $B"
+                        echo "  Detour Penalty (lambda_): $lambda_"
+                        echo "  Reallocation Task Method: $reallocation_task_method"
                         if [ "$use_precomputed_schedule" = true ]; then
                             echo "  Schedule File: $schedule_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
@@ -135,6 +139,8 @@ for seed in "${seeds[@]}"; do
                             --solution-repair-function "$solution_repair_function" \
                             --W "$W" \
                             --B "$B" \
+                            --lambda_ "$lambda_" \
+                            --reallocation-task-method "$reallocation_task_method" \
                             "${precomputed_args[@]}"
 
                         # Optional: Add a small delay between runs
