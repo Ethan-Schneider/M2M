@@ -9,6 +9,8 @@ from typing import Dict, Tuple
 def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
     states = [agent.state for agent in Rs.agents]
 
+    
+
     goal_locations = []
     for agent in Rs.agents:
         # If robot is going to pickup, set goal location to the task's start location
@@ -22,7 +24,7 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
             
         # If robot is a free_agent, set goal location to current state
         else:
-            goal_locations.append(agent.state)
+            goal_locations.append(agent.home)
 
     sequences = []
     w = 1.2
@@ -43,6 +45,14 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
     while not sequences:
         # Execute the path planning algorithm
         if path_planning_strategy == "pbs":
+            if len(goal_locations) != len(set(goal_locations)):
+                print(f"Duplicate goal locations: {goal_locations}")
+            else:
+                print(f"No duplicate goal locations.")
+            if len(Rs.get_agent_states()) != len(set(Rs.get_agent_states())):
+                print(f"Duplicate agent states: {Rs.get_agent_states()}")
+            else:
+                print(f"No duplicate agent states.")
             sequences = pbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
         elif path_planning_strategy == "ecbs":
             sequences = eecbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
@@ -55,6 +65,7 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
             if latch:
                 break
             for i, agent in enumerate(Rs.agents):
+                print(f"Agent {agent.id} home location: {agent.home} with assigned goal location: {goal_locations[i]}")
                 if agent.path_sequence == []:
                     goal_locations[i] = agent.home
             latch = True

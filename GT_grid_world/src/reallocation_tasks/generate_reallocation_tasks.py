@@ -8,6 +8,26 @@ SCHEDULE_SKU_ID_OFFSET = 1
 TASK_TYPE_SHUFFLE = 2
 
 
+def merge_reallocation_tasks_into_J(
+    tasks_a: dict,
+    J: dict,
+    G: Graph,
+    last_task_id: int,
+) -> int:
+    """Add candidate rearrangement tasks to ``J`` for simultaneous (crM2M) allocation."""
+    for _task_key, (C_i, _release, deadline, task_type) in tasks_a.items():
+        if not C_i:
+            continue
+        starts = frozenset(start for start, _goal in C_i)
+        goals = frozenset(goal for _start, goal in C_i)
+        sample_start = next(iter(starts))
+        sku = G.warehouse.get_sku_at_location(sample_start)
+        sku_id = int(sku.sku_id) if sku is not None else 0
+        last_task_id += 1
+        J[last_task_id] = (starts, goals, int(deadline), sku_id, int(task_type))
+    return last_task_id
+
+
 def generate_reallocation_tasks(schedule: np.ndarray, J: dict, G : Graph, Rs: AgentLoader, B : int, W : int, t : int) -> dict:
     """
     Look at future released tasks between timesteps [t, t+W], find the subset of tasks that we want to reallocate for then construct a set of reallocation tasks to return.
