@@ -10,13 +10,13 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(0)
+seeds=(1)
 num_robots=(40)
-time_horizons=(1000)
+time_horizons=(3000)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
-num_skus=(50)
+num_skus=(30)
 initial_inventory=(30.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
@@ -47,8 +47,8 @@ reallocation_task_method="insertion"
 
 # Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
 use_precomputed_schedule=true
-schedule_file="$repo_root/data/schedules/sparse_schedule_1_hour.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/sparse_schedule_1_hour_init_inventory.txt"
+schedule_file="$repo_root/data/schedules/schedule_1_hour.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/schedule_1_hour_init_inventory.txt"
 run_until_schedule_complete=false
 
 precomputed_args=()
