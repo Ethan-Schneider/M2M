@@ -188,7 +188,8 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
 
 
 def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a : Dict[int, Tuple], map_name : str, t : int,
-             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False) -> Tuple[AgentLoader, Dict[int, Tuple]]:
+             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False,
+             J_a_objectives: Dict[int, Dict[str, float]] = None) -> Tuple[AgentLoader, Dict[int, Tuple]]:
     """
     Simulate the system for one timestep.
 
@@ -211,6 +212,9 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
     Returns:
         Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks and rearrangement tasks
     """
+
+    if J_a_objectives is None:
+        J_a_objectives = {}
 
     # Update state of robots
     for agent in Rs.agents:
@@ -332,6 +336,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                 agent.set_sku_id_carrying(None)
 
                 if inbound_task == TASK_TYPE_SHUFFLE:
+                    objectives = J_a_objectives.pop(task_id, None)
                     S.add_completed_rearrangement_task_id(
                         task_id,
                         t,
@@ -340,6 +345,9 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                         int(deadline),
                         int(sku_id),
                         int(inbound_task),
+                        benefit=objectives.get("benefit") if objectives else None,
+                        utility=objectives.get("utility") if objectives else None,
+                        detour_cost=objectives.get("detour_cost") if objectives else None,
                     )
                 else:
                     S.add_completed_task_id(

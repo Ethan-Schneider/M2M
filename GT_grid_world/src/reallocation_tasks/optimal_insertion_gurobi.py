@@ -43,6 +43,27 @@ def benefit(G: Graph, s, g, Rs: AgentLoader) -> float:
     dummy_location = Rs.agents[0].home
     return G.get_distance(s, dummy_location) - G.get_distance(g, dummy_location)
 
+def compute_insertion_objectives(
+    G: Graph,
+    Rs: AgentLoader,
+    start: Location,
+    goal: Location,
+    agent_idx: int,
+    position: int,
+    lambda_: float,
+) -> Tuple[float, float, float]:
+    """Return benefit, detour cost, and utility for a chosen insertion."""
+    prior_goal = Rs.agents[agent_idx].task_sequence[position - 1][2]
+    next_anchor = Rs.agents[agent_idx].home
+    task_benefit = benefit(G, start, goal, Rs)
+    detour_cost = (
+        dist(G, prior_goal, start)
+        + dist(G, start, next_anchor)
+        - dist(G, prior_goal, next_anchor)
+    )
+    utility = task_benefit - lambda_ * detour_cost
+    return task_benefit, detour_cost, utility
+
 def dist(G: Graph, u: Location, v: Location) -> float:
     return float(G.get_distance(u, v))
 
@@ -71,7 +92,8 @@ def apply_insertions(
     J: Dict[int, Tuple],
     J_a: Dict[int, Tuple],
     next_rearrangement_task_id: Optional[int] = None,
-) -> Tuple[AgentLoader, Dict[int, Tuple]]:
+    lambda_: float = 1.0,
+) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Dict[str, float]]]:
     """Insert Gurobi-selected rearrangement tasks into agent task sequences.
 
     Args:
@@ -81,15 +103,18 @@ def apply_insertions(
         chosen: Mapping of ``(n, k, s, g, a, i) -> value`` for selected variables.
         J: Live task dictionary; updated in-place for each inserted task.
         next_task_id: Optional starting id; defaults to rearrangement id range.
+        lambda_: Detour penalty used when computing insertion utility.
 
     Returns:
-        Deep copy of ``Rs`` with chosen insertions applied.
+        Deep copy of ``Rs`` with chosen insertions applied, updated ``J_a``,
+        and per-task objective metrics keyed by assigned task id.
     """
     if not chosen:
-        return Rs.copy(), J_a
+        return Rs.copy(), J_a, {}
 
     modified = Rs.copy()
     current_id = next_rearrangement_task_id + 1
+    objectives: Dict[int, Dict[str, float]] = {}
 
     by_agent: Dict[int, List[Tuple[int, int, Location, Location]]] = defaultdict(list)
     for (n, _k, s, g, a, i), value in chosen.items():
@@ -102,6 +127,9 @@ def apply_insertions(
             insertions, key=lambda item: -item[0]
         ):
             _C_i, _release, deadline, sigma = tasks_a[task_key]
+            task_benefit, detour_cost, utility = compute_insertion_objectives(
+                G, Rs, start, goal, agent_idx, position, lambda_
+            )
             task_tuple = (current_id, start, goal, int(deadline))
             modified.agents[agent_idx].task_sequence.insert(position, task_tuple)
             J_a[current_id] = (
@@ -111,9 +139,14 @@ def apply_insertions(
                 G.warehouse.get_sku_at_location(start).sku_id,
                 TASK_TYPE_SHUFFLE,
             )
+            objectives[current_id] = {
+                "benefit": float(task_benefit),
+                "utility": float(utility),
+                "detour_cost": float(detour_cost),
+            }
             current_id += 1
 
-    return modified, J_a
+    return modified, J_a, objectives
 
 
 def solve_insertion(
@@ -126,17 +159,18 @@ def solve_insertion(
     lambda_: float = 1.0,
     t0: float = 0.0,
     next_rearrangement_task_id: Optional[int] = None,
-) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float]:
+) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float, Dict[int, Dict[str, float]]]:
     """Build, solve, and apply the rearrangement insertion MILP with Gurobi.
 
     Returns:
         Modified agent loader, updated rearrangement task dict, number of
         insertions chosen by the optimizer, number of binary variables in the
-        MILP, construction time (seconds), and solve time (seconds).
+        MILP, construction time (seconds), solve time (seconds), and objective
+        metrics for inserted rearrangement tasks.
     """
     del t0  # used by commented completion-time / deadline blocks
     if not tasks_a:
-        return Rs.copy(), J_a, 0, 0, 0.0, 0.0
+        return Rs.copy(), J_a, 0, 0, 0.0, 0.0, {}
 
     construct_tik = time.time()
     V_alloc = collect_V_alloc(Rs)
@@ -230,18 +264,25 @@ def solve_insertion(
     construct_time = time.time() - construct_tik
 
     if not z:
-        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, 0.0
+        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, 0.0, {}
 
     solve_tik = time.time()
     mdl.optimize()
     solve_time = time.time() - solve_tik
 
     if mdl.Status not in (GRB.OPTIMAL, GRB.SUBOPTIMAL):
-        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, solve_time
+        return Rs.copy(), J_a, 0, num_binary_vars, construct_time, solve_time, {}
 
     chosen = {key: var.X for key, var in z.items() if var.X > 0.5}
     num_chosen = len(chosen)
-    Rs_modified, J_a = apply_insertions(
-        tasks_a, Rs, G, chosen, J, J_a, next_rearrangement_task_id=next_rearrangement_task_id
+    Rs_modified, J_a, objectives = apply_insertions(
+        tasks_a,
+        Rs,
+        G,
+        chosen,
+        J,
+        J_a,
+        next_rearrangement_task_id=next_rearrangement_task_id,
+        lambda_=lambda_,
     )
-    return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time
+    return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time, objectives

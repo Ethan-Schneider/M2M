@@ -215,6 +215,9 @@ class Stats:
         self.__completed_rearrangement_task_ids = []
         self.__rearrangement_task_completion_timestamps = {}  # task_id -> timestep
         self.__completed_rearrangement_task_details = {}  # task_id -> (start, goal, deadline, sku, type)
+        self.__completed_rearrangement_task_benefit = {}  # task_id -> benefit
+        self.__completed_rearrangement_task_utility = {}  # task_id -> utility
+        self.__completed_rearrangement_task_detour_cost = {}  # task_id -> detour cost
         self.__reallocation_tasks_generated_per_timestep = {}  # t -> len(Ta)
         self.__reallocation_tasks_chosen_per_timestep = {}  # t -> MILP-selected insertions
         self.__reallocation_generation_time_per_timestep = {}  # t -> seconds
@@ -510,6 +513,9 @@ class Stats:
         deadline: int = None,
         sku_id: int = None,
         task_type: int = None,
+        benefit: float = None,
+        utility: float = None,
+        detour_cost: float = None,
     ) -> None:
         """Record completion of a rearrangement (shuffle) task."""
         self.__completed_rearrangement_task_ids.append(int(task_id))
@@ -522,6 +528,12 @@ class Stats:
                 sku_id,
                 task_type,
             )
+        if benefit is not None:
+            self.__completed_rearrangement_task_benefit[task_id] = float(benefit)
+        if utility is not None:
+            self.__completed_rearrangement_task_utility[task_id] = float(utility)
+        if detour_cost is not None:
+            self.__completed_rearrangement_task_detour_cost[task_id] = float(detour_cost)
 
     def get_completed_rearrangement_task_ids(self) -> list:
         return self.__completed_rearrangement_task_ids
@@ -910,6 +922,11 @@ class Stats:
             ),
             "completed_rearrangement_tasks": self.__completed_rearrangement_task_ids,
             "completed_rearrangement_task_details": self.__completed_rearrangement_task_details,
+            "completed_rearrangement_task_benefit": self.__completed_rearrangement_task_benefit,
+            "completed_rearrangement_task_utility": self.__completed_rearrangement_task_utility,
+            "completed_rearrangement_task_detour_cost": (
+                self.__completed_rearrangement_task_detour_cost
+            ),
             "rearrangement_task_completion_timestamps": (
                 self.__rearrangement_task_completion_timestamps
             ),

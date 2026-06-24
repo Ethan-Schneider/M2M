@@ -60,6 +60,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     # Initilize empty dict of rearrangement tasks defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
     # Rearrangement tasks only added when committed to an agent's task sequence
     J_a = {}
+    J_a_objectives = {}
 
     last_task_id = 0
     last_rearrangement_task_id = 100000
@@ -182,7 +183,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
             if reallocation_task_method == "insertion":
                 tik = time.time()
-                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time = solve_insertion(
+                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time, new_objectives = solve_insertion(
                     Ta,
                     Rs,
                     G,
@@ -191,6 +192,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     lambda_=lambda_,
                     next_rearrangement_task_id=last_rearrangement_task_id,
                 )
+                J_a_objectives.update(new_objectives)
                 S.log_reallocation_tasks_chosen(t, num_chosen)
                 S.log_reallocation_milp_binary_vars(t, num_binary_vars)
                 S.log_reallocation_milp_construct_time(t, construct_time)
@@ -429,6 +431,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             S, G, Rs, J, J_a, map, t,
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
+            J_a_objectives=J_a_objectives,
         )
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
