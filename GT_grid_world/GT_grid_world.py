@@ -2,6 +2,7 @@ import time
 import os
 import numpy as np
 import argparse
+from typing import List
 
 from src import graph, simulate, task_allocation, case_request_generator, import_schedule, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
@@ -42,9 +43,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             shuffle_percentage: float = 0.0,
             aisle_dual_cycle: bool = False,
             driveway_dual_cycle: bool = False,
-            use_precomputed_schedule: bool = False,
-            schedule: np.ndarray = None,
-            run_until_schedule_complete: bool = False,
+            use_precomputed_queue: bool = False,
+            queue: np.ndarray = None,
+            run_until_queue_complete: bool = False,
             W: int = 300,
             B: int = 60,
             lambda_: float = 1.5,
@@ -64,17 +65,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
     last_task_id = 0
     last_rearrangement_task_id = 100000
-    total_schedule_tasks = schedule.shape[0] if use_precomputed_schedule and schedule is not None else 0
+    total_queue_tasks = queue.shape[0] if use_precomputed_queue and queue is not None else 0
+    deferred_queue: List[List[int]] = []
     
     global_tik = time.time()
     t = 0
     while True:
-        if not run_until_schedule_complete and t >= T:
+        if not run_until_queue_complete and t >= T:
             break
 
         print(f"Number of tasks in system: {len(J)}")
-        if use_precomputed_schedule:
-            print(f"Number of tasks remaining in schedule: {schedule.shape[0]}")
+        if use_precomputed_queue:
+            print(f"Number of tasks remaining in queue: {queue.shape[0]}")
+            print(f"Number of deferred tasks: {len(deferred_queue)}")
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -82,21 +85,22 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # B.add(Rs.get_agent_states(), t)
         
         print("=============================" + "Task Generation"+ "=============================")
-        if use_precomputed_schedule:
+        if use_precomputed_queue:
             tik = time.time()
-            J, __, __, schedule, last_task_id = import_schedule.add_tasks_from_schedule(
+            J, __, __, queue, deferred_queue, last_task_id = import_schedule.add_tasks_from_queue(
                 t,
-                schedule,
+                queue,
+                deferred_queue,
                 J,
                 S,
                 G,
                 last_task_id,
+                max_task_number,
+                frequency,
+                deadline_generation_method,
+                deadline_offset,
             )
 
-            # Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
-            # print(f"Number of reallocation tasks: {len(Ta)}")
-            # # for task_id, task in Ta.items():
-            # #     print(f"Reallocation task {task_id}: {task}")
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
@@ -169,12 +173,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         if (
             reallocation_task_method != "none"
-            and use_precomputed_schedule
-            and schedule is not None
+            and use_precomputed_queue
+            and queue is not None
         ):
             print("=============================" + "Reallocation Tasks" + "=============================")
             tik = time.time()
-            Ta = generate_reallocation_tasks(schedule, J, G, Rs, B, W, t)
+            Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
             generation_time = time.time() - tik
             S.log_reallocation_tasks_generated(t, len(Ta))
             S.log_reallocation_generation_time(t, generation_time)
@@ -485,15 +489,16 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             S.save_data(intermediate_output_file)
 
         if (
-            run_until_schedule_complete
-            and use_precomputed_schedule
-            and import_schedule.schedule_tasks_finished(
-                schedule, J, S, total_schedule_tasks
+            run_until_queue_complete
+            and use_precomputed_queue
+            and import_schedule.queue_tasks_finished(
+                queue, deferred_queue, J, S, total_queue_tasks
             )
         ):
-            print(f"All {total_schedule_tasks} schedule tasks completed at t={t}")
+            print(f"All {total_queue_tasks} queue tasks completed at t={t}")
             print(f"Current tasks in system: {len(J)}")
-            print(f"Current tasks in schedule: {schedule.shape[0]}")
+            print(f"Current tasks in queue: {queue.shape[0]}")
+            print(f"Current deferred tasks: {len(deferred_queue)}")
             t += 1
             break
 
@@ -524,10 +529,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          shuffle_percentage: float = 0.0,
          aisle_dual_cycle: bool = False,
          driveway_dual_cycle: bool = False,
-         use_precomputed_schedule: bool = False,
-         schedule_file: str = None,
+         use_precomputed_queue: bool = False,
+         queue_file: str = None,
          initial_inventory_file: str = None,
-         run_until_schedule_complete: bool = False,
+         run_until_queue_complete: bool = False,
          W: int = 300,
          B: int = 60,
          lambda_: float = 1.5,
@@ -578,30 +583,30 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             f"expected one of {REALLOCATION_TASK_METHODS}"
         )
 
-    if use_precomputed_schedule:
-        if not schedule_file or not initial_inventory_file:
+    if use_precomputed_queue:
+        if not queue_file or not initial_inventory_file:
             raise ValueError(
-                "--use-precomputed-schedule requires both --schedule-file and --initial-inventory-file"
+                "--use-precomputed-queue requires both --queue-file and --initial-inventory-file"
             )
 
-    if run_until_schedule_complete and not use_precomputed_schedule:
+    if run_until_queue_complete and not use_precomputed_queue:
         raise ValueError(
-            "--run-until-schedule-complete requires --use-precomputed-schedule"
+            "--run-until-queue-complete requires --use-precomputed-queue"
         )
     
     stripped_map_name = map_name.split("/")[-1].replace(".json", "")
     effective_task_generation_strategy = (
-        "precomputed_schedule" if use_precomputed_schedule else task_generation_strategy
+        "precomputed_queue" if use_precomputed_queue else task_generation_strategy
     )
-    schedule_stem = (
-        os.path.splitext(os.path.basename(schedule_file))[0]
-        if schedule_file
+    queue_stem = (
+        os.path.splitext(os.path.basename(queue_file))[0]
+        if queue_file
         else "none"
     )
 
     output_file = (
         f"data/raw_data/{T}_{effective_task_generation_strategy}_"
-        f"{reallocation_task_method}_{lambda_}_{schedule_stem}_"
+        f"{reallocation_task_method}_{lambda_}_{queue_stem}_"
         f"{initial_inventory}_{initial_task_assignment_strategy}_"
         f"{improvement_task_assignment_strategy}_{path_planning_strategy}_"
         f"{stripped_map_name}_{num_robots}_{max_number_tasks}_"
@@ -646,18 +651,18 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         agent_unallocated_penalty=agent_unallocated_penalty,
         solution_repair_detection_function=solution_repair_detection_function,
         solution_repair_function=solution_repair_function,
-        schedule_name=schedule_stem,
+        schedule_name=queue_stem,
         W=W,
         B=B,
         lambda_=lambda_,
         reallocation_task_method=reallocation_task_method,
     )
-    schedule = None
-    if use_precomputed_schedule:
-        schedule = import_schedule.import_schedule(schedule_file)
+    queue = None
+    if use_precomputed_queue:
+        queue = import_schedule.import_queue(queue_file)
         G = graph.Graph(num_robots, map_name, 0.0, num_skus, weight_init_method)
         import_schedule.load_initial_inventory(initial_inventory_file, G)
-        print(f"Loaded precomputed schedule ({schedule.shape[0]} tasks) and initial inventory from file")
+        print(f"Loaded precomputed queue ({queue.shape[0]} tasks) and initial inventory from file")
     else:
         G = graph.Graph(num_robots, map_name, initial_inventory, num_skus, weight_init_method)
 
@@ -703,17 +708,17 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             shuffle_percentage=shuffle_percentage,
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
-            use_precomputed_schedule=use_precomputed_schedule,
-            schedule=schedule,
-            run_until_schedule_complete=run_until_schedule_complete,
+            use_precomputed_queue=use_precomputed_queue,
+            queue=queue,
+            run_until_queue_complete=run_until_queue_complete,
             W=W,
             B=B,
             lambda_=lambda_,
             reallocation_task_method=reallocation_task_method,
     )
-    if run_until_schedule_complete:
+    if run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
-        print(f"Simulated {simulated_timesteps} timesteps (run until schedule complete)")
+        print(f"Simulated {simulated_timesteps} timesteps (run until queue complete)")
     tok = time.time()
     S.set_total_runtime(tok-tik)
     
@@ -810,16 +815,16 @@ if __name__=="__main__":
                             'When set, after an agent completes an outbound delivery at a '
                             'driveway cell it will immediately pick up an unallocated inbound '
                             'task whose pickup is at any driveway cell. Default off.')
-    parser.add_argument('--use-precomputed-schedule', action='store_true',
-                       help='Load tasks from a precomputed schedule file and skip CRG. '
-                            'Requires --schedule-file and --initial-inventory-file.')
-    parser.add_argument('--schedule-file', type=str, default=None,
-                       help='Path to precomputed schedule text file (task_id, time, sku_id, type)')
+    parser.add_argument('--use-precomputed-queue', action='store_true',
+                       help='Load tasks from a precomputed queue file and skip CRG. '
+                            'Requires --queue-file and --initial-inventory-file.')
+    parser.add_argument('--queue-file', type=str, default=None,
+                       help='Path to precomputed queue text file (sku_id, task_type)')
     parser.add_argument('--initial-inventory-file', type=str, default=None,
                        help='Path to precomputed initial inventory text file (sku_id, row, col)')
-    parser.add_argument('--run-until-schedule-complete', action='store_true',
-                       help='Run until all precomputed schedule tasks are completed instead '
-                            'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
+    parser.add_argument('--run-until-queue-complete', action='store_true',
+                       help='Run until all precomputed queue tasks are completed instead '
+                            'of stopping at --time-horizon. Requires --use-precomputed-queue.')
     parser.add_argument('--W', type=int, default=300, help='Lookahead window')
     parser.add_argument('--B', type=int, default=60, help='Lookahead beginning')
     parser.add_argument(
@@ -874,10 +879,10 @@ if __name__=="__main__":
         shuffle_percentage=args.shuffle_percentage,
         aisle_dual_cycle=args.aisle_dual_cycle,
         driveway_dual_cycle=args.driveway_dual_cycle,
-        use_precomputed_schedule=args.use_precomputed_schedule,
-        schedule_file=args.schedule_file,
+        use_precomputed_queue=args.use_precomputed_queue,
+        queue_file=args.queue_file,
         initial_inventory_file=args.initial_inventory_file,
-        run_until_schedule_complete=args.run_until_schedule_complete,
+        run_until_queue_complete=args.run_until_queue_complete,
         W=args.W,
         B=args.B,
         lambda_=args.lambda_,

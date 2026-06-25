@@ -40,3 +40,36 @@ def poisson(lam : float, total_timesteps : int) -> NDArray:
     else:
         ts = np.zeros_like(ts)
     return ts.astype(float)
+
+
+def constant_weight(value: float, total_timesteps: int) -> NDArray:
+    """Return a constant tasking weight for every task index."""
+    return np.full(total_timesteps, max(float(value), 1e-6), dtype=float)
+
+
+def sinusoid_weight(
+    min_weight: float,
+    max_weight: float,
+    period_tasks: float,
+    phase: float,
+    total_timesteps: int,
+) -> NDArray:
+    """Return tasking weights that oscillate between ``min_weight`` and ``max_weight``.
+
+    ``period_tasks`` is the number of queue indices per full cycle and does not
+    depend on ``total_timesteps``. Generating fewer tasks simply truncates the
+    curve rather than compressing more cycles into the queue.
+    """
+    if period_tasks <= 0:
+        raise ValueError(f"period_tasks must be positive, got {period_tasks}")
+
+    lo = float(min_weight)
+    hi = float(max_weight)
+    if hi < lo:
+        lo, hi = hi, lo
+
+    t = np.arange(total_timesteps, dtype=float)
+    omega = 2 * np.pi * t / float(period_tasks)
+    sine = np.sin(omega + phase)
+    weights = lo + (hi - lo) * (sine + 1.0) / 2.0
+    return np.clip(weights, 1e-6, None).astype(float)

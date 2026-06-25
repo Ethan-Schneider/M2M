@@ -12,12 +12,12 @@ mkdir -p "$repo_root/data/videos"
 # Define arrays of parameters to test
 seeds=(1)
 num_robots=(40)
-time_horizons=(3000)
+time_horizons=(3600)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
 num_skus=(30)
-initial_inventory=(30.0)
+initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
@@ -45,19 +45,19 @@ B=30
 lambda_=1.0
 reallocation_task_method="insertion"
 
-# Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
-use_precomputed_schedule=true
-schedule_file="$repo_root/data/schedules/schedule_1_hour.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/schedule_1_hour_init_inventory.txt"
-run_until_schedule_complete=false
+# Precomputed queue/inventory (set use_precomputed_queue=true to enable)
+use_precomputed_queue=true
+queue_file="$repo_root/data/queues/10000_25_percent_inventory_high_frequency.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/10000_25_percent_inventory_high_frequency_init_inventory.txt"
+run_until_queue_complete=false
 
 precomputed_args=()
-if [ "$use_precomputed_schedule" = true ]; then
-    precomputed_args+=(--use-precomputed-schedule)
-    precomputed_args+=(--schedule-file "$schedule_file")
+if [ "$use_precomputed_queue" = true ]; then
+    precomputed_args+=(--use-precomputed-queue)
+    precomputed_args+=(--queue-file "$queue_file")
     precomputed_args+=(--initial-inventory-file "$initial_inventory_file")
-    if [ "$run_until_schedule_complete" = true ]; then
-        precomputed_args+=(--run-until-schedule-complete)
+    if [ "$run_until_queue_complete" = true ]; then
+        precomputed_args+=(--run-until-queue-complete)
     fi
 fi
 
@@ -93,15 +93,15 @@ for seed in "${seeds[@]}"; do
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
                         echo "  Solution Repair Detection Function: $solution_repair_detection_function"
                         echo "  Solution Repair Function: $solution_repair_function"
-                        echo "  Use Precomputed Schedule: $use_precomputed_schedule"
+                        echo "  Use Precomputed Queue: $use_precomputed_queue"
                         echo "  Lookahead Window (W): $W"
                         echo "  Lookahead Beginning (B): $B"
                         echo "  Detour Penalty (lambda_): $lambda_"
                         echo "  Reallocation Task Method: $reallocation_task_method"
-                        if [ "$use_precomputed_schedule" = true ]; then
-                            echo "  Schedule File: $schedule_file"
+                        if [ "$use_precomputed_queue" = true ]; then
+                            echo "  Queue File: $queue_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
-                            echo "  Run Until Schedule Complete: $run_until_schedule_complete"
+                            echo "  Run Until Queue Complete: $run_until_queue_complete"
                         fi
                         echo "----------------------------------------"
                         
