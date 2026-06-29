@@ -14,6 +14,10 @@ from .removal_operators.shaw_removal import shaw_removal
 from .repair_operators.greedy_repair import greedy_repair
 from .repair_operators.fast_SCF_repair import fast_SCF_repair
 
+from .initial_solutions.construct_cost_elements import (
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+)
 from .initial_solutions.fast_greedy import fast_greedy_allocation
 from .initial_solutions.fast_FCF import fast_FCF_allocation
 from .initial_solutions.fast_SCF import fast_SCF_allocation
@@ -29,7 +33,9 @@ class LNS:
                  deadline_weight: float = 0.0,
                  sku_distribution_weight: float = 0.0,
                  agent_unallocated_penalty: float = 0.0,
-                 agent_task_sequence_limit : int = -1):
+                 agent_task_sequence_limit : int = -1,
+                 crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
+                 crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF):
         """
         Initialize Large Neighborhood Search algorithm.
         
@@ -69,6 +75,8 @@ class LNS:
         self.sku_distribution_weight = sku_distribution_weight
         self.agent_unallocated_penalty = agent_unallocated_penalty
         self.agent_task_sequence_limit = agent_task_sequence_limit
+        self.crm2m_lambda = crm2m_lambda
+        self.crm2m_detour_cutoff = crm2m_detour_cutoff
         # Store best solution found
         self.best_solution = None
         self.best_cost = np.inf
@@ -124,7 +132,9 @@ class LNS:
                                                                         deadline_weight=self.deadline_weight,
                                                                         sku_distribution_weight=self.sku_distribution_weight,
                                                                         agent_task_sequence_time=self.agent_task_sequence_time, 
-                                                                        agent_task_sequence_limit=self.agent_task_sequence_limit)
+                                                                        agent_task_sequence_limit=self.agent_task_sequence_limit,
+                                                                        crm2m_lambda=self.crm2m_lambda,
+                                                                        crm2m_detour_cutoff=self.crm2m_detour_cutoff)
         elif self.initial_task_assignment_strategy == "fast_FCF":
             current_solution, allocations, __ = fast_FCF_allocation(self.S, self.G, self.Rs, self.start_locs, self.goal_locs, self.idx_to_task_id, self.cost_calculation_method, self.agent_start_cost_tensor, self.start_goal_dist, self.task_start_mask, self.task_goal_mask, cost_lookup=self.cost_lookup)
         elif self.initial_task_assignment_strategy == "fast_SCF":
@@ -260,7 +270,8 @@ class LNS:
                                                                          deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
                                                                          agent_task_sequence_time=temp_agent_task_sequence_time,
-                                                                         current_time=self.current_time, agent_task_sequence_limit=self.agent_task_sequence_limit)
+                                                                         current_time=self.current_time, agent_task_sequence_limit=self.agent_task_sequence_limit,
+                                                                         crm2m_lambda=self.crm2m_lambda, crm2m_detour_cutoff=self.crm2m_detour_cutoff)
                 # Update the temp cost elements with the returned values
                 temp_start_goal_dist = temp_start_goal_dist.copy()
                 temp_task_deadline_costs = temp_task_deadline_costs.copy()
@@ -276,7 +287,8 @@ class LNS:
                                                                          base_cost_weight=self.base_cost_weight, deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
                                                                          agent_task_sequence_time=temp_agent_task_sequence_time,
-                                                                         current_time=self.current_time)
+                                                                         current_time=self.current_time,
+                                                                         crm2m_lambda=self.crm2m_lambda, crm2m_detour_cutoff=self.crm2m_detour_cutoff)
                 # Update the temp cost elements with the returned values
                 temp_start_goal_dist = temp_start_goal_dist.copy()
                 temp_task_deadline_costs = temp_task_deadline_costs.copy()
@@ -294,7 +306,8 @@ class LNS:
                                                                          base_cost_weight=self.base_cost_weight, deadline_weight=self.deadline_weight,
                                                                          sku_distribution_weight=self.sku_distribution_weight,
                                                                          agent_task_sequence_time=temp_agent_task_sequence_time,
-                                                                         current_time=self.current_time)
+                                                                         current_time=self.current_time,
+                                                                         crm2m_lambda=self.crm2m_lambda, crm2m_detour_cutoff=self.crm2m_detour_cutoff)
                 # Update the temp cost elements with the returned values
                 temp_start_goal_dist = temp_start_goal_dist.copy()
                 temp_task_deadline_costs = temp_task_deadline_costs.copy()
@@ -445,7 +458,9 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
                 base_cost_weight: float = 1.0,
                 deadline_weight: float = 0.0,
                 sku_distribution_weight: float = 0.0,
-                agent_unallocated_penalty: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                agent_unallocated_penalty: float = 0.0,
+                crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
+                crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Call the LNS algorithm with given parameters.
     
@@ -483,5 +498,6 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
     
     lns = LNS(S, G, Rs, J, initial_task_assignment_strategy, time_limit, removal_size, 
               cost_calculation_method, removal_operator, repair_operator, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, current_time=t if t is not None else 0,
-              base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty, agent_task_sequence_limit=3)
+              base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty, agent_task_sequence_limit=3,
+              crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff)
     return lns.run(t=t)

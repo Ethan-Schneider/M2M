@@ -6,6 +6,18 @@ from .graphing import *
 from ..agent import *
 
 
+def _json_safe_location(loc):
+    """Convert task locations (tuples / frozensets) to JSON-serializable lists."""
+    if isinstance(loc, frozenset):
+        if len(loc) == 1:
+            loc = next(iter(loc))
+        else:
+            return [list(x) if isinstance(x, tuple) else x for x in sorted(loc)]
+    if isinstance(loc, tuple):
+        return list(loc)
+    return loc
+
+
 def compute_sku_spread(eta: np.ndarray) -> float:
     """Hierarchical SKU-spread metric (entropy weighted by per-SKU count).
 
@@ -192,7 +204,15 @@ class Stats:
             
         self.__completed_task_ids = []
         self.__completed_task_details = {}  # task_id -> (start_location, goal_location)
+        self.__completed_rearrangement_task_ids = []
+        self.__rearrangement_task_completion_timestamps = {}  # task_id -> timestep
+        self.__completed_rearrangement_task_details = {}  # task_id -> (start, goal, deadline, sku, type)
         self.__completed_to_pickup_task_ids = []
+
+        # crM2M reallocation diagnostics (per-tick)
+        self.__reallocation_tasks_generated = {}   # t -> number of candidates generated
+        self.__reallocation_generation_time = {}   # t -> seconds spent generating candidates
+        self.__reallocation_tasks_committed = {}   # t -> shuffles staged in J_a after pruning
         
         # Runtime Stastics: 
         self.__total_runtime = []
@@ -471,7 +491,53 @@ class Stats:
         
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
-            
+
+    def add_completed_rearrangement_task_id(
+        self,
+        task_id: int,
+        timestep: int,
+        start_location: tuple = None,
+        goal_location: tuple = None,
+        deadline: int = None,
+        sku_id: int = None,
+        task_type: int = None,
+    ) -> None:
+        """Record completion of a rearrangement (shuffle / type=2) task.
+
+        Kept separate from ``add_completed_task_id`` so rearrangement throughput
+        is reported independently of real (inbound/outbound) task completions and
+        does not pollute service-time / tardiness statistics, which are
+        deadline-graded concepts that do not apply to opportunistic shuffles.
+        """
+        self.__completed_rearrangement_task_ids.append(int(task_id))
+        self.__rearrangement_task_completion_timestamps[task_id] = int(timestep)
+        if start_location is not None and goal_location is not None:
+            self.__completed_rearrangement_task_details[task_id] = (
+                _json_safe_location(start_location),
+                _json_safe_location(goal_location),
+                deadline,
+                sku_id,
+                task_type,
+            )
+
+    def get_completed_rearrangement_task_ids(self) -> list:
+        return self.__completed_rearrangement_task_ids
+
+    def get_total_completed_rearrangement_tasks(self) -> int:
+        return len(self.__completed_rearrangement_task_ids)
+
+    def log_reallocation_tasks_generated(self, t: int, count: int) -> None:
+        """Record how many shuffle candidates the generator produced at tick ``t``."""
+        self.__reallocation_tasks_generated[int(t)] = int(count)
+
+    def log_reallocation_generation_time(self, t: int, seconds: float) -> None:
+        """Record candidate-generation wall time (seconds) at tick ``t``."""
+        self.__reallocation_generation_time[int(t)] = float(seconds)
+
+    def log_reallocation_tasks_committed(self, t: int, count: int) -> None:
+        """Record how many shuffles remain staged in ``J_a`` after pruning at ``t``."""
+        self.__reallocation_tasks_committed[int(t)] = int(count)
+
     # ====================== Completed To-Pickup Task Id Functions
     
     def add_completed_to_pickup_task_id(self, task_id : int) -> None:
@@ -801,6 +867,17 @@ class Stats:
             "total_completed_tasks": int(len(self.__completed_task_ids)),
             "completed_tasks": self.__completed_task_ids,
             "completed_task_details": self.__completed_task_details,
+            "total_completed_rearrangement_tasks": int(
+                len(self.__completed_rearrangement_task_ids)
+            ),
+            "completed_rearrangement_tasks": self.__completed_rearrangement_task_ids,
+            "completed_rearrangement_task_details": self.__completed_rearrangement_task_details,
+            "rearrangement_task_completion_timestamps": (
+                self.__rearrangement_task_completion_timestamps
+            ),
+            "reallocation_tasks_generated": self.__reallocation_tasks_generated,
+            "reallocation_generation_time": self.__reallocation_generation_time,
+            "reallocation_tasks_committed": self.__reallocation_tasks_committed,
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,

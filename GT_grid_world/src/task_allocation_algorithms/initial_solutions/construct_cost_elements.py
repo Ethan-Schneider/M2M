@@ -106,6 +106,140 @@ def per_task_type_sku_distribution_term(
         f"TASK_TYPE_SHUFFLE={TASK_TYPE_SHUFFLE}}}."
     )
 
+# Default crM2M (concatenated rearrangement) objective hyperparameters.
+# ``lambda`` weights the detour cost against the placement benefit in the
+# rearrangement utility ``U = b - lambda * Delta`` (lambda >= 1). 1.5 matches
+# Ethan's MILP-branch insertion experiments. The detour cutoff rejects any
+# rearrangement whose *weighted* detour ``lambda * Delta`` reaches the cutoff
+# (so e.g. Delta=5, lambda=2 is rejected even though Delta alone is < 10).
+CRM2M_DEFAULT_LAMBDA = 1.5
+CRM2M_DEFAULT_DETOUR_CUTOFF = 10.0
+
+
+def _crm2m_distance(G: Graph, a: Tuple[int, int], b: Tuple[int, int], method: str) -> float:
+    """Distance between two cells using the allocator's configured metric."""
+    if method == "manhattan":
+        return float(manhattan_distance(a, b))
+    if method == "shortest_path":
+        return float(G.get_distance(a, b))
+    raise ValueError(f"Invalid cost calculation method: {method}")
+
+
+def compute_crm2m_terms(
+    Rs: AgentLoader,
+    G: Graph,
+    start_locs: List[Tuple[int, int]],
+    goal_locs: List[Tuple[int, int]],
+    method: str = "manhattan",
+) -> Tuple[Tuple[int, int], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Static terms for the crM2M rearrangement utility (plan section 3.4).
+
+    The rearrangement utility is ``U(a_m, s_p, d_q) = b(s_p, d_q) - lambda * Delta(a_m, s_p)``
+    where (all distances reference a single fixed dummy ``h_0 = Rs.agents[0].home``):
+
+    - ``Delta(a_m, s_p) = dist(g^m_{i-1}, s_p) + dist(s_p, h_0) - dist(a_m, h_0)`` --
+      the marginal detour of inserting a pickup at ``s_p`` on the agent's way
+      out of the aisle toward ``h_0``. ``dist(g^m_{i-1}, s_p)`` is supplied live
+      by the allocator's ``agent_start_cost_tensor`` (it already equals the
+      distance from the agent's previous-task goal / current anchor to ``s_p``,
+      and is updated in place as the agent picks up more tasks in a batch).
+    - ``b(s_p, d_q) = dist(s_p, h_0) - dist(d_q, h_0)`` -- how much closer to the
+      aisle exit the item moved (agent-independent placement quality).
+
+    This function returns only the agent-independent / anchor-dependent pieces
+    so the allocator never densifies the full ``(M, N, P, Q, K)`` tensor: the
+    ``(M, P)`` detour and ``(P, Q)`` benefit are assembled on demand per task
+    from these vectors, and the ``K`` coupling is the ``(P, Q)`` same-aisle mask.
+
+    Returns:
+        - ``home``: the dummy reference cell ``h_0``.
+        - ``start_home``: ``(P,)`` distances ``dist(s_p, h_0)``.
+        - ``goal_home``: ``(Q,)`` distances ``dist(d_q, h_0)``.
+        - ``agent_home``: ``(M,)`` distances ``dist(a_m, h_0)`` from each agent's
+          current anchor (last task goal, else live state). Kept as its own
+          vector -- deliberately NOT aliased to ``g^m_{i-1}`` -- so downstream
+          changes to the agent anchor stay separable from the previous-goal term.
+        - ``coupling_mask``: ``(P, Q)`` boolean, ``True`` where ``s_p`` and ``d_q``
+          share an aisle (column). This reproduces the generator's per-aisle
+          ``C_i`` coupling (``s_p in S^k_n`` and ``d_q in D^k_n``) as a single
+          global mask, since coupling is "same column" for every shuffle task.
+    """
+    home = Rs.agents[0].home
+
+    start_home = np.array(
+        [_crm2m_distance(G, s, home, method) for s in start_locs], dtype=float
+    )
+    goal_home = np.array(
+        [_crm2m_distance(G, g, home, method) for g in goal_locs], dtype=float
+    )
+
+    M = len(Rs.agents)
+    agent_home = np.empty(M, dtype=float)
+    for m, agent in enumerate(Rs.agents):
+        if len(agent.task_sequence) == 0:
+            anchor = agent.state
+        else:
+            anchor = agent.task_sequence[-1][2]
+        agent_home[m] = _crm2m_distance(G, anchor, home, method)
+
+    start_cols = np.array([s[1] for s in start_locs])
+    goal_cols = np.array([g[1] for g in goal_locs])
+    if len(start_cols) == 0 or len(goal_cols) == 0:
+        coupling_mask = np.zeros((len(start_locs), len(goal_locs)), dtype=bool)
+    else:
+        coupling_mask = start_cols[:, None] == goal_cols[None, :]
+
+    return home, start_home, goal_home, agent_home, coupling_mask
+
+
+def rearrangement_cost_cube(
+    agent_start_cost_tensor: np.ndarray,
+    agent_home: np.ndarray,
+    start_home: np.ndarray,
+    goal_home: np.ndarray,
+    coupling_mask: np.ndarray,
+    valid_p: np.ndarray,
+    valid_q: np.ndarray,
+    lambda_: float,
+    detour_cutoff: float,
+) -> np.ndarray:
+    """Per-task crM2M cost cube ``-U`` over ``(M, |valid_p|, |valid_q|)``.
+
+    Allocators minimize cost, so the rearrangement cost is ``-U`` (maximizing
+    utility). For a type=2 (shuffle) task this *replaces* the base + SKU cost
+    entirely (per plan section 3.4 -- the rearrangement objective is a complete
+    utility, not an additive placement term).
+
+    Gating (entry set to ``+inf`` -> never chosen by ``argmin``):
+        - ``lambda_ * Delta >= detour_cutoff`` (weighted-detour cutoff),
+        - ``U <= 0`` (no net benefit; rearrangement is opportunistic/droppable),
+        - ``coupling_mask`` False (``s_p`` / ``d_q`` not in the same aisle group).
+
+    The ``s_p in V_alloc`` / ``d_q in V_alloc`` / ``tau_n in T_alloc`` gates are
+    already enforced upstream (allocated locations are removed from
+    ``valid_p`` / ``valid_q`` via the task masks, and allocated tasks are
+    excluded from the unallocated-task set), so they need no handling here.
+    """
+    # Delta: (M, |valid_p|). dist(g^m_{i-1}, s_p) is the live agent_start cost.
+    detour = (
+        agent_start_cost_tensor[:, valid_p]
+        + start_home[valid_p][None, :]
+        - agent_home[:, None]
+    )
+    # b: (|valid_p|, |valid_q|).
+    benefit = start_home[valid_p][:, None] - goal_home[valid_q][None, :]
+    # U: (M, |valid_p|, |valid_q|).
+    U = benefit[None, :, :] - lambda_ * detour[:, :, None]
+    cost = -U
+
+    weighted_detour = lambda_ * detour  # (M, |valid_p|)
+    cost = np.where(weighted_detour[:, :, None] >= detour_cutoff, np.inf, cost)
+    cost = np.where(U <= 0, np.inf, cost)
+    coupling = coupling_mask[np.ix_(valid_p, valid_q)]  # (|valid_p|, |valid_q|)
+    cost = np.where(coupling[None, :, :], cost, np.inf)
+    return cost
+
+
 def construct_cost_elements(J: Dict[int, Tuple], Rs: AgentLoader, G: Graph, current_time: int, method : str = "manhattan") -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, List[Tuple[int, int]], List[Tuple[int, int]], Dict[int, int]]:
     """
     Compute the cost elements needed for allocation.

@@ -195,29 +195,35 @@ def test_fast_greedy_prefers_idle_agent_over_busy_one(
 # ---------------------------------------------------------------------------
 # Per-task-type SKU distribution dispatch in the live allocator
 # ---------------------------------------------------------------------------
-def test_fast_greedy_shuffle_uses_rearrangement_matrix(
+def test_fast_greedy_shuffle_is_droppable_when_detour_dominates(
     populated_graph, minimal_stats, seeded_rng
 ):
-    """1.6 dispatch invariant: when ``sku_distribution_weight > 0`` and a
-    shuffle (type=2) task is the only task in J, the allocator must succeed
-    (proving the rearrangement matrix is populated and the dispatch routes
-    type=2 through it). If the dispatch were still binary, type=2 would fall
-    through to the OB branch which is now all-inf for shuffle and the
-    allocation would fail with a "No best task found" outcome."""
+    """crM2M (roadmap 4.2) replaces the 1.6 type=2 SKU-matrix routing entirely
+    with the rearrangement utility ``U = b - lambda*Delta`` (cost = -U, gated).
+
+    Here the only agent is anchored at its home ``h_0 = (17, 0)``. The detour to
+    fetch any SKU instance is then ``Delta ~= dist(h_0, s) + dist(s, h_0) -
+    dist(h_0, h_0) = 2*dist(s, h_0)``, which swamps the placement benefit
+    ``b <= dist(s, h_0)``. So ``U <= 0`` for every candidate and the (opportunistic,
+    droppable) shuffle is correctly gated out -- the allocator simply assigns
+    nothing rather than forcing a wasteful move. ``sku_distribution_weight`` no
+    longer influences type=2 cost at all."""
     sku = next(s for s in populated_graph.warehouse.get_all_skus()
                if populated_graph.warehouse.get_sku_instance_count(s) >= 1)
 
     Rs = _agents_at(populated_graph, [(17, 0)])
     task_id, t = _make_shuffle_task(populated_graph, sku, deadline=100)
 
-    _, allocations, cost = fast_greedy_call(
+    _, allocations, _ = fast_greedy_call(
         minimal_stats, populated_graph, Rs, {task_id: t}, current_time=0,
         method="manhattan", base_cost_weight=1.0, deadline_weight=0.0,
         sku_distribution_weight=1.0,
     )
 
-    assert allocations, "shuffle task with sku_distribution_weight>0 should be allocated"
-    assert cost != np.inf, "shuffle allocation cost must be finite via the rearrangement matrix"
+    assert not allocations, (
+        "a shuffle whose detour dominates its benefit (agent at home) must be "
+        "dropped under crM2M, not force-allocated"
+    )
 
 
 def test_fast_greedy_outbound_uses_outbound_matrix(
@@ -244,8 +250,13 @@ def test_fast_greedy_outbound_uses_outbound_matrix(
 def test_construct_cost_elements_handles_all_three_task_types_in_one_J(
     populated_graph, minimal_stats, seeded_rng
 ):
-    """Mixed J: one of each type, all three matrices populated, allocator
-    runs without raising. Mostly a smoke test for the integration path."""
+    """Mixed J: one of each type; allocator runs without raising.
+
+    The mandatory inbound (20) and outbound (10) tasks are always allocated. The
+    type=2 shuffle (30) is opportunistic under crM2M: with agents anchored at
+    their homes its detour dominates its benefit (``U <= 0``), so it is gated out.
+    The invariant we assert is that the two mandatory tasks are allocated and the
+    integration path doesn't raise; the shuffle is allowed to be dropped."""
     sku = next(s for s in populated_graph.warehouse.get_all_skus()
                if populated_graph.warehouse.get_sku_instance_count(s) >= 1)
 
@@ -272,7 +283,8 @@ def test_construct_cost_elements_handles_all_three_task_types_in_one_J(
         sku_distribution_weight=1.0,
     )
 
-    assert len(allocations) == 3, \
-        f"expected all 3 task types to be allocated, got {len(allocations)}"
     allocated_task_ids = {a[1] for a in allocations}
-    assert allocated_task_ids == {10, 20, 30}
+    assert {10, 20} <= allocated_task_ids, (
+        f"expected both mandatory real tasks (IB 20, OB 10) to be allocated, "
+        f"got {allocated_task_ids}"
+    )

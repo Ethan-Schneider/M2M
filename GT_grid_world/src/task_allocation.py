@@ -14,6 +14,10 @@ from .task_allocation_algorithms.py_lns_V2 import py_lns_call
 from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
 from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
 from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
+from .task_allocation_algorithms.initial_solutions.construct_cost_elements import (
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+)
 from .task_allocation_algorithms.hbh_mla_star import hbh_mla_star_call
 from .task_allocation_algorithms.ta_hybrid_driver import ta_hybrid_call
 from .task_allocation_algorithms.dual_cycle_allocation import apply_dual_cycle_pairing
@@ -28,7 +32,9 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
                    agent_unallocated_penalty: float = 0.0,
                    schedule=None,
                    aisle_dual_cycle: bool = False,
-                   driveway_dual_cycle: bool = False) -> AgentLoader:
+                   driveway_dual_cycle: bool = False,
+                   crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
+                   crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF) -> AgentLoader:
     """ Task allocation entrance function, which calls the respsective task assignment algorithm and returns the updated task assignment, set of free_agents, and set of to_pickup agents.
 
     Args:
@@ -60,7 +66,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
     result = None
 
     if improvement_task_assignment_strategy == "py_lns":
-        result = py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
+        result = py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty, crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff)
     elif improvement_task_assignment_strategy == "c_lns":
         result = lns_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "hbh_mla_star":
@@ -108,7 +114,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         elif initial_task_assignment_strategy == "fast_SCF":
             result = fast_SCF_call(S, G, Rs, J, t, method=cost_calculation_method)
         elif initial_task_assignment_strategy == "fast_greedy":
-            result = fast_greedy_call(S, G, Rs, J, t, method=cost_calculation_method, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_task_sequence_limit=3)
+            result = fast_greedy_call(S, G, Rs, J, t, method=cost_calculation_method, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_task_sequence_limit=3, crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff)
         else:
             print("ERROR: Unknown task assignment strategy " + initial_task_assignment_strategy + ", please choose another one.")
             return Rs

@@ -69,7 +69,7 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
 
 
-def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, set]:
+def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a : Dict[int, Tuple], map_name : str, t : int) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Tuple]]:
     """
     Simulate the system for one timestep.
 
@@ -156,10 +156,30 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 #       own assignee will collect it.
                 pickup_succeeded = False
 
-                if task_id not in J:
+                if task_id not in J and task_id not in J_a:
                     # Task hasn't been released yet (TA-Hybrid pre-allocation
-                    # case). Don't touch any SKU at this cell.
+                    # case). Don't touch any SKU at this cell. Shuffles live in
+                    # ``J_a`` rather than ``J``, so they must be admitted here
+                    # too -- otherwise the pickup is silently skipped and the
+                    # shuffle can never execute.
                     pass
+                # Stale shuffle: the agent reached its committed source cell but
+                # that cell no longer holds the SKU this shuffle was generated
+                # for. Warehouse churn (an outbound emptied the cell, possibly an
+                # inbound then refilled it with a different SKU) invalidated the
+                # move between commitment and arrival. Moving the wrong item is
+                # pointless and would crash at the delivery-side SKU-match check,
+                # so abort the shuffle and free the agent. Shuffles are optional,
+                # so dropping one is harmless (unlike a real task).
+                elif task_id in J_a and (
+                    start_location not in G.warehouse.get_full_locations()
+                    or G.warehouse.get_sku_at_location(start_location).sku_id != J_a[task_id][3]
+                ):
+                    J_a.pop(task_id, None)
+                    agent.task_sequence.pop(0)
+                    agent.path_sequence = []
+                    agent.status = 1 if agent.task_sequence else 0
+                    continue
                 # Outbound or warehouse-based pickup
                 elif start_location in G.warehouse.get_full_locations():
                     try:
@@ -171,6 +191,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                         G.update_sku_KD_trees(agent.get_sku_id_carrying())
 
                         _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
+                        _refresh_tasks_after_warehouse_change(J_a, G, task_id, sku_id)
 
                         if agent.get_sku_id_carrying() is None:
                             raise ValueError(f"Agent should be holding item after pickup ... Exiting")
@@ -213,9 +234,15 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                 goal_location = task[2]
                 deadline = task[3]
                 
-                deadline = J[task_id][2]
-                sku_id = J[task_id][3]
-                inbound_task = J[task_id][4]
+                # Shuffles live in the separate ``J_a`` pool; real tasks in ``J``.
+                if task_id in J_a:
+                    deadline = J_a[task_id][2]
+                    sku_id = J_a[task_id][3]
+                    inbound_task = J_a[task_id][4]
+                else:
+                    deadline = J[task_id][2]
+                    sku_id = J[task_id][3]
+                    inbound_task = J[task_id][4]
 
                 if sku_id != agent.get_sku_id_carrying():
                     raise ValueError(f"Agent {agent.id} carrying sku {agent.get_sku_id_carrying()} but task {task_id} requires sku {sku_id} ... Exiting")
@@ -227,17 +254,29 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                     G.warehouse.add_sku_instance(carried_sku, goal_location)
                     G.update_sku_KD_trees(agent.get_sku_id_carrying())
                     _refresh_tasks_after_warehouse_change(J, G, task_id, carried_sku)
+                    _refresh_tasks_after_warehouse_change(J_a, G, task_id, carried_sku)
 
                                 
                 elif goal_location in G.driveway.get_empty_locations():
                     pass
                 agent.set_sku_id_carrying(None)
 
-                S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
-                S.update_service_time(task_id, t)
-                
-                J.pop(task_id)
-                    
+                if inbound_task == TASK_TYPE_SHUFFLE:
+                    # crM2M (concatenated rearrangement): a completed shuffle is
+                    # reported on the separate rearrangement track. Service time /
+                    # tardiness are deliberately skipped -- those are deadline-graded
+                    # metrics for real (inbound/outbound) tasks, whereas a shuffle's
+                    # "deadline" is just its look-ahead window edge.
+                    S.add_completed_rearrangement_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
+                else:
+                    S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
+                    S.update_service_time(task_id, t)
+
+                if task_id in J_a:
+                    J_a.pop(task_id)
+                else:
+                    J.pop(task_id)
+
                 agent.task_sequence.pop(0)
 
                 if agent.task_sequence == []:
@@ -264,4 +303,4 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], map_n
                     if t <= 100:
                         S.append_early_task_ids(new_task_id)
                         
-    return Rs, J
+    return Rs, J, J_a

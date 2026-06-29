@@ -213,7 +213,7 @@ def test_simulate_completes_shuffle_pickup_and_dropoff_end_to_end(
 
     populated_graph.set_occupied(pickup_loc, True)
 
-    Rs, J = simulate(minimal_stats, populated_graph, Rs, J, "small_test", t=0)
+    Rs, J, J_a = simulate(minimal_stats, populated_graph, Rs, J, {}, "small_test", t=0)
 
     assert agent.status == 2, "agent should transition to delivery phase after pickup"
     assert agent.get_sku_id_carrying() == sku, "agent should be carrying the picked SKU"
@@ -224,7 +224,7 @@ def test_simulate_completes_shuffle_pickup_and_dropoff_end_to_end(
     agent.state = goal_loc
     agent.path_sequence = []
 
-    Rs, J = simulate(minimal_stats, populated_graph, Rs, J, "small_test", t=1)
+    Rs, J, J_a = simulate(minimal_stats, populated_graph, Rs, J, {}, "small_test", t=1)
 
     assert agent.status == 0, "agent should be idle after dropoff (no remaining tasks)"
     assert agent.get_sku_id_carrying() is None, "agent should not be carrying anything after dropoff"

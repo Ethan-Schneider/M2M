@@ -22,18 +22,40 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
             
         # If robot is a free_agent, set goal location to current state
         else:
-            goal_locations.append(agent.state)
+            goal_locations.append(agent.home)
 
     sequences = []
     w = 1.2
 
-    # If two agents have the same goal location, set the goal location of the agnet with no task to its home location
-    # Check if any goal location is found more than once
+    # Guarantee unique goal locations before path planning. PBS asserts a
+    # single permanent goal per cell (ConstraintTable::insert2CAT); two agents
+    # sharing a goal cell abort the planner. The baseline allocators never
+    # emit duplicate goals, but crM2M shuffle tasks can place a pickup/drop-off
+    # cell that coincides with a concurrent real task's cell, so any residual
+    # collision must be resolved here. Keep the first occurrence of each cell
+    # and defer the rest: idle agents (status 0) have no real goal so they go
+    # to their home; task-bearing agents wait in place at their current state
+    # this tick (a one-tick deferral -- they re-plan toward the real goal next
+    # tick, the task is not dropped) and fall back to home if the state is also
+    # taken. This loop is a no-op when goals are already unique, so baseline
+    # and LNS-PBS routing behaviour is unchanged.
     if len(goal_locations) != len(set(goal_locations)):
-        # raise ValueError(f"Agents have duplicate goal locations: {goal_locations} with agent states: {states}")
+        used = set()
         for i, agent in enumerate(Rs.agents):
-            if goal_locations.count(goal_locations[i]) > 1 and agent.status == 0:
-                goal_locations[i] = agent.home
+            goal = goal_locations[i]
+            if goal not in used:
+                used.add(goal)
+                continue
+            fallbacks = (
+                [agent.home, agent.state]
+                if agent.status == 0
+                else [agent.state, agent.home]
+            )
+            new_goal = next((c for c in fallbacks if c not in used), goal)
+            goal_locations[i] = new_goal
+            used.add(new_goal)
+        if len(goal_locations) != len(set(goal_locations)):
+            print(f"[WARN] router could not fully de-duplicate goal locations: {goal_locations}")
 
     print(f"Goal locations: {goal_locations}")
     # print(f"Number of goal locations: {len(goal_locations)}")
