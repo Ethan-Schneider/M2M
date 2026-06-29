@@ -12,6 +12,9 @@ from gurobipy import GRB
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2
 
+# Pick (5s) + place (5s) detour adjustment when pick/place time is enabled.
+PICK_PLACE_DETOUR_ADJUSTMENT = 10.0
+
 # Inserted rearrangement tasks use ids in this range to avoid colliding with
 # real schedule / CRG task ids.
 REARRANGEMENT_TASK_ID_BASE = 1_000_000_000
@@ -51,6 +54,7 @@ def compute_insertion_objectives(
     agent_idx: int,
     position: int,
     lambda_: float,
+    pick_place_time: bool = False,
 ) -> Tuple[float, float, float]:
     """Return benefit, detour cost, and utility for a chosen insertion."""
     prior_goal = Rs.agents[agent_idx].task_sequence[position - 1][2]
@@ -61,6 +65,8 @@ def compute_insertion_objectives(
         + dist(G, start, next_anchor)
         - dist(G, prior_goal, next_anchor)
     )
+    if pick_place_time:
+        detour_cost -= PICK_PLACE_DETOUR_ADJUSTMENT
     utility = task_benefit - lambda_ * detour_cost
     return task_benefit, detour_cost, utility
 
@@ -93,6 +99,7 @@ def apply_insertions(
     J_a: Dict[int, Tuple],
     next_rearrangement_task_id: Optional[int] = None,
     lambda_: float = 1.0,
+    pick_place_time: bool = False,
 ) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Dict[str, float]]]:
     """Insert Gurobi-selected rearrangement tasks into agent task sequences.
 
@@ -128,7 +135,7 @@ def apply_insertions(
         ):
             _C_i, _release, deadline, sigma = tasks_a[task_key]
             task_benefit, detour_cost, utility = compute_insertion_objectives(
-                G, Rs, start, goal, agent_idx, position, lambda_
+                G, Rs, start, goal, agent_idx, position, lambda_, pick_place_time
             )
             task_tuple = (current_id, start, goal, int(deadline))
             modified.agents[agent_idx].task_sequence.insert(position, task_tuple)
@@ -159,6 +166,7 @@ def solve_insertion(
     lambda_: float = 1.0,
     t0: float = 0.0,
     next_rearrangement_task_id: Optional[int] = None,
+    pick_place_time: bool = False,
 ) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float, Dict[int, Dict[str, float]]]:
     """Build, solve, and apply the rearrangement insertion MILP with Gurobi.
 
@@ -219,6 +227,8 @@ def solve_insertion(
                             p = seq[i - 1][2]
                             q = ag.home
                             ddet = dist(G, p, s) + dist(G, s, q) - dist(G, p, q)
+                            if pick_place_time:
+                                ddet -= PICK_PLACE_DETOUR_ADJUSTMENT
                             # if ddet > 10:
                             #     continue
                             # d = dist(G, p, s) + dist(G, s, g) + dist(G, g, q) - dist(G, p, q)
@@ -284,5 +294,6 @@ def solve_insertion(
         J_a,
         next_rearrangement_task_id=next_rearrangement_task_id,
         lambda_=lambda_,
+        pick_place_time=pick_place_time,
     )
     return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time, objectives

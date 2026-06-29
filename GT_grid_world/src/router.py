@@ -4,6 +4,7 @@ from src.path_finding_algorithms.external_algorithms.PBS import pbs
 from .agent import *
 from .utils import *
 from .analysis.statistics import *
+from .simulate import STATUS_PICKING, STATUS_PLACING
 from typing import Dict, Tuple
 
 def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
@@ -21,6 +22,10 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
         # If robot is going to delivery, set goal location to the task's goal location
         elif agent.status == 2:
             goal_locations.append(agent.task_sequence[0][2])
+
+        # Pick/place: hold position while waiting at pickup or delivery
+        elif agent.status in (STATUS_PICKING, STATUS_PLACING):
+            goal_locations.append(agent.state)
             
         # If robot is a free_agent, set goal location to current state
         else:
@@ -67,7 +72,10 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
             for i, agent in enumerate(Rs.agents):
                 print(f"Agent {agent.id} home location: {agent.home} with assigned goal location: {goal_locations[i]}")
                 if agent.path_sequence == []:
-                    goal_locations[i] = agent.home
+                    if agent.status in (STATUS_PICKING, STATUS_PLACING):
+                        goal_locations[i] = agent.state
+                    else:
+                        goal_locations[i] = agent.home
             latch = True
         w += 5.0
 

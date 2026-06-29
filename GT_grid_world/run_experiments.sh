@@ -10,9 +10,9 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(1)
+seeds=(8)
 num_robots=(40)
-time_horizons=(3600)
+time_horizons=(100)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
@@ -35,20 +35,24 @@ deadline_offset=180
 output_intermediate_data=False
 intermediate_data_interval=4000
 base_cost_weight=1.0
-deadline_weight=0.0
+deadline_weight=0.25
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
-W=600
-B=30
+W=200
+B=60
+queue_release_window=60
 lambda_=1.0
-reallocation_task_method="insertion"
+reallocation_task_method="none"
+pick_place_time=true
+buffer_capacity_k=4
+buffer_consumption_rate=61
 
 # Precomputed queue/inventory (set use_precomputed_queue=true to enable)
 use_precomputed_queue=true
-queue_file="$repo_root/data/queues/10000_25_percent_inventory_high_frequency.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/10000_25_percent_inventory_high_frequency_init_inventory.txt"
+queue_file="$repo_root/data/queues/uniform_with_deadlines_5000_arrival_rate_120.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/uniform_with_deadlines_5000_arrival_rate_120_init_inventory.txt"
 run_until_queue_complete=false
 
 precomputed_args=()
@@ -59,6 +63,11 @@ if [ "$use_precomputed_queue" = true ]; then
     if [ "$run_until_queue_complete" = true ]; then
         precomputed_args+=(--run-until-queue-complete)
     fi
+fi
+
+pick_place_args=()
+if [ "$pick_place_time" = true ]; then
+    pick_place_args+=(--pick-place-time)
 fi
 
 # Loop through all combinations
@@ -96,8 +105,12 @@ for seed in "${seeds[@]}"; do
                         echo "  Use Precomputed Queue: $use_precomputed_queue"
                         echo "  Lookahead Window (W): $W"
                         echo "  Lookahead Beginning (B): $B"
+                        echo "  Queue Release Window: $queue_release_window"
                         echo "  Detour Penalty (lambda_): $lambda_"
                         echo "  Reallocation Task Method: $reallocation_task_method"
+                        echo "  Pick/Place Time: $pick_place_time"
+                        echo "  Buffer Capacity (K): $buffer_capacity_k"
+                        echo "  Buffer Consumption Rate (tasks/min): $buffer_consumption_rate"
                         if [ "$use_precomputed_queue" = true ]; then
                             echo "  Queue File: $queue_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
@@ -139,9 +152,13 @@ for seed in "${seeds[@]}"; do
                             --solution-repair-function "$solution_repair_function" \
                             --W "$W" \
                             --B "$B" \
+                            --queue-release-window "$queue_release_window" \
                             --lambda_ "$lambda_" \
                             --reallocation-task-method "$reallocation_task_method" \
-                            "${precomputed_args[@]}"
+                            --buffer-capacity-k "$buffer_capacity_k" \
+                            --buffer-consumption-rate "$buffer_consumption_rate" \
+                            "${precomputed_args[@]}" \
+                            "${pick_place_args[@]}"
 
                         # Optional: Add a small delay between runs
                         sleep 1

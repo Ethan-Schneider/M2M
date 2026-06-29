@@ -1,5 +1,5 @@
 import random
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from numpy.typing import NDArray
@@ -13,11 +13,38 @@ QUEUE_SKU_ID_OFFSET = 1
 
 QUEUE_SKU_ID = 0
 QUEUE_TASK_TYPE = 1
+QUEUE_DEADLINE = 2
 
 
 def import_queue(file_path: str) -> NDArray:
-    """Load a precomputed task queue from a text file (sku_id, task_type)."""
+    """Load a precomputed task queue (sku_id, task_type[, deadline])."""
     return np.atleast_2d(np.loadtxt(file_path, dtype=int))
+
+
+def queue_row_deadline(
+    task: NDArray,
+    current_time: int,
+    deadline_generation_method: str,
+    deadline_offset: float,
+) -> int:
+    """Use precomputed queue deadline when present, else generate at release."""
+    if task.shape[0] > QUEUE_DEADLINE:
+        return int(task[QUEUE_DEADLINE])
+    return get_deadline(current_time, deadline_generation_method, deadline_offset)
+
+
+def queue_task_releasable(
+    task: NDArray,
+    current_time: int,
+    queue_release_window: int,
+    deadline_generation_method: str,
+    deadline_offset: float,
+) -> bool:
+    """True when the task's deadline falls within ``current_time + window``."""
+    deadline = queue_row_deadline(
+        task, current_time, deadline_generation_method, deadline_offset
+    )
+    return deadline <= current_time + queue_release_window
 
 
 def load_initial_inventory(
@@ -49,6 +76,7 @@ def _add_inbound_task(
     last_task_id: int,
     deadline_generation_method: str,
     deadline_offset: float,
+    deadline: int = None,
 ) -> Tuple[bool, int]:
     available_start_locations = set(G.driveway.get_empty_locations())
     available_goal_locations = set(G.warehouse.get_empty_locations())
@@ -59,7 +87,8 @@ def _add_inbound_task(
     chosen_start_location = random.choice(list(available_start_locations))
     G.driveway.add_sku_instance(sku_id, chosen_start_location)
 
-    deadline = get_deadline(current_time, deadline_generation_method, deadline_offset)
+    if deadline is None:
+        deadline = get_deadline(current_time, deadline_generation_method, deadline_offset)
     last_task_id += 1
     J[last_task_id] = (
         frozenset([chosen_start_location]),
@@ -82,6 +111,7 @@ def _add_outbound_task(
     last_task_id: int,
     deadline_generation_method: str,
     deadline_offset: float,
+    deadline: int = None,
 ) -> Tuple[bool, int]:
     available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
     available_goal_locations = set(G.driveway.get_empty_locations())
@@ -89,7 +119,8 @@ def _add_outbound_task(
     if not available_start_locations or not available_goal_locations:
         return False, last_task_id
 
-    deadline = get_deadline(current_time, deadline_generation_method, deadline_offset)
+    if deadline is None:
+        deadline = get_deadline(current_time, deadline_generation_method, deadline_offset)
     last_task_id += 1
     J[last_task_id] = (
         frozenset(available_start_locations),
@@ -116,6 +147,9 @@ def _add_task_from_queue_row(
 ) -> Tuple[bool, int]:
     sku_id = int(task[QUEUE_SKU_ID]) + sku_id_offset
     inbound_outbound = int(task[QUEUE_TASK_TYPE])
+    deadline = queue_row_deadline(
+        task, current_time, deadline_generation_method, deadline_offset
+    )
 
     if inbound_outbound == TASK_TYPE_INBOUND:
         return _add_inbound_task(
@@ -127,6 +161,7 @@ def _add_task_from_queue_row(
             last_task_id,
             deadline_generation_method,
             deadline_offset,
+            deadline=deadline,
         )
 
     return _add_outbound_task(
@@ -138,6 +173,7 @@ def _add_task_from_queue_row(
         last_task_id,
         deadline_generation_method,
         deadline_offset,
+        deadline=deadline,
     )
 
 
@@ -149,34 +185,47 @@ def add_tasks_from_queue(
     S: Stats,
     G: Graph,
     last_task_id: int,
-    max_task_number: int,
+    max_task_number: Optional[int],
     frequency: float,
     deadline_generation_method: str,
     deadline_offset: float,
     sku_id_offset: int = QUEUE_SKU_ID_OFFSET,
+    queue_release_window: int = 60,
+    release_all_in_window: bool = False,
 ) -> Tuple[Dict[int, Tuple], List[int], List[int], NDArray, List[List[int]], int]:
-    """Pop up to N queue tasks using the same release cadence as CRG.
+    """Release tasks from a precomputed queue into ``J``.
 
-    Tasks that cannot be added are moved to ``deferred_queue``. On each release
-    tick, deferred tasks are retried once before new tasks are taken from the
-    main queue. Successful deferred adds count toward the per-tick budget ``N``;
-    failed deferred attempts do not. Each main-queue slot consumed always
+    When ``release_all_in_window`` is True (precomputed-queue mode), every task
+    at the front of the queue whose deadline is at most
+    ``current_time + queue_release_window`` is popped each tick. ``max_task_number``
+    and ``frequency`` are not used to cap releases in that mode.
+
+    Otherwise (legacy cadence), pop up to ``tasks_to_generate_count(frequency)``
+    tasks per tick, stopping when ``len(J) >= max_task_number``.
+
+    Tasks that cannot be added are moved to ``deferred_queue``. Deferred tasks
+    are retried before new main-queue pops. Each main-queue slot consumed always
     advances the queue, whether or not the task was added successfully.
     """
     outbound_tasks: List[int] = []
     inbound_tasks: List[int] = []
 
-    if len(J) >= max_task_number:
+    def at_j_cap() -> bool:
+        return max_task_number is not None and len(J) >= max_task_number
+
+    if at_j_cap():
         return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
 
     if queue.size == 0 and not deferred_queue:
         return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
 
-    tasks_budget = tasks_to_generate_count(frequency)
+    tasks_budget: Optional[int] = (
+        None if release_all_in_window else tasks_to_generate_count(frequency)
+    )
     remaining_deferred: List[List[int]] = []
 
     for i, task_row in enumerate(deferred_queue):
-        if len(J) >= max_task_number:
+        if at_j_cap():
             remaining_deferred.extend(deferred_queue[i:])
             deferred_queue = remaining_deferred
             return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
@@ -198,24 +247,34 @@ def add_tasks_from_queue(
                 inbound_tasks.append(last_task_id)
             else:
                 outbound_tasks.append(last_task_id)
-            tasks_budget -= 1
-            if tasks_budget <= 0:
-                remaining_deferred.extend(deferred_queue[i + 1 :])
-                deferred_queue = remaining_deferred
-                return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
+            if tasks_budget is not None:
+                tasks_budget -= 1
+                if tasks_budget <= 0:
+                    remaining_deferred.extend(deferred_queue[i + 1 :])
+                    deferred_queue = remaining_deferred
+                    return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
         else:
             remaining_deferred.append(task_row)
 
     deferred_queue = remaining_deferred
 
-    main_slots = tasks_budget
+    main_slots = tasks_budget if tasks_budget is not None else queue.shape[0]
     num_popped = 0
 
-    for _ in range(main_slots):
-        if queue.size == 0 or len(J) >= max_task_number:
+    while num_popped < main_slots:
+        if queue.size == 0 or at_j_cap():
             break
 
         task = queue[num_popped]
+        if not queue_task_releasable(
+            task,
+            current_time,
+            queue_release_window,
+            deadline_generation_method,
+            deadline_offset,
+        ):
+            break
+
         success, last_task_id = _add_task_from_queue_row(
             current_time,
             task,
@@ -242,7 +301,8 @@ def add_tasks_from_queue(
     if num_popped:
         queue = queue[num_popped:]
         if queue.size == 0:
-            queue = np.empty((0, 2), dtype=int)
+            cols = queue.shape[1] if queue.ndim > 1 else 2
+            queue = np.empty((0, cols), dtype=int)
         else:
             queue = np.atleast_2d(queue)
 

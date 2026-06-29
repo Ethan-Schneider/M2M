@@ -13,10 +13,50 @@ TASK_TYPE_INBOUND = 1
 
 QUEUE_SKU_ID = 0
 QUEUE_TASK_TYPE = 1
+QUEUE_DEADLINE = 2
 
 
 def save_queue(queue: NDArray, file_name: str) -> None:
     np.savetxt("data/queues/" + file_name + ".txt", queue, fmt="%d")
+
+
+def tasks_per_second(deadline_rate: float) -> float:
+    """Convert tasks/min release rate to tasks per simulated second."""
+    if deadline_rate <= 0:
+        raise ValueError(f"deadline_rate must be positive, got {deadline_rate}")
+    return deadline_rate / 60.0
+
+
+def deadline_second_for_task_index(task_index: int, deadline_rate: float) -> int:
+    """Return the 1-based deadline second for a zero-based queue task index.
+
+    At ``deadline_rate=60``, tasks release one per second (00:01, 00:02, …).
+    At ``deadline_rate=120``, two tasks per second on average (00:01, 00:01, …).
+    At ``deadline_rate=90``, 1.5 tasks per second on average (some seconds
+    carry one task, others two).
+    """
+    return int(np.ceil((task_index + 1) * 60.0 / deadline_rate))
+
+
+def assign_queue_deadlines(number_of_tasks: int, deadline_rate: float) -> NDArray:
+    """Return 1-based deadline timesteps (seconds) for each queue index."""
+    if number_of_tasks <= 0:
+        return np.array([], dtype=int)
+    indices = np.arange(number_of_tasks, dtype=int)
+    return np.ceil((indices + 1) * 60.0 / deadline_rate).astype(int)
+
+
+def expected_queue_duration_seconds(number_of_tasks: int, deadline_rate: float) -> int:
+    """Wall-clock seconds spanned by ``number_of_tasks`` at ``deadline_rate`` tasks/min."""
+    if number_of_tasks <= 0:
+        return 0
+    return deadline_second_for_task_index(number_of_tasks - 1, deadline_rate)
+
+
+def format_deadline_seconds(seconds: int) -> str:
+    """Format a 1-based deadline second as mm:ss (e.g. 1 -> 00:01)."""
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def save_weight_plots(weight_profiles: NDArray, file_name: str) -> None:
@@ -234,19 +274,14 @@ def _sample_adversarial_inventory(
     return init_inventory
 
 
-def compute_inventory_tally(
-    initial_counts: Dict[int, int],
-    queue_rows: List[List[int]],
-) -> Dict[int, int]:
-    """Project inventory after all queued tasks (outbound removes, inbound adds)."""
-    counts = {sku_id: initial_counts[sku_id] for sku_id in initial_counts}
-    for sku_id, task_type in queue_rows:
-        sku_id = int(sku_id)
-        if task_type == TASK_TYPE_OUTBOUND:
-            counts[sku_id] -= 1
-        elif task_type == TASK_TYPE_INBOUND:
-            counts[sku_id] += 1
-    return counts
+def _apply_task_to_tally(tally: Dict[int, int], sku_id: int, task_type: int) -> int:
+    """Update projected inventory tally in place. Returns change in total count."""
+    sku_id = int(sku_id)
+    if task_type == TASK_TYPE_OUTBOUND:
+        tally[sku_id] -= 1
+        return -1
+    tally[sku_id] += 1
+    return 1
 
 
 def try_generate_task(
@@ -254,12 +289,11 @@ def try_generate_task(
     task_idx: int,
     sku_ids: List[int],
     tasking_weight_profiles: NDArray,
-    initial_counts: Dict[int, int],
-    queue_rows: List[List[int]],
+    tally: Dict[int, int],
+    total_count: int,
     num_endpoints: int,
 ) -> Tuple[bool, int]:
     """Return (success, sku_id). Uses running inventory tally (initial + queued tasks)."""
-    tally = compute_inventory_tally(initial_counts, queue_rows)
     tasking_weights = _tasking_weights_at_index(task_idx, sku_ids, tasking_weight_profiles)
 
     if task_type == TASK_TYPE_OUTBOUND:
@@ -272,18 +306,16 @@ def try_generate_task(
         sku_id = int(np.random.choice(eligible, p=eligible_weights))
         return True, sku_id
 
-    if sum(tally.values()) >= num_endpoints:
+    if total_count >= num_endpoints:
         return False, -1
 
     total_weight = sum(tasking_weights[sku_id] for sku_id in sku_ids)
     weights = [tasking_weights[sku_id] / total_weight for sku_id in sku_ids]
     sku_id = int(np.random.choice(sku_ids, p=weights))
 
-    trial_queue = queue_rows + [[sku_id, TASK_TYPE_INBOUND]]
-    trial_tally = compute_inventory_tally(initial_counts, trial_queue)
-    if sum(trial_tally.values()) > num_endpoints:
+    if total_count + 1 > num_endpoints:
         return False, sku_id
-    if any(count < 0 for count in trial_tally.values()):
+    if tally[sku_id] + 1 < 0:
         return False, sku_id
 
     return True, sku_id
@@ -295,6 +327,7 @@ def build_queue(
     tasking_weight_profiles: NDArray,
     initial_inventory_percentage: float,
     number_of_tasks: int,
+    deadline_rate: float,
 ) -> NDArray:
     """Generate a feasible task queue using feedback_control inventory logic."""
     sku_ids = list(range(tasking_weight_profiles.shape[0]))
@@ -305,11 +338,17 @@ def build_queue(
     p_max = 0.85
 
     print(f"Number of SKUs: {len(sku_ids)}")
+    rate_per_sec = tasks_per_second(deadline_rate)
+    duration_sec = expected_queue_duration_seconds(number_of_tasks, deadline_rate)
+    print(
+        f"Deadline rate: {deadline_rate} tasks/min "
+        f"({rate_per_sec:.4g} tasks/s, ~{duration_sec}s for {number_of_tasks} tasks)"
+    )
     queue_rows: List[List[int]] = []
+    tally = {sku_id: initial_counts[sku_id] for sku_id in sku_ids}
+    total_count = sum(tally.values())
 
     for task_idx in range(number_of_tasks):
-        tally = compute_inventory_tally(initial_counts, queue_rows)
-        total_count = sum(tally.values())
         current_inventory = (total_count / num_endpoints) * 100 if num_endpoints > 0 else 0.0
         p_in = np.clip(0.5 + k * (initial_inventory_percentage - current_inventory), p_min, p_max)
         p_out = 1 - p_in
@@ -322,12 +361,14 @@ def build_queue(
                 task_idx,
                 sku_ids,
                 tasking_weight_profiles,
-                initial_counts,
-                queue_rows,
+                tally,
+                total_count,
                 num_endpoints,
             )
             if success:
-                queue_rows.append([sku_id, task_type])
+                deadline = deadline_second_for_task_index(len(queue_rows), deadline_rate)
+                queue_rows.append([sku_id, task_type, deadline])
+                total_count += _apply_task_to_tally(tally, sku_id, task_type)
                 break
             attempts += 1
 
@@ -411,21 +452,20 @@ def validate_queue(
     num_endpoints: int,
 ) -> None:
     """Check inventory stays feasible after each prefix of the queue."""
-    queue_rows: List[List[int]] = []
-    initial_total = sum(initial_sku_counts.values())
-    maximum_storage_taken = initial_total
-    minimum_storage_taken = initial_total
+    tally = {sku_id: initial_sku_counts[sku_id] for sku_id in initial_sku_counts}
+    total = sum(tally.values())
+    maximum_storage_taken = total
+    minimum_storage_taken = total
 
     for row in queue.tolist():
-        queue_rows.append(row)
-        tally = compute_inventory_tally(initial_sku_counts, queue_rows)
+        sku_id, task_type = int(row[QUEUE_SKU_ID]), int(row[QUEUE_TASK_TYPE])
+        total += _apply_task_to_tally(tally, sku_id, task_type)
         if any(count < 0 for count in tally.values()):
             raise ValueError(f"SKU count became negative after queue prefix: {tally}")
-        total = sum(tally.values())
         if total > num_endpoints:
             raise ValueError(
                 f"Total SKU count {total} exceeded warehouse capacity {num_endpoints} "
-                f"after queue prefix of length {len(queue_rows)}"
+                f"after queue prefix"
             )
         maximum_storage_taken = max(maximum_storage_taken, total)
         minimum_storage_taken = min(minimum_storage_taken, total)
@@ -436,6 +476,7 @@ def validate_queue(
 
 
 def main(
+    seed: int,
     output_file_name: str,
     map_file_name: str,
     init_inventory_full_percentage: float,
@@ -446,7 +487,11 @@ def main(
     inventory_layout_mode: str,
     save_plots: bool,
     args_json: str,
+    deadline_rate: float,
 ) -> None:
+    np.random.seed(seed)
+    print(f"Random seed: {seed}")
+
     tasking_weight_profiles = build_sku_weight_profiles(
         num_skus, number_of_tasks, weight_mode, sku_weights_json
     )
@@ -469,9 +514,23 @@ def main(
         tasking_weight_profiles,
         initial_inventory_percentage,
         number_of_tasks,
+        deadline_rate,
     )
 
     print(f"Total Tasks: {queue.shape[0]} (target: {number_of_tasks})")
+    if queue.shape[0] > 0:
+        last_deadline = int(queue[-1, QUEUE_DEADLINE])
+        print(
+            f"Queue spans {last_deadline}s "
+            f"({format_deadline_seconds(last_deadline)}) at {deadline_rate} tasks/min"
+        )
+        sample = min(6, queue.shape[0])
+        print("First queue deadlines (mm:ss):")
+        for row in queue[:sample]:
+            print(f"  task -> {format_deadline_seconds(int(row[QUEUE_DEADLINE]))}")
+        if queue.shape[0] >= 60:
+            last_in_minute = queue[59, QUEUE_DEADLINE]
+            print(f"Deadline at queue index 59: {format_deadline_seconds(int(last_in_minute))}")
 
     for sku_idx in range(num_skus):
         num_inbound_tasks_sku = np.sum(
@@ -506,6 +565,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Construct task queue with specified parameters")
 
+    parser.add_argument("--seed", type=int, default=1, help="Random seed for reproducibility")
     parser.add_argument("--output_file_name", type=str)
     parser.add_argument("--map_file_name", type=str)
     parser.add_argument("--init_inventory_full_percentage", type=float, default=0.5)
@@ -544,9 +604,18 @@ if __name__ == "__main__":
         default="[]",
         help="Optional legacy JSON for inbound/outbound frequency plots",
     )
+    parser.add_argument(
+        "--deadline-rate",
+        type=float,
+        default=60.0,
+        help="Task release rate in tasks/min. Deadlines are 1-based simulated "
+             "seconds computed as ceil((task_index + 1) * 60 / rate). "
+             "Examples: 60 -> 5000 tasks over 5000s; 120 -> 2500s; 90 -> ~3334s.",
+    )
     args = parser.parse_args()
 
     main(
+        seed=args.seed,
         output_file_name=args.output_file_name,
         map_file_name=args.map_file_name,
         init_inventory_full_percentage=args.init_inventory_full_percentage,
@@ -557,4 +626,5 @@ if __name__ == "__main__":
         inventory_layout_mode=args.inventory_layout_mode,
         save_plots=args.save_plots,
         args_json=args.args_json,
+        deadline_rate=args.deadline_rate,
     )

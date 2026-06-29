@@ -83,6 +83,39 @@ def compute_sku_spread(eta: np.ndarray) -> float:
     return float((N_active.squeeze(-1) * H).sum())
 
 
+def compute_gini_coefficient(values: np.ndarray) -> float:
+    """Gini coefficient for a distribution across ``n`` units.
+
+    Uses the mean-difference form from warehouse analytics references:
+
+        G = (1 / (2 n^2 x_bar)) * sum_i sum_j |x_i - x_j|
+
+    where ``x_i`` is the value for unit ``i`` (e.g. inventory units at a
+    storage location) and ``x_bar`` is the mean. Returns ``0.0`` for empty
+    input, all-zero values, or perfectly equal non-zero values.
+
+    Interpretation: ``0`` = perfectly equal, ``1`` = maximally unequal.
+    """
+    x = np.asarray(values, dtype=np.float64).ravel()
+    n = x.size
+    if n == 0:
+        return 0.0
+
+    x_bar = float(x.mean())
+    if x_bar == 0.0:
+        return 0.0
+
+    diff_sum = np.abs(x[:, np.newaxis] - x[np.newaxis, :]).sum()
+    return float(diff_sum / (2.0 * n * n * x_bar))
+
+
+def compute_gini_from_counts(counts) -> float:
+    """Gini coefficient over a sequence of non-negative bucket counts."""
+    if counts is None or len(counts) == 0:
+        return 0.0
+    return compute_gini_coefficient(np.asarray(counts, dtype=np.float64))
+
+
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
@@ -96,7 +129,17 @@ class Stats:
                  agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None,
                  schedule_name: str = None, W: int = None, B: int = None,
                  lambda_: float = None,
-                 reallocation_task_method: str = None) -> None:
+                 reallocation_task_method: str = None,
+                 queue_release_window: int = None,
+                 pick_place_time: bool = None,
+                 buffer_capacity_k: int = None,
+                 buffer_consumption_rate: float = None,
+                 use_precomputed_queue: bool = None,
+                 queue_file: str = None,
+                 initial_inventory_file: str = None,
+                 run_until_queue_complete: bool = None,
+                 aisle_dual_cycle: bool = None,
+                 driveway_dual_cycle: bool = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -136,6 +179,16 @@ class Stats:
         self.__B = B
         self.__lambda_ = lambda_
         self.__reallocation_task_method = reallocation_task_method
+        self.__queue_release_window = queue_release_window
+        self.__pick_place_time = pick_place_time
+        self.__buffer_capacity_k = buffer_capacity_k
+        self.__buffer_consumption_rate = buffer_consumption_rate
+        self.__use_precomputed_queue = use_precomputed_queue
+        self.__queue_file = queue_file
+        self.__initial_inventory_file = initial_inventory_file
+        self.__run_until_queue_complete = run_until_queue_complete
+        self.__aisle_dual_cycle = aisle_dual_cycle
+        self.__driveway_dual_cycle = driveway_dual_cycle
 
         self.__num_improved_assignments = 0
         self.__num_worse_assignments = 0
@@ -224,6 +277,7 @@ class Stats:
         self.__reallocation_milp_construct_time_per_timestep = {}  # t -> seconds
         self.__reallocation_milp_solve_time_per_timestep = {}  # t -> seconds
         self.__reallocation_milp_binary_vars_per_timestep = {}  # t -> count
+        self.__output_buffer_level_per_timestep = {}  # t -> buffer level
         self.__completed_to_pickup_task_ids = []
         
         # Runtime Stastics: 
@@ -260,6 +314,11 @@ class Stats:
         # SKU Spread (hierarchical entropy) per timestep -- roadmap 1.7 / plan 3.6.
         # Computed by ``append_sku_spread`` clustered by warehouse aisle column.
         self.__sku_spread_per_timestep = []
+        # Gini of warehouse inventory counts aggregated by row / aisle column.
+        self.__inventory_row_gini_per_timestep = []
+        self.__inventory_aisle_gini_per_timestep = []
+        # Cumulative pick/place events at warehouse aisle columns (col -> count).
+        self.__pick_place_count_by_aisle_column = {}
         
         # SKU Agents carrying over time
         
@@ -267,6 +326,7 @@ class Stats:
         
         # Deadline tracking
         self.__task_deadlines = {}  # task_id -> deadline
+        self.__task_tardiness = {}  # task_id -> seconds past deadline (0 if on time)
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
 
         self.reallocation_data = {}
@@ -495,12 +555,31 @@ class Stats:
         if start_location is not None and goal_location is not None:
             self.__completed_task_details[task_id] = (start_location, goal_location, deadline, sku_id, inbound_task)
         
-        # Check if task was completed after its deadline
-        if task_id in self.__task_deadlines:
-            deadline = self.__task_deadlines[task_id]
-            if timestep > deadline:
+        task_deadline = self._task_deadline(task_id, deadline)
+        if task_deadline is not None:
+            tardiness = max(0, int(timestep) - int(task_deadline))
+            self.__task_tardiness[task_id] = tardiness
+            if tardiness > 0:
                 self.__overdue_task_completions += 1
         
+    def _task_deadline(self, task_id: int, deadline: int = None) -> int | None:
+        """Return the deadline for a task from stored metadata."""
+        if task_id in self.__task_deadlines:
+            return self.__task_deadlines[task_id]
+        if deadline is not None:
+            return deadline
+        details = self.__completed_task_details.get(task_id)
+        if details is not None and len(details) > 2 and details[2] is not None:
+            return details[2]
+        return None
+
+    def get_task_tardiness(self) -> dict:
+        """Return task_id -> tardiness (seconds past deadline, 0 if on time)."""
+        return self.__task_tardiness
+
+    def get_cumulative_tardy_tasks(self) -> int:
+        """Return the number of completed tasks with tardiness > 0."""
+        return sum(1 for tardiness in self.__task_tardiness.values() if tardiness > 0)
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
 
@@ -564,6 +643,13 @@ class Stats:
     def log_reallocation_milp_binary_vars(self, t: int, count: int) -> None:
         """Record number of binary variables in the insertion MILP at timestep t."""
         self.__reallocation_milp_binary_vars_per_timestep[int(t)] = int(count)
+
+    def log_output_buffer_level(self, t: int, level: float) -> None:
+        """Record shared outbound output buffer level at timestep t."""
+        self.__output_buffer_level_per_timestep[int(t)] = float(level)
+
+    def get_output_buffer_level_per_timestep(self) -> dict:
+        return self.__output_buffer_level_per_timestep
 
     def get_reallocation_tasks_generated_per_timestep(self) -> dict:
         return self.__reallocation_tasks_generated_per_timestep
@@ -871,6 +957,15 @@ class Stats:
         # Calculate final statistics
         avg_service_time, total_service_time = self.get_service_time_stats()
         avg_task_cost, total_costs = self.get_cost_stats()
+
+        for task_id in self.__completed_task_ids:
+            if task_id in self.__task_tardiness:
+                continue
+            completion_timestep = self.__task_completion_timestamps.get(task_id)
+            task_deadline = self._task_deadline(task_id)
+            if completion_timestep is None or task_deadline is None:
+                continue
+            self.__task_tardiness[task_id] = max(0, int(completion_timestep) - int(task_deadline))
         
         data = {
             # Input parameters from main
@@ -912,6 +1007,16 @@ class Stats:
             "B": self.__B,
             "lambda_": self.__lambda_,
             "reallocation_task_method": self.__reallocation_task_method,
+            "queue_release_window": self.__queue_release_window,
+            "pick_place_time": self.__pick_place_time,
+            "buffer_capacity_k": self.__buffer_capacity_k,
+            "buffer_consumption_rate": self.__buffer_consumption_rate,
+            "use_precomputed_queue": self.__use_precomputed_queue,
+            "queue_file": self.__queue_file,
+            "initial_inventory_file": self.__initial_inventory_file,
+            "run_until_queue_complete": self.__run_until_queue_complete,
+            "aisle_dual_cycle": self.__aisle_dual_cycle,
+            "driveway_dual_cycle": self.__driveway_dual_cycle,
             # Simulation results
             "timesteps_completed": self.return_actual_timesteps(),
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -948,6 +1053,7 @@ class Stats:
             "reallocation_milp_binary_vars_per_timestep": (
                 self.__reallocation_milp_binary_vars_per_timestep
             ),
+            "output_buffer_level_per_timestep": self.__output_buffer_level_per_timestep,
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,
@@ -993,10 +1099,20 @@ class Stats:
             "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
             "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
             "py_lns_logs": self.__py_lns_logs,
+            "task_tardiness": self.__task_tardiness,
+            "cumulative_tardy_tasks": sum(
+                1 for tardiness in self.__task_tardiness.values() if tardiness > 0
+            ),
             "overdue_task_completions": self.__overdue_task_completions,
             "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
             "sku_locations_per_timestep": self.__sku_locations_per_timestep,
             "sku_spread_per_timestep": self.__sku_spread_per_timestep,
+            "inventory_row_gini_per_timestep": self.__inventory_row_gini_per_timestep,
+            "inventory_aisle_gini_per_timestep": self.__inventory_aisle_gini_per_timestep,
+            "pick_place_count_by_aisle_column": self.__pick_place_count_by_aisle_column,
+            "pick_place_aisle_gini": compute_gini_from_counts(
+                list(self.__pick_place_count_by_aisle_column.values())
+            ),
             "num_improved_assignments": self.__num_improved_assignments,
             "num_worse_assignments": self.__num_worse_assignments,
             "num_same_assignments": self.__num_same_assignments,
@@ -1124,6 +1240,8 @@ class Stats:
         if not aisle_locations:
             self.__warehouse_row_counts_per_timestep.append([])
             self.__warehouse_col_counts_per_timestep.append([])
+            self.__inventory_row_gini_per_timestep.append(0.0)
+            self.__inventory_aisle_gini_per_timestep.append(0.0)
             return
 
         # Find bounds
@@ -1148,6 +1266,27 @@ class Stats:
             count = sum((r, c) in full_set for r in range(min_row, max_row + 1) if (r, c) in aisle_locations)
             col_counts.append(count)
         self.__warehouse_col_counts_per_timestep.append(col_counts)
+
+        self.__inventory_row_gini_per_timestep.append(compute_gini_from_counts(row_counts))
+        self.__inventory_aisle_gini_per_timestep.append(compute_gini_from_counts(col_counts))
+
+    def get_inventory_row_gini_per_timestep(self) -> list:
+        return self.__inventory_row_gini_per_timestep
+
+    def get_inventory_aisle_gini_per_timestep(self) -> list:
+        return self.__inventory_aisle_gini_per_timestep
+
+    def record_aisle_pick_place_activity(self, location, graph) -> None:
+        """Count a warehouse pick or place at the aisle column of ``location``."""
+        if location is None or not graph.is_warehouse_aisle_location(location):
+            return
+        col = int(location[1])
+        self.__pick_place_count_by_aisle_column[col] = (
+            self.__pick_place_count_by_aisle_column.get(col, 0) + 1
+        )
+
+    def get_pick_place_count_by_aisle_column(self) -> dict:
+        return self.__pick_place_count_by_aisle_column
 
     def append_driveway_inventory_state(self, driveway):
         full_locations = driveway.get_full_locations()

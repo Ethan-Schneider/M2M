@@ -145,7 +145,21 @@ This pattern is useful for testing a small hot set, a time-varying middle group,
 
 Queue generation also writes:
 
-- `{output_file_name}.txt` — task queue (`sku_id`, `task_type`)
+- `{output_file_name}.txt` — task queue (`sku_id`, `task_type`, `deadline`)
+
+### Queue deadlines
+
+Set `deadline_rate` in `run_queue_generation.sh` (passed as `--deadline-rate`).
+Each simulated second receives `deadline_rate / 60` tasks with the same
+deadline timestep (1-based seconds, displayed as `mm:ss`):
+
+| `deadline_rate` | First tasks' deadlines |
+|-----------------|------------------------|
+| 60 | `00:01`, `00:02`, …, `01:00` (one task per second) |
+| 120 | `00:01`, `00:01`, `00:02`, `00:02`, …, `01:00` (two per second) |
+
+Legacy two-column queue files remain supported; the simulator generates
+deadlines at release time when the third column is absent.
 - `{output_file_name}_sku_{id}_weight.png` — optional weight plots when `save_plots=true` and `weight_mode=custom`
 
 Initial inventory is written to `data/initial_inventories/`, not here.

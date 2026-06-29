@@ -11,8 +11,11 @@ class Agent:
         # 0 == Free Agent
         # 1 == To_Pickup
         # 2 == To_Delivery
+        # 3 == Picking (waiting at pickup location)
+        # 4 == Placing (waiting at delivery location)
         self.status = 0
         self.sku_id_carrying = None
+        self.pick_place_counter = 0
     
     def set_sku_id_carrying(self, sku_id : int):
         self.sku_id_carrying = sku_id
@@ -25,6 +28,8 @@ class Agent:
         0 == Free Agent
         1 == To_Pickup
         2 == To_Delivery
+        3 == Picking
+        4 == Placing
 
         Args:
             status (int): Current status of agent
@@ -110,5 +115,6 @@ class AgentLoader:
             new_agent.status = agent.status
             new_agent.path_sequence = agent.path_sequence.copy()
             new_agent.sku_id_carrying = agent.sku_id_carrying
+            new_agent.pick_place_counter = agent.pick_place_counter
             new_solution.agents.append(new_agent)
         return new_solution

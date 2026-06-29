@@ -2,7 +2,7 @@ import time
 import os
 import numpy as np
 import argparse
-from typing import List
+from typing import List, Optional
 
 from src import graph, simulate, task_allocation, case_request_generator, import_schedule, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
@@ -17,6 +17,7 @@ from src.reallocation_tasks.generate_reallocation_tasks import (
 )
 from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
+from src.output_buffer import OutputBuffer
 
 REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion")
 
@@ -49,7 +50,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             W: int = 300,
             B: int = 60,
             lambda_: float = 1.5,
-            reallocation_task_method: str = "none") -> int:
+            reallocation_task_method: str = "none",
+            pick_place_time: bool = False,
+            buffer_capacity_k: int = 0,
+            buffer_consumption_rate: float = 70.0,
+            queue_release_window: int = 60) -> int:
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
@@ -67,6 +72,13 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     last_rearrangement_task_id = 100000
     total_queue_tasks = queue.shape[0] if use_precomputed_queue and queue is not None else 0
     deferred_queue: List[List[int]] = []
+
+    output_buffer: Optional[OutputBuffer] = None
+    if buffer_capacity_k > 0:
+        output_buffer = OutputBuffer(
+            capacity=buffer_capacity_k,
+            consumption_rate_per_min=buffer_consumption_rate,
+        )
     
     global_tik = time.time()
     t = 0
@@ -95,10 +107,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
-                max_task_number,
-                frequency,
-                deadline_generation_method,
-                deadline_offset,
+                max_task_number=None,
+                frequency=frequency,
+                deadline_generation_method=deadline_generation_method,
+                deadline_offset=deadline_offset,
+                queue_release_window=queue_release_window,
+                release_all_in_window=True,
             )
 
             tok = time.time()
@@ -128,16 +142,16 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         print("=============================" + "Task Allocation"+ "=============================")
         if improvement_task_assignment_strategy == "hbh_mla_star" and J:
             resolve_open_task_locations(J, G, Rs)
-        if len(J) > 0:
-            print(f"Printout a task in the system: {J[list(J.keys())[0]]}")
+        # if len(J) > 0:
+        #     print(f"Printout a task in the system: {J[list(J.keys())[0]]}")
         # Check if all tasks are allocated, if so, skip
         total = 0
         for agent in Rs.agents:
             total += len(agent.task_sequence)
             
-        if total < max_task_number:
-            print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty)
+        # if total < max_task_number:
+        #     print(f"Attempting to allocate tasks")
+        Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -195,6 +209,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     J_a,
                     lambda_=lambda_,
                     next_rearrangement_task_id=last_rearrangement_task_id,
+                    pick_place_time=pick_place_time,
                 )
                 J_a_objectives.update(new_objectives)
                 S.log_reallocation_tasks_chosen(t, num_chosen)
@@ -436,6 +451,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             aisle_dual_cycle=aisle_dual_cycle,
             driveway_dual_cycle=driveway_dual_cycle,
             J_a_objectives=J_a_objectives,
+            pick_place_time=pick_place_time,
+            output_buffer=output_buffer,
         )
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
@@ -536,7 +553,11 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          W: int = 300,
          B: int = 60,
          lambda_: float = 1.5,
-         reallocation_task_method: str = "none") -> None:
+         reallocation_task_method: str = "none",
+         pick_place_time: bool = False,
+         buffer_capacity_k: int = 0,
+         buffer_consumption_rate: float = 70.0,
+         queue_release_window: int = 60) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -656,6 +677,16 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         B=B,
         lambda_=lambda_,
         reallocation_task_method=reallocation_task_method,
+        queue_release_window=queue_release_window,
+        pick_place_time=pick_place_time,
+        buffer_capacity_k=buffer_capacity_k,
+        buffer_consumption_rate=buffer_consumption_rate,
+        use_precomputed_queue=use_precomputed_queue,
+        queue_file=queue_file,
+        initial_inventory_file=initial_inventory_file,
+        run_until_queue_complete=run_until_queue_complete,
+        aisle_dual_cycle=aisle_dual_cycle,
+        driveway_dual_cycle=driveway_dual_cycle,
     )
     queue = None
     if use_precomputed_queue:
@@ -715,6 +746,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             B=B,
             lambda_=lambda_,
             reallocation_task_method=reallocation_task_method,
+            pick_place_time=pick_place_time,
+            buffer_capacity_k=buffer_capacity_k,
+            buffer_consumption_rate=buffer_consumption_rate,
+            queue_release_window=queue_release_window,
     )
     if run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -815,6 +850,15 @@ if __name__=="__main__":
                             'When set, after an agent completes an outbound delivery at a '
                             'driveway cell it will immediately pick up an unallocated inbound '
                             'task whose pickup is at any driveway cell. Default off.')
+    parser.add_argument('--pick-place-time', action='store_true',
+                       help='When set, agents spend 5 seconds picking up and 5 seconds '
+                            'placing items at pickup/delivery locations before inventory '
+                            'is updated (status 3=picking, 4=placing).')
+    parser.add_argument('--buffer-capacity-k', type=int, default=0,
+                       help='Shared outbound output buffer capacity K (0 disables).')
+    parser.add_argument('--buffer-consumption-rate', type=float, default=70.0,
+                       help='Output buffer consumption rate in tasks/min (drains '
+                            'rate/60 items per simulation tick).')
     parser.add_argument('--use-precomputed-queue', action='store_true',
                        help='Load tasks from a precomputed queue file and skip CRG. '
                             'Requires --queue-file and --initial-inventory-file.')
@@ -825,8 +869,14 @@ if __name__=="__main__":
     parser.add_argument('--run-until-queue-complete', action='store_true',
                        help='Run until all precomputed queue tasks are completed instead '
                             'of stopping at --time-horizon. Requires --use-precomputed-queue.')
-    parser.add_argument('--W', type=int, default=300, help='Lookahead window')
-    parser.add_argument('--B', type=int, default=60, help='Lookahead beginning')
+    parser.add_argument('--W', type=int, default=300,
+                       help='Rearrangement lookahead window (queue indices)')
+    parser.add_argument('--B', type=int, default=60,
+                       help='Rearrangement lookahead beginning (queue index)')
+    parser.add_argument('--queue-release-window', type=int, default=60,
+                       help='Release precomputed queue tasks only when their '
+                            'deadline is within this many timesteps of the '
+                            'current time (deadline <= t + window).')
     parser.add_argument(
         '--lambda_',
         type=float,
@@ -887,4 +937,8 @@ if __name__=="__main__":
         B=args.B,
         lambda_=args.lambda_,
         reallocation_task_method=args.reallocation_task_method,
+        pick_place_time=args.pick_place_time,
+        buffer_capacity_k=args.buffer_capacity_k,
+        buffer_consumption_rate=args.buffer_consumption_rate,
+        queue_release_window=args.queue_release_window,
     )
