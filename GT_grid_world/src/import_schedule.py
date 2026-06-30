@@ -33,20 +33,6 @@ def queue_row_deadline(
     return get_deadline(current_time, deadline_generation_method, deadline_offset)
 
 
-def queue_task_releasable(
-    task: NDArray,
-    current_time: int,
-    queue_release_window: int,
-    deadline_generation_method: str,
-    deadline_offset: float,
-) -> bool:
-    """True when the task's deadline falls within ``current_time + window``."""
-    deadline = queue_row_deadline(
-        task, current_time, deadline_generation_method, deadline_offset
-    )
-    return deadline <= current_time + queue_release_window
-
-
 def load_initial_inventory(
     file_path: str,
     G: Graph,
@@ -190,22 +176,19 @@ def add_tasks_from_queue(
     deadline_generation_method: str,
     deadline_offset: float,
     sku_id_offset: int = QUEUE_SKU_ID_OFFSET,
-    queue_release_window: int = 60,
-    release_all_in_window: bool = False,
 ) -> Tuple[Dict[int, Tuple], List[int], List[int], NDArray, List[List[int]], int]:
     """Release tasks from a precomputed queue into ``J``.
 
-    When ``release_all_in_window`` is True (precomputed-queue mode), every task
-    at the front of the queue whose deadline is at most
-    ``current_time + queue_release_window`` is popped each tick. ``max_task_number``
-    and ``frequency`` are not used to cap releases in that mode.
+    When ``max_task_number`` is set, pop tasks from the front of the queue
+    (and retry deferred tasks first) until ``len(J) >= max_task_number`` or
+    no queue rows remain. Deadlines on queue rows are still attached to
+    released tasks but do not gate release timing.
 
-    Otherwise (legacy cadence), pop up to ``tasks_to_generate_count(frequency)``
-    tasks per tick, stopping when ``len(J) >= max_task_number``.
+    When ``max_task_number`` is ``None`` (legacy cadence), pop up to
+    ``tasks_to_generate_count(frequency)`` tasks per tick.
 
-    Tasks that cannot be added are moved to ``deferred_queue``. Deferred tasks
-    are retried before new main-queue pops. Each main-queue slot consumed always
-    advances the queue, whether or not the task was added successfully.
+    Tasks that cannot be added are moved to ``deferred_queue``. Each main-queue
+    slot consumed always advances the queue, whether or not the task was added.
     """
     outbound_tasks: List[int] = []
     inbound_tasks: List[int] = []
@@ -220,7 +203,7 @@ def add_tasks_from_queue(
         return J, outbound_tasks, inbound_tasks, queue, deferred_queue, last_task_id
 
     tasks_budget: Optional[int] = (
-        None if release_all_in_window else tasks_to_generate_count(frequency)
+        None if max_task_number is not None else tasks_to_generate_count(frequency)
     )
     remaining_deferred: List[List[int]] = []
 
@@ -258,23 +241,14 @@ def add_tasks_from_queue(
 
     deferred_queue = remaining_deferred
 
-    main_slots = tasks_budget if tasks_budget is not None else queue.shape[0]
     num_popped = 0
-
-    while num_popped < main_slots:
-        if queue.size == 0 or at_j_cap():
+    while num_popped < queue.shape[0]:
+        if at_j_cap():
+            break
+        if tasks_budget is not None and num_popped >= tasks_budget:
             break
 
         task = queue[num_popped]
-        if not queue_task_releasable(
-            task,
-            current_time,
-            queue_release_window,
-            deadline_generation_method,
-            deadline_offset,
-        ):
-            break
-
         success, last_task_id = _add_task_from_queue_row(
             current_time,
             task,

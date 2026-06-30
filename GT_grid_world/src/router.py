@@ -7,6 +7,24 @@ from .analysis.statistics import *
 from .simulate import STATUS_PICKING, STATUS_PLACING
 from typing import Dict, Tuple
 
+BLOCKED_REPLAN_THRESHOLD = 5
+
+
+def needs_path_plan(Rs: AgentLoader, blocked_threshold: int = BLOCKED_REPLAN_THRESHOLD) -> bool:
+    for agent in Rs.agents:
+        if agent.path_sequence == []:
+            return True
+        if agent.blocked_ticks >= blocked_threshold:
+            return True
+    return False
+
+
+def clear_all_paths(Rs: AgentLoader) -> None:
+    for agent in Rs.agents:
+        agent.path_sequence = []
+        agent.blocked_ticks = 0
+
+
 def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
     states = [agent.state for agent in Rs.agents]
 
@@ -25,6 +43,7 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
 
         # Pick/place: hold position while waiting at pickup or delivery
         elif agent.status in (STATUS_PICKING, STATUS_PLACING):
+            print(f"Agent {agent.id} status: {agent.status} with state: {agent.state}")
             goal_locations.append(agent.state)
             
         # If robot is a free_agent, set goal location to current state
@@ -80,11 +99,13 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
         w += 5.0
 
     if not sequences:
+        clear_all_paths(Rs)
         return Rs
     
     # Remove first item in sequences, as they are the robot's current location
     for i, agent in enumerate(Rs.agents):
         temp_sequence = sequences[i][1:]
         agent.path_sequence = temp_sequence
+        agent.blocked_ticks = 0
     
     return Rs

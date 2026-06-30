@@ -265,6 +265,8 @@ def _complete_delivery(
     output_buffer: Optional["OutputBuffer"] = None,
 ) -> bool:
     if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
+        if S is not None:
+            S.record_outbound_buffer_placement_blocked()
         return False
 
     if sku_id != agent.get_sku_id_carrying():
@@ -403,15 +405,19 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
     # Update state of robots
     for agent in Rs.agents:
         if agent.status in (STATUS_PICKING, STATUS_PLACING):
+            agent.blocked_ticks = 0
             continue
         # If robot sequence is stationary, leave the robot in place (wait action)
         if len(agent.path_sequence) == 0:
+            agent.blocked_ticks = 0
             continue
 
         next_state = agent.path_sequence[0]
         if _is_cell_occupied_by_other_agent(Rs.agents, next_state, agent):
+            agent.blocked_ticks += 1
             continue
 
+        agent.blocked_ticks = 0
         # If robot does have a sequence of actions, pop next state and update
         G.set_occupied(agent.state, False)
         old_state = agent.state
@@ -484,6 +490,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                 inbound_task = J[task_id][4]
             if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                 print(f"============Output Delivery Blocked due to buffer level: {output_buffer.level}")
+                S.record_outbound_buffer_placement_blocked()
                 agent.status = STATUS_TO_DELIVERY
                 continue
             if not _complete_delivery(
@@ -539,6 +546,7 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                     sku_id = J[task_id][3]
                     inbound_task = J[task_id][4]
                 if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
+                    S.record_outbound_buffer_placement_blocked()
                     continue
                 if pick_place_time:
                     agent.status = STATUS_PLACING

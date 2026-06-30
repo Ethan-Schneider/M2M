@@ -107,12 +107,10 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
-                max_task_number=None,
+                max_task_number=max_task_number,
                 frequency=frequency,
                 deadline_generation_method=deadline_generation_method,
                 deadline_offset=deadline_offset,
-                queue_release_window=queue_release_window,
-                release_all_in_window=True,
             )
 
             tok = time.time()
@@ -207,7 +205,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     G,
                     J,
                     J_a,
+                    output_buffer,
                     lambda_=lambda_,
+                    t=t,
                     next_rearrangement_task_id=last_rearrangement_task_id,
                     pick_place_time=pick_place_time,
                 )
@@ -281,10 +281,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # external router for that strategy and let the MLA*-produced
         # paths drive the simulator.
         if improvement_task_assignment_strategy != "hbh_mla_star":
-            for agent in Rs.agents:
-                if agent.path_sequence == []:
-                    Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
-                    break    
+            if router.needs_path_plan(Rs):
+                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
 
         tok = time.time()
         S.add_total_PF_time(tok-tik)

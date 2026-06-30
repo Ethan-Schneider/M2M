@@ -116,6 +116,20 @@ def compute_gini_from_counts(counts) -> float:
     return compute_gini_coefficient(np.asarray(counts, dtype=np.float64))
 
 
+def compute_nonzero_tardiness_stats(task_tardiness: dict) -> dict:
+    """Mean, median, and std dev of tardiness for tasks with tardiness > 0."""
+    nonzero = [float(t) for t in task_tardiness.values() if t > 0]
+    if len(nonzero) == 0:
+        return {"average": 0.0, "median": 0.0, "std": 0.0}
+    arr = np.asarray(nonzero, dtype=np.float64)
+    std = float(arr.std(ddof=0)) if len(nonzero) > 1 else 0.0
+    return {
+        "average": float(arr.mean()),
+        "median": float(np.median(arr)),
+        "std": std,
+    }
+
+
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
@@ -328,6 +342,7 @@ class Stats:
         self.__task_deadlines = {}  # task_id -> deadline
         self.__task_tardiness = {}  # task_id -> seconds past deadline (0 if on time)
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
+        self.__outbound_buffer_placement_blocks = 0  # times outbound place blocked by full buffer
 
         self.reallocation_data = {}
 
@@ -648,6 +663,13 @@ class Stats:
         """Record shared outbound output buffer level at timestep t."""
         self.__output_buffer_level_per_timestep[int(t)] = float(level)
 
+    def record_outbound_buffer_placement_blocked(self) -> None:
+        """Increment when an outbound delivery is blocked by a full output buffer."""
+        self.__outbound_buffer_placement_blocks += 1
+
+    def get_outbound_buffer_placement_blocks(self) -> int:
+        return self.__outbound_buffer_placement_blocks
+
     def get_output_buffer_level_per_timestep(self) -> dict:
         return self.__output_buffer_level_per_timestep
 
@@ -966,6 +988,8 @@ class Stats:
             if completion_timestep is None or task_deadline is None:
                 continue
             self.__task_tardiness[task_id] = max(0, int(completion_timestep) - int(task_deadline))
+
+        tardiness_stats = compute_nonzero_tardiness_stats(self.__task_tardiness)
         
         data = {
             # Input parameters from main
@@ -1054,6 +1078,7 @@ class Stats:
                 self.__reallocation_milp_binary_vars_per_timestep
             ),
             "output_buffer_level_per_timestep": self.__output_buffer_level_per_timestep,
+            "outbound_buffer_placement_blocks": int(self.__outbound_buffer_placement_blocks),
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,
@@ -1100,6 +1125,9 @@ class Stats:
             "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
             "py_lns_logs": self.__py_lns_logs,
             "task_tardiness": self.__task_tardiness,
+            "average_task_tardiness": tardiness_stats["average"],
+            "median_task_tardiness": tardiness_stats["median"],
+            "std_dev_task_tardiness": tardiness_stats["std"],
             "cumulative_tardy_tasks": sum(
                 1 for tardiness in self.__task_tardiness.values() if tardiness > 0
             ),

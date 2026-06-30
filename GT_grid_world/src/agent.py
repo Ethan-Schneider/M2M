@@ -16,6 +16,7 @@ class Agent:
         self.status = 0
         self.sku_id_carrying = None
         self.pick_place_counter = 0
+        self.blocked_ticks = 0
     
     def set_sku_id_carrying(self, sku_id : int):
         self.sku_id_carrying = sku_id
@@ -116,5 +117,6 @@ class AgentLoader:
             new_agent.path_sequence = agent.path_sequence.copy()
             new_agent.sku_id_carrying = agent.sku_id_carrying
             new_agent.pick_place_counter = agent.pick_place_counter
+            new_agent.blocked_ticks = agent.blocked_ticks
             new_solution.agents.append(new_agent)
         return new_solution
