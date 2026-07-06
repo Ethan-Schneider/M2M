@@ -320,7 +320,11 @@ class Stats:
         self.__driveway_sku_counts_per_timestep = []
         
         self.__py_lns_logs = []
-        
+
+        # Per-SKU Gini snapshots at t=0, t%1800==0, and end-of-simulation.
+        # Each entry: {"t": int, "sku_gini": {sku_id: float}, "label": str|None}
+        self.__sku_gini_snapshots = []
+
         # Centroids of each SKU per timestep
         self.__sku_centroids_per_timestep = []
         # Locations of each SKU per timestep
@@ -343,6 +347,8 @@ class Stats:
         self.__task_tardiness = {}  # task_id -> seconds past deadline (0 if on time)
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
         self.__outbound_buffer_placement_blocks = 0  # times outbound place blocked by full buffer
+        self.__agent_buffer_block_start = {}  # agent_id -> timestep when current block started
+        self.__buffer_block_durations = []    # timesteps blocked for each completed blocking event
 
         self.reallocation_data = {}
 
@@ -663,9 +669,25 @@ class Stats:
         """Record shared outbound output buffer level at timestep t."""
         self.__output_buffer_level_per_timestep[int(t)] = float(level)
 
-    def record_outbound_buffer_placement_blocked(self) -> None:
-        """Increment when an outbound delivery is blocked by a full output buffer."""
+    def record_outbound_buffer_placement_blocked(self, agent_id: int, t: int) -> None:
+        """Increment when an outbound delivery is blocked by a full output buffer.
+
+        Tracks the start of a new blocking event per agent so duration can be
+        computed when the agent eventually places successfully.
+        """
         self.__outbound_buffer_placement_blocks += 1
+        if agent_id not in self.__agent_buffer_block_start:
+            self.__agent_buffer_block_start[agent_id] = t
+
+    def record_outbound_buffer_unblocked(self, agent_id: int, t: int) -> None:
+        """Finalize a buffer blocking event when an agent successfully places.
+
+        No-op if the agent was not previously recorded as blocked.
+        """
+        if agent_id in self.__agent_buffer_block_start:
+            duration = t - self.__agent_buffer_block_start.pop(agent_id)
+            if duration > 0:
+                self.__buffer_block_durations.append(duration)
 
     def get_outbound_buffer_placement_blocks(self) -> int:
         return self.__outbound_buffer_placement_blocks
@@ -990,7 +1012,24 @@ class Stats:
             self.__task_tardiness[task_id] = max(0, int(completion_timestep) - int(task_deadline))
 
         tardiness_stats = compute_nonzero_tardiness_stats(self.__task_tardiness)
-        
+
+        # Finalize any blocking events still open at end-of-simulation.
+        final_t = self.return_actual_timesteps()
+        for agent_id, start_t in list(self.__agent_buffer_block_start.items()):
+            duration = final_t - start_t
+            if duration > 0:
+                self.__buffer_block_durations.append(duration)
+
+        if self.__buffer_block_durations:
+            _block_arr = np.asarray(self.__buffer_block_durations, dtype=np.float64)
+            buffer_block_avg = float(_block_arr.mean())
+            buffer_block_median = float(np.median(_block_arr))
+            buffer_block_std = float(_block_arr.std(ddof=0)) if len(self.__buffer_block_durations) > 1 else 0.0
+        else:
+            buffer_block_avg = 0.0
+            buffer_block_median = 0.0
+            buffer_block_std = 0.0
+
         data = {
             # Input parameters from main
             "seed": self.__seed,
@@ -1079,6 +1118,10 @@ class Stats:
             ),
             "output_buffer_level_per_timestep": self.__output_buffer_level_per_timestep,
             "outbound_buffer_placement_blocks": int(self.__outbound_buffer_placement_blocks),
+            "buffer_block_durations": self.__buffer_block_durations,
+            "average_buffer_block_duration": buffer_block_avg,
+            "median_buffer_block_duration": buffer_block_median,
+            "std_dev_buffer_block_duration": buffer_block_std,
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,
@@ -1141,6 +1184,7 @@ class Stats:
             "pick_place_aisle_gini": compute_gini_from_counts(
                 list(self.__pick_place_count_by_aisle_column.values())
             ),
+            "sku_gini_snapshots": self.__sku_gini_snapshots,
             "num_improved_assignments": self.__num_improved_assignments,
             "num_worse_assignments": self.__num_worse_assignments,
             "num_same_assignments": self.__num_same_assignments,
@@ -1372,6 +1416,39 @@ class Stats:
                     eta[sku_local, col_to_idx[col]] += 1
 
         self.__sku_spread_per_timestep.append(compute_sku_spread(eta))
+
+    def record_sku_gini_snapshot(
+        self, warehouse, num_skus: int, aisle_locations, t: int, label: str = None
+    ) -> None:
+        """Record per-SKU Gini coefficients (distribution across aisle columns).
+
+        Called at t=0, every 1800 timesteps, and end-of-simulation. For each
+        SKU the Gini is computed over the count-per-aisle-column vector, so
+        0 means perfectly uniform spread and 1 means all inventory in one column.
+        """
+        if num_skus is None or num_skus <= 0 or not aisle_locations:
+            return
+
+        columns = sorted({loc[1] for loc in aisle_locations})
+        col_to_idx = {col: idx for idx, col in enumerate(columns)}
+
+        sku_gini = {}
+        for sku_local in range(num_skus):
+            sku_id = sku_local + 1
+            eta = np.zeros(len(columns), dtype=np.float64)
+            for loc in warehouse.get_sku_instances(sku_id):
+                col = loc[1]
+                if col in col_to_idx:
+                    eta[col_to_idx[col]] += 1
+            sku_gini[sku_id] = compute_gini_coefficient(eta)
+
+        snapshot = {"t": int(t), "sku_gini": sku_gini}
+        if label is not None:
+            snapshot["label"] = label
+        self.__sku_gini_snapshots.append(snapshot)
+
+    def get_sku_gini_snapshots(self) -> list:
+        return self.__sku_gini_snapshots
 
     def append_sku_locations(self, warehouse, driveway, num_skus):
         """Log the locations of each SKU for this timestep."""

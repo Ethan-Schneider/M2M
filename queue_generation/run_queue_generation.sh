@@ -3,10 +3,10 @@
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 repo_root="$( cd "${parent_path}/.." ; pwd -P )"
 
-output_file_name="restricted_small_long_uniform_with_deadlines_5000_arrival_rate_60"
-map_file_name="study_small_long_restricted"
+output_file_name="restricted_small_adversarial_with_deadlines_20000_arrival_rate_60"
+map_file_name="study_small_restricted"
 init_inventory_full_percentage=0.25
-number_of_tasks=5000
+number_of_tasks=20000
 num_skus=30
 seed=0
 
@@ -14,7 +14,7 @@ seed=0
 deadline_rate=60
 
 # Initial inventory layout: "uniform" (random) or "adversarial" (high-weight SKUs in back)
-inventory_layout_mode="uniform"
+inventory_layout_mode="adversarial"
 
 # Save per-SKU weight plots to data/queues/ (true or false)
 save_plots=false

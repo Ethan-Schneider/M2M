@@ -11,13 +11,18 @@ from typing import Dict, List, Optional, Set, Tuple
 import gurobipy as gp
 from gurobipy import GRB
 
-# os.environ["GRB_LICENSE_FILE"] = os.path.join("data/licenses/gurobi.lic")
+os.environ["GRB_LICENSE_FILE"] = os.path.join("data/licenses/gurobi.lic")
 
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2
 
 # Pick (5s) + place (5s) detour adjustment when pick/place time is enabled.
-PICK_PLACE_DETOUR_ADJUSTMENT = 8.0
+SINGLE_PICK_PLACE_TIME = 4.0 #seconds
+
+PICK_PLACE_DETOUR_ADJUSTMENT = 2*SINGLE_PICK_PLACE_TIME  # 8.0 seconds
+
+MAX_DETOUR_COST = 20
+
 
 # Inserted rearrangement tasks use ids in this range to avoid colliding with
 # real schedule / CRG task ids.
@@ -106,7 +111,7 @@ def arrival_time(
             total_travel += _remaining_travel_current_task(G, agent, start, goal)
         else:
             prev_goal = seq[idx - 1][2]
-            total_travel += dist(G, prev_goal, start) + dist(G, start, goal)
+            total_travel += dist(G, prev_goal, start) + dist(G, start, goal) + PICK_PLACE_DETOUR_ADJUSTMENT
 
     return float(t) + total_travel
 
@@ -484,7 +489,7 @@ def solve_insertion(
                 for g in D:
                     if g in V_alloc:
                         continue
-                    if benefit(G, s, g, Rs) <= 5:
+                    if benefit(G, s, g, Rs) <= 0:
                         continue
                     for a, ag in enumerate(Rs.agents):
                         seq = ag.task_sequence
@@ -507,6 +512,9 @@ def solve_insertion(
                                 q = ag.home
                             # ddet = dist(G, p, s) + dist(G, s, q) - dist(G, p, q)
                             dfull = dist(G, p, s) + dist(G, s, g) + dist(G, g, q) - dist(G, p, q)
+
+                            if dfull > MAX_DETOUR_COST:
+                                continue
                             # Add additional pick place time to the full distance cost
                             if pick_place_time:
                                 dfull += PICK_PLACE_DETOUR_ADJUSTMENT
@@ -520,13 +528,13 @@ def solve_insertion(
                                         t,
                                         _outbound_schedule,
                                     )
-                            print(f"slack_value: {slack_value}")
-                            print(f"dfull: {dfull}")
-                            print(f"benefit: {benefit(G, s, g, Rs)}")
+                            # print(f"slack_value: {slack_value}")
+                            # print(f"dfull: {dfull}")
+                            # print(f"benefit: {benefit(G, s, g, Rs)}")
                             U = benefit(G, s, g, Rs) - lambda_ * max(0.0, (dfull - slack_value))
                             if U <= 0:
                                 continue
-                            print(f"U: {U}")
+                            # print(f"U: {U}")
                             z[(n, k, s, g, a, insertion_position)] = mdl.addVar(
                                 vtype=GRB.BINARY,
                                 obj=U,

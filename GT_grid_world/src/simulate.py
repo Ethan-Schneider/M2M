@@ -402,6 +402,12 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
     if J_a_objectives is None:
         J_a_objectives = {}
 
+    # Snapshot per-SKU Gini at t=0 (start) and every 1800 timesteps.
+    num_skus = S.get_num_skus()
+    if num_skus and (t == 0 or t % 1800 == 0):
+        label = "start" if t == 0 else None
+        S.record_sku_gini_snapshot(G.warehouse, num_skus, G.get_aisle_locations(), t, label)
+
     # Update state of robots
     for agent in Rs.agents:
         if agent.status in (STATUS_PICKING, STATUS_PLACING):
@@ -490,9 +496,11 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                 inbound_task = J[task_id][4]
             if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                 print(f"============Output Delivery Blocked due to buffer level: {output_buffer.level}")
-                S.record_outbound_buffer_placement_blocked()
+                S.record_outbound_buffer_placement_blocked(agent.id, t)
                 agent.status = STATUS_TO_DELIVERY
                 continue
+            if inbound_task == TASK_TYPE_OUTBOUND:
+                S.record_outbound_buffer_unblocked(agent.id, t)
             if not _complete_delivery(
                 agent,
                 task_id,
@@ -546,8 +554,10 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                     sku_id = J[task_id][3]
                     inbound_task = J[task_id][4]
                 if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
-                    S.record_outbound_buffer_placement_blocked()
+                    S.record_outbound_buffer_placement_blocked(agent.id, t)
                     continue
+                if inbound_task == TASK_TYPE_OUTBOUND:
+                    S.record_outbound_buffer_unblocked(agent.id, t)
                 if pick_place_time:
                     agent.status = STATUS_PLACING
                     agent.pick_place_counter = pick_place_duration

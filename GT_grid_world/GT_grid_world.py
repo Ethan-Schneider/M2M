@@ -15,7 +15,7 @@ from src.reallocation_tasks.generate_reallocation_tasks import (
     generate_reallocation_tasks,
     merge_reallocation_tasks_into_J,
 )
-from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
+# from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
 from src.output_buffer import OutputBuffer
 
@@ -754,7 +754,15 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         print(f"Simulated {simulated_timesteps} timesteps (run until queue complete)")
     tok = time.time()
     S.set_total_runtime(tok-tik)
-    
+
+    S.record_sku_gini_snapshot(
+        G.warehouse,
+        G.warehouse.get_all_skus().__len__(),
+        G.get_aisle_locations(),
+        simulated_timesteps,
+        label="end",
+    )
+
     S.save_data()
     
     folder_name = f"{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{num_robots}_{max_number_tasks}_{deadline_generation_method}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"

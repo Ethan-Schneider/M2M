@@ -195,33 +195,6 @@ def _load_aisle_locations(map_file: str) -> List[Tuple[int, int]]:
     return aisle_locations
 
 
-def _location_depth(
-    location: Tuple[int, int],
-    aisle_locations: List[Tuple[int, int]],
-) -> float:
-    """Return depth in [0, 1], where 0 is the back and 1 is the front (near driveway)."""
-    rows = [row for row, _ in aisle_locations]
-    min_row, max_row = min(rows), max(rows)
-    if max_row == min_row:
-        return 0.5
-    row, _ = location
-    return (row - min_row) / (max_row - min_row)
-
-
-def _normalize_sku_weights(sku_tasking_weights: Dict[int, float]) -> Dict[int, float]:
-    values = list(sku_tasking_weights.values())
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return {sku_id: 0.5 for sku_id in sku_tasking_weights}
-    return {sku_id: (weight - lo) / (hi - lo) for sku_id, weight in sku_tasking_weights.items()}
-
-
-def _mean_sku_tasking_weights(tasking_weight_profiles: NDArray) -> Dict[int, float]:
-    return {
-        sku_id: float(tasking_weight_profiles[sku_id].mean())
-        for sku_id in range(tasking_weight_profiles.shape[0])
-    }
-
 
 def _sample_uniform_inventory(
     num_init_inventory: int,
@@ -246,29 +219,111 @@ def _sample_adversarial_inventory(
     aisle_locations: List[Tuple[int, int]],
     available_locations: List[Tuple[int, int]],
     appearance_probs: List[float],
-    sku_tasking_weights: Dict[int, float],
 ) -> List[Tuple[int, int, int]]:
-    """Place high-weight SKUs toward the back and low-weight SKUs toward the front."""
-    normalized_weights = _normalize_sku_weights(sku_tasking_weights)
-    init_inventory: List[Tuple[int, int, int]] = []
+    """Maximise per-SKU Gini by concentrating each SKU into as few aisle columns as possible.
 
+    Each SKU is pre-assigned a home column (round-robin) used as the initial
+    target and as a tiebreaker when the SKU has no inventory yet. After the
+    first placement, every subsequent item for that SKU goes to whichever
+    column already holds the most instances of it, extending the most
+    concentrated cluster and driving its Gini toward 1. Falls back to the
+    next best column if the preferred one has no available locations.
+    """
+    columns = sorted({loc[1] for loc in aisle_locations})
+    sku_home_column = {sku_id: columns[sku_id % len(columns)] for sku_id in range(num_skus)}
+
+    col_to_locs: Dict[int, List[Tuple[int, int]]] = {col: [] for col in columns}
+    for loc in available_locations:
+        col_to_locs[loc[1]].append(loc)
+
+    available_set: set = set(map(tuple, available_locations))
+    sku_col_counts: Dict[int, Dict[int, int]] = {
+        sku_id: {col: 0 for col in columns} for sku_id in range(num_skus)
+    }
+
+    init_inventory: List[Tuple[int, int, int]] = []
     for _ in range(num_init_inventory):
-        if not available_locations:
+        if not available_set:
             break
 
         sku_id = int(np.random.choice(num_skus, p=appearance_probs))
-        sku_weight = normalized_weights[sku_id]
 
-        location_weights = []
-        for location in available_locations:
-            depth = _location_depth(location, aisle_locations)
-            affinity = sku_weight * (1.0 - depth) + (1.0 - sku_weight) * depth
-            location_weights.append(max(affinity, 1e-6))
+        home_col = sku_home_column[sku_id]
+        col_counts = sku_col_counts[sku_id]
+        # Primary sort: descending instance count (concentrate into fewest columns).
+        # Tiebreaker: home column first so distinct SKUs spread across columns
+        # before any single SKU has been placed.
+        sorted_cols = sorted(columns, key=lambda c: (-col_counts[c], c != home_col))
 
-        location_probs = np.array(location_weights, dtype=float)
-        location_probs /= location_probs.sum()
-        loc_idx = int(np.random.choice(len(available_locations), p=location_probs))
-        location = available_locations.pop(loc_idx)
+        location = None
+        for col in sorted_cols:
+            candidates = [loc for loc in col_to_locs[col] if loc in available_set]
+            if candidates:
+                location = candidates[int(np.random.choice(len(candidates)))]
+                break
+
+        if location is None:
+            break
+
+        available_set.discard(location)
+        sku_col_counts[sku_id][location[1]] += 1
+        init_inventory.append((sku_id, location[0], location[1]))
+
+    return init_inventory
+
+
+def _sample_perfect_inventory(
+    num_init_inventory: int,
+    num_skus: int,
+    aisle_locations: List[Tuple[int, int]],
+    available_locations: List[Tuple[int, int]],
+    appearance_probs: List[float],
+) -> List[Tuple[int, int, int]]:
+    """Minimise per-SKU Gini by spreading each SKU as evenly as possible across aisle columns.
+
+    For each item placed, picks the column where that SKU has the fewest
+    existing instances, driving the column-count distribution toward uniform
+    and Gini toward 0. Ties are broken randomly so no column is systematically
+    preferred over another.
+    """
+    columns = sorted({loc[1] for loc in aisle_locations})
+
+    col_to_locs: Dict[int, List[Tuple[int, int]]] = {col: [] for col in columns}
+    for loc in available_locations:
+        col_to_locs[loc[1]].append(loc)
+
+    available_set: set = set(map(tuple, available_locations))
+    sku_col_counts: Dict[int, Dict[int, int]] = {
+        sku_id: {col: 0 for col in columns} for sku_id in range(num_skus)
+    }
+
+    init_inventory: List[Tuple[int, int, int]] = []
+    for _ in range(num_init_inventory):
+        if not available_set:
+            break
+
+        sku_id = int(np.random.choice(num_skus, p=appearance_probs))
+
+        col_counts = sku_col_counts[sku_id]
+        # Shuffle first so equal-count columns get a random ordering, then
+        # stable-sort ascending by count to always fill the most under-
+        # represented column first.
+        shuffled = list(columns)
+        np.random.shuffle(shuffled)
+        sorted_cols = sorted(shuffled, key=lambda c: col_counts[c])
+
+        location = None
+        for col in sorted_cols:
+            candidates = [loc for loc in col_to_locs[col] if loc in available_set]
+            if candidates:
+                location = candidates[int(np.random.choice(len(candidates)))]
+                break
+
+        if location is None:
+            break
+
+        available_set.discard(location)
+        sku_col_counts[sku_id][location[1]] += 1
         init_inventory.append((sku_id, location[0], location[1]))
 
     return init_inventory
@@ -384,16 +439,13 @@ def build_init_inventory(
     num_skus: int,
     output_file_name: str,
     inventory_layout_mode: str = "uniform",
-    sku_tasking_weights: Optional[Dict[int, float]] = None,
 ) -> Tuple[Dict[int, int], int]:
     """Initialize warehouse inventory placement."""
-    if inventory_layout_mode not in ("uniform", "adversarial"):
+    if inventory_layout_mode not in ("uniform", "adversarial", "perfect"):
         raise ValueError(
             f"Unknown inventory_layout_mode {inventory_layout_mode!r}; "
-            "expected 'uniform' or 'adversarial'"
+            "expected 'uniform', 'adversarial', or 'perfect'"
         )
-    if inventory_layout_mode == "adversarial" and sku_tasking_weights is None:
-        raise ValueError("adversarial inventory layout requires sku_tasking_weights")
 
     aisle_locations = _load_aisle_locations(map_file)
     num_endpoints = len(aisle_locations)
@@ -413,14 +465,21 @@ def build_init_inventory(
         init_inventory = _sample_uniform_inventory(
             num_init_inventory, num_skus, available_locations, appearance_probs
         )
-    else:
+    elif inventory_layout_mode == "adversarial":
         init_inventory = _sample_adversarial_inventory(
             num_init_inventory,
             num_skus,
             aisle_locations,
             available_locations,
             appearance_probs,
-            sku_tasking_weights,
+        )
+    else:
+        init_inventory = _sample_perfect_inventory(
+            num_init_inventory,
+            num_skus,
+            aisle_locations,
+            available_locations,
+            appearance_probs,
         )
 
     sku_counts = {sku_id: 0 for sku_id in range(num_skus)}
@@ -495,8 +554,6 @@ def main(
     tasking_weight_profiles = build_sku_weight_profiles(
         num_skus, number_of_tasks, weight_mode, sku_weights_json
     )
-    sku_tasking_weights = _mean_sku_tasking_weights(tasking_weight_profiles)
-
     print("Building Initial Inventory...")
     initial_sku_counts, num_endpoints = build_init_inventory(
         map_file_name,
@@ -504,7 +561,6 @@ def main(
         num_skus,
         output_file_name,
         inventory_layout_mode=inventory_layout_mode,
-        sku_tasking_weights=sku_tasking_weights,
     )
     initial_inventory_percentage = init_inventory_full_percentage * 100.0
     print(f"Building Queue (feedback_control, weight_mode={weight_mode})...")
@@ -588,9 +644,10 @@ if __name__ == "__main__":
         "--inventory_layout_mode",
         type=str,
         default="uniform",
-        choices=["uniform", "adversarial"],
-        help="Initial inventory placement: uniform (random locations) or adversarial "
-             "(high-weight SKUs toward back, low-weight toward front)",
+        choices=["uniform", "adversarial", "perfect"],
+        help="Initial inventory placement: uniform (random), adversarial "
+             "(each SKU concentrated in one column, maximising per-SKU Gini), "
+             "or perfect (each SKU spread evenly across all columns, minimising per-SKU Gini)",
     )
     parser.add_argument(
         "--save-plots",

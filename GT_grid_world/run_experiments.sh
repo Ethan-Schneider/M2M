@@ -10,9 +10,9 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(2)
+seeds=(0)
 num_robots=(40)
-time_horizons=(500)
+time_horizons=(1500)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
@@ -40,19 +40,19 @@ sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
-W=90
-B=30
+W=300
+B=60
 queue_release_window=60
-lambda_=2.0
-reallocation_task_method="none"
+lambda_=1.5
+reallocation_task_method="insertion"
 pick_place_time=true
 buffer_capacity_k=20
 buffer_consumption_rate=25
 
 # Precomputed queue/inventory (set use_precomputed_queue=true to enable)
 use_precomputed_queue=true
-queue_file="$repo_root/data/queues/uniform_with_deadlines_5000_arrival_rate_60.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/uniform_with_deadlines_5000_arrival_rate_60_init_inventory.txt"
+queue_file="$repo_root/data/queues/restricted_small_uniform_with_deadlines_20000_arrival_rate_60.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/restricted_small_uniform_with_deadlines_20000_arrival_rate_60_init_inventory.txt"
 run_until_queue_complete=false
 
 precomputed_args=()
