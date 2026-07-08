@@ -1,3 +1,4 @@
+import random
 import numpy as np
 from typing import List, Tuple
 
@@ -82,28 +83,47 @@ def generate_reallocation_tasks(
     flagged_real_tasks = _lookahead_outbound_tasks(queue, B, W)
 
     reallocation_tasks = {}
-    aisle_columns = sorted({loc[1] for loc in G.get_aisle_locations()})
+    if not flagged_real_tasks:
+        return reallocation_tasks
+
+    # Aisles (driveway columns) currently available for an outbound task's
+    # eventual delivery. Empty for every flagged task if the driveway is full.
+    driveway_columns = sorted({loc[1] for loc in G.driveway.get_empty_locations()})
+    if not driveway_columns:
+        return reallocation_tasks
+
+    dist_matrix = G.get_distance_matrix()
+    empty_locations = list(G.warehouse.get_empty_locations())
+    empty_idx = np.array([G.location_index(loc) for loc in empty_locations], dtype=int)
 
     for reallocation_task_id, (task, queue_index) in enumerate(flagged_real_tasks):
         sku_id = int(task[QUEUE_SKU_ID]) + QUEUE_SKU_ID_OFFSET
-        sku_locations = set(G.warehouse.get_sku_instances(sku_id))
-        empty_locations = set(G.warehouse.get_empty_locations())
+        sku_locations = list(G.warehouse.get_sku_instances(sku_id))
+        if not sku_locations or empty_idx.size == 0:
+            continue
+
+        # Pre-commit this (not-yet-released) outbound task to one driveway
+        # aisle, the same way import_schedule._add_outbound_task will when it
+        # is actually released, and use any cell in that aisle as "the real
+        # goal location" -- driveway cells in the same column are close
+        # enough to each other that it doesn't matter which one. Candidate
+        # goals span the whole warehouse (not just the SKU's own aisle) so
+        # inter-aisle rearrangements are possible, but are pruned to those
+        # that are actually closer to that reference than the SKU already
+        # is -- a move that isn't is never chosen by the insertion MILP
+        # anyway (see optimal_insertion_gurobi.solve_insertion), so skipping
+        # it here keeps the candidate set from blowing up now that every
+        # empty warehouse location is in play.
+        chosen_column = random.choice(driveway_columns)
+        reference_location = G.get_driveway_column_reference(chosen_column)
+        dist_to_reference = dist_matrix[G.location_index(reference_location)]
 
         C_i = set()
-        for column in aisle_columns:
-            aisle_locations = [
-                loc for loc in G.get_aisle_locations() if loc[1] == column
-            ]
-            start_locations = [
-                loc for loc in aisle_locations if loc in sku_locations
-            ]
-            goal_locations = [
-                loc for loc in aisle_locations if loc in empty_locations
-            ]
-            if not start_locations or not goal_locations:
-                continue
-            for start_loc in start_locations:
-                for goal_loc in goal_locations:
+        for start_loc in sku_locations:
+            d_start = dist_to_reference[G.location_index(start_loc)]
+            closer = dist_to_reference[empty_idx] < d_start
+            for goal_loc, is_closer in zip(empty_locations, closer):
+                if is_closer and goal_loc != start_loc:
                     C_i.add((start_loc, goal_loc))
 
         if not C_i:

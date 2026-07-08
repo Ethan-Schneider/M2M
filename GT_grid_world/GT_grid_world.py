@@ -17,9 +17,10 @@ from src.reallocation_tasks.generate_reallocation_tasks import (
 )
 # from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
+from src.reallocation_tasks.fast_optimal_insertion import solve_insertion_fast
 from src.output_buffer import OutputBuffer
 
-REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion")
+REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion", "fast_insertion")
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -54,7 +55,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             pick_place_time: bool = False,
             buffer_capacity_k: int = 0,
             buffer_consumption_rate: float = 70.0,
-            queue_release_window: int = 60) -> int:
+            queue_release_window: int = 60,
+            log_buffer_predictions: bool = False) -> int:
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
@@ -197,15 +199,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             tok = time.time()
             print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
 
-            if reallocation_task_method == "insertion":
+            if reallocation_task_method in ("insertion", "fast_insertion"):
+                solve_insertion_fn = (
+                    solve_insertion_fast if reallocation_task_method == "fast_insertion" else solve_insertion
+                )
                 tik = time.time()
-                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time, new_objectives = solve_insertion(
+                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time, new_objectives = solve_insertion_fn(
                     Ta,
                     Rs,
                     G,
                     J,
                     J_a,
                     output_buffer,
+                    S=S,
                     lambda_=lambda_,
                     t=t,
                     next_rearrangement_task_id=last_rearrangement_task_id,
@@ -249,6 +255,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 )
                 tok = time.time()
                 print(f"Simultaneous reallocation allocation time: {tok - tik}")
+
+        S.record_buffer_prediction(t, G, Rs, J, J_a, output_buffer)
 
         print("=============================" +"Routing"+ "=============================")
         tik = time.time()
@@ -555,7 +563,8 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          pick_place_time: bool = False,
          buffer_capacity_k: int = 0,
          buffer_consumption_rate: float = 70.0,
-         queue_release_window: int = 60) -> None:
+         queue_release_window: int = 60,
+         log_buffer_predictions: bool = False) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -685,6 +694,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         run_until_queue_complete=run_until_queue_complete,
         aisle_dual_cycle=aisle_dual_cycle,
         driveway_dual_cycle=driveway_dual_cycle,
+        log_buffer_predictions=log_buffer_predictions,
     )
     queue = None
     if use_precomputed_queue:
@@ -865,6 +875,12 @@ if __name__=="__main__":
     parser.add_argument('--buffer-consumption-rate', type=float, default=70.0,
                        help='Output buffer consumption rate in tasks/min (drains '
                             'rate/60 items per simulation tick).')
+    parser.add_argument('--log-buffer-predictions', action='store_true',
+                       help='Every 100 timesteps, forecast the shared output buffer '
+                            'level for the next 300 timesteps (same prediction logic '
+                            'used by the fast_insertion reallocation path) and record '
+                            'it alongside the real observed buffer levels for that '
+                            'window. Requires --buffer-capacity-k > 0.')
     parser.add_argument('--use-precomputed-queue', action='store_true',
                        help='Load tasks from a precomputed queue file and skip CRG. '
                             'Requires --queue-file and --initial-inventory-file.')
@@ -894,7 +910,9 @@ if __name__=="__main__":
         type=str,
         default='none',
         choices=list(REALLOCATION_TASK_METHODS),
-        help='Rearrangement task integration method: none, simultaneous (crM2M), or insertion (irM2M).',
+        help='Rearrangement task integration method: none, simultaneous (crM2M), '
+             'insertion (irM2M), or fast_insertion (numpy-vectorized MILP construction, '
+             'same result as insertion but faster to build).',
     )
     args = parser.parse_args()
     
@@ -947,4 +965,5 @@ if __name__=="__main__":
         buffer_capacity_k=args.buffer_capacity_k,
         buffer_consumption_rate=args.buffer_consumption_rate,
         queue_release_window=args.queue_release_window,
+        log_buffer_predictions=args.log_buffer_predictions,
     )

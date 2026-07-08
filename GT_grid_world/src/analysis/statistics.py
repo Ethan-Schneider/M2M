@@ -153,7 +153,8 @@ class Stats:
                  initial_inventory_file: str = None,
                  run_until_queue_complete: bool = None,
                  aisle_dual_cycle: bool = None,
-                 driveway_dual_cycle: bool = None) -> None:
+                 driveway_dual_cycle: bool = None,
+                 log_buffer_predictions: bool = False) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -203,6 +204,7 @@ class Stats:
         self.__run_until_queue_complete = run_until_queue_complete
         self.__aisle_dual_cycle = aisle_dual_cycle
         self.__driveway_dual_cycle = driveway_dual_cycle
+        self.__log_buffer_predictions = log_buffer_predictions
 
         self.__num_improved_assignments = 0
         self.__num_worse_assignments = 0
@@ -349,6 +351,14 @@ class Stats:
         self.__outbound_buffer_placement_blocks = 0  # times outbound place blocked by full buffer
         self.__agent_buffer_block_start = {}  # agent_id -> timestep when current block started
         self.__buffer_block_durations = []    # timesteps blocked for each completed blocking event
+        self.__agents_waiting_at_buffer_per_timestep = []  # t -> count of agents flagged waiting_at_buffer
+
+        # Buffer-level forecast diagnostics: every ``__BUFFER_PREDICTION_INTERVAL``
+        # timesteps, predicts the output buffer level at each of the next
+        # ``__BUFFER_PREDICTION_HORIZON`` timesteps (using the same
+        # OutboundDeliverySchedule / predict_output_buffer_level logic the
+        # fast_insertion reallocation path uses to score buffer slack).
+        self.__buffer_predictions_per_timestep = {}  # t -> [predicted level at t+1, ..., t+horizon]
 
         self.reallocation_data = {}
 
@@ -691,6 +701,64 @@ class Stats:
 
     def get_outbound_buffer_placement_blocks(self) -> int:
         return self.__outbound_buffer_placement_blocks
+
+    def append_agents_waiting_at_buffer(self, count: int) -> None:
+        """Record how many agents are flagged as waiting at the buffer at this timestep."""
+        self.__agents_waiting_at_buffer_per_timestep.append(int(count))
+
+    def get_agents_waiting_at_buffer_per_timestep(self) -> list:
+        return self.__agents_waiting_at_buffer_per_timestep
+
+    # Cadence for the buffer-level forecast: forecast every 100 timesteps,
+    # looking 300 timesteps ahead.
+    BUFFER_PREDICTION_INTERVAL = 100
+    BUFFER_PREDICTION_HORIZON = 300
+
+    def record_buffer_prediction(self, t: int, G, Rs, J: dict, J_a: dict, output_buffer) -> None:
+        """Forecast the shared output buffer level for the next horizon timesteps.
+
+        No-op unless ``log_buffer_predictions`` was enabled, a buffer exists,
+        and ``t`` falls on the prediction cadence. Reuses the
+        ``OutboundDeliverySchedule`` / ``predict_output_buffer_level`` logic
+        that the ``fast_insertion`` reallocation path (see
+        ``reallocation_tasks/fast_optimal_insertion.py``) uses to score buffer
+        slack, so the forecast reflects the same estimated delivery times the
+        task allocator is acting on. The real (observed) buffer levels for
+        the same window are reconstructed from ``log_output_buffer_level``
+        entries in ``save_data``.
+        """
+        if not self.__log_buffer_predictions or output_buffer is None:
+            return
+        if t % self.BUFFER_PREDICTION_INTERVAL != 0:
+            return
+
+        # Deferred import: avoids a circular import (optimal_insertion_gurobi
+        # imports Stats from this module) and keeps the gurobipy dependency
+        # scoped to when this diagnostic is actually enabled.
+        from ..reallocation_tasks.optimal_insertion_gurobi import (
+            OutboundDeliverySchedule,
+            predict_output_buffer_level,
+        )
+
+        outbound_schedule = OutboundDeliverySchedule.build(Rs, G, J, J_a, t)
+        predicted_levels = [
+            predict_output_buffer_level(output_buffer, t + offset, t, outbound_schedule)
+            for offset in range(1, self.BUFFER_PREDICTION_HORIZON + 1)
+        ]
+        self.__buffer_predictions_per_timestep[int(t)] = predicted_levels
+
+    def get_buffer_predictions_per_timestep(self) -> dict:
+        return self.__buffer_predictions_per_timestep
+
+    def _buffer_prediction_actuals(self) -> dict:
+        """Real buffer levels observed over each prediction's forecast window."""
+        actuals = {}
+        for t, predicted in self.__buffer_predictions_per_timestep.items():
+            actuals[t] = [
+                self.__output_buffer_level_per_timestep.get(t + offset)
+                for offset in range(1, len(predicted) + 1)
+            ]
+        return actuals
 
     def get_output_buffer_level_per_timestep(self) -> dict:
         return self.__output_buffer_level_per_timestep
@@ -1080,6 +1148,7 @@ class Stats:
             "run_until_queue_complete": self.__run_until_queue_complete,
             "aisle_dual_cycle": self.__aisle_dual_cycle,
             "driveway_dual_cycle": self.__driveway_dual_cycle,
+            "log_buffer_predictions": self.__log_buffer_predictions,
             # Simulation results
             "timesteps_completed": self.return_actual_timesteps(),
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -1122,6 +1191,9 @@ class Stats:
             "average_buffer_block_duration": buffer_block_avg,
             "median_buffer_block_duration": buffer_block_median,
             "std_dev_buffer_block_duration": buffer_block_std,
+            "agents_waiting_at_buffer_per_timestep": self.__agents_waiting_at_buffer_per_timestep,
+            "buffer_predictions_per_timestep": self.__buffer_predictions_per_timestep,
+            "buffer_predictions_actual_per_timestep": self._buffer_prediction_actuals(),
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,

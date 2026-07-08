@@ -180,10 +180,12 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
         from current warehouse-empty cells (regardless of SKU, because adding
         or removing any SKU shifts the empty set).
       - For outbound tasks (dropoff = driveway), re-derive goal_locs from
-        current driveway-empty cells. The current execution flow only modifies
-        warehouse occupancy here, so this branch is mostly defensive but kept
-        consistent so the same helper is reusable when driveway-side
-        transitions are added.
+        currently-empty cells within the task's already-committed aisle
+        (the driveway column its goal_locs were originally restricted to),
+        never expanding back out to every empty driveway cell. The current
+        execution flow only modifies warehouse occupancy here, so this
+        branch is mostly defensive but kept consistent so the same helper
+        is reusable when driveway-side transitions are added.
     """
     if not J:
         return
@@ -205,8 +207,11 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             new_start_locs = same_sku_warehouse_instances
         if task_type in WAREHOUSE_DROPOFF_TASK_TYPES:
             new_goal_locs = warehouse_empty
-        elif task_type == TASK_TYPE_OUTBOUND:
-            new_goal_locs = driveway_empty
+        elif task_type == TASK_TYPE_OUTBOUND and goal_locations:
+            aisle_column = next(iter(goal_locations))[1]
+            new_goal_locs = frozenset(
+                loc for loc in driveway_empty if loc[1] == aisle_column
+            )
 
         if new_start_locs is not start_locations or new_goal_locs is not goal_locations:
             J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
@@ -497,10 +502,12 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
             if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                 print(f"============Output Delivery Blocked due to buffer level: {output_buffer.level}")
                 S.record_outbound_buffer_placement_blocked(agent.id, t)
+                agent.waiting_at_buffer = True
                 agent.status = STATUS_TO_DELIVERY
                 continue
             if inbound_task == TASK_TYPE_OUTBOUND:
                 S.record_outbound_buffer_unblocked(agent.id, t)
+                agent.waiting_at_buffer = False
             if not _complete_delivery(
                 agent,
                 task_id,
@@ -555,9 +562,11 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                     inbound_task = J[task_id][4]
                 if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                     S.record_outbound_buffer_placement_blocked(agent.id, t)
+                    agent.waiting_at_buffer = True
                     continue
                 if inbound_task == TASK_TYPE_OUTBOUND:
                     S.record_outbound_buffer_unblocked(agent.id, t)
+                    agent.waiting_at_buffer = False
                 if pick_place_time:
                     agent.status = STATUS_PLACING
                     agent.pick_place_counter = pick_place_duration
@@ -583,8 +592,10 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                 ):
                     continue
 
+    S.append_agents_waiting_at_buffer(sum(1 for agent in Rs.agents if agent.waiting_at_buffer))
+
     consumption_tick(output_buffer)
     if output_buffer is not None:
         S.log_output_buffer_level(t, output_buffer.level)
-                        
+
     return Rs, J, J_a

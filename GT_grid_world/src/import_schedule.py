@@ -100,10 +100,16 @@ def _add_outbound_task(
     deadline: int = None,
 ) -> Tuple[bool, int]:
     available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
-    available_goal_locations = set(G.driveway.get_empty_locations())
+    driveway_empty = set(G.driveway.get_empty_locations())
 
-    if not available_start_locations or not available_goal_locations:
+    if not available_start_locations or not driveway_empty:
         return False, last_task_id
+
+    # Restrict this task's goal locations to a single driveway aisle (column)
+    # instead of every empty driveway cell, so the task doesn't fan out
+    # across the whole driveway.
+    chosen_column = random.choice(list({loc[1] for loc in driveway_empty}))
+    available_goal_locations = {loc for loc in driveway_empty if loc[1] == chosen_column}
 
     if deadline is None:
         deadline = get_deadline(current_time, deadline_generation_method, deadline_offset)

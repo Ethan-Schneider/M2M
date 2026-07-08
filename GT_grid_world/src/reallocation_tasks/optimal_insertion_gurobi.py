@@ -21,20 +21,21 @@ SINGLE_PICK_PLACE_TIME = 4.0 #seconds
 
 PICK_PLACE_DETOUR_ADJUSTMENT = 2*SINGLE_PICK_PLACE_TIME  # 8.0 seconds
 
-MAX_DETOUR_COST = 20
-
 
 # Inserted rearrangement tasks use ids in this range to avoid colliding with
 # real schedule / CRG task ids.
 REARRANGEMENT_TASK_ID_BASE = 1_000_000_000
 
 from ..agent import AgentLoader
+from ..analysis.statistics import Stats
 from ..graph import Graph
 from ..output_buffer import OutputBuffer
 from ..simulate import (
+    STATUS_FREE,
     STATUS_PICKING,
     STATUS_PLACING,
     STATUS_TO_DELIVERY,
+    STATUS_TO_PICKUP,
     TASK_TYPE_OUTBOUND,
 )
 
@@ -44,7 +45,10 @@ InsertionKey = Tuple[int, int, Location, Location, int, int]
 # (task_key, candidate_idx, start, goal, agent_idx, insertion_position)
 #
 # Indexing convention:
-# - ``insertion_position`` is 1-based: insert after task index ``insertion_position - 1``.
+# - ``insertion_position`` only ever takes two values now: ``0`` (the agent's
+#   task_sequence is empty, so the rearrangement task becomes its only task)
+#   or ``1`` (insert right after the agent's first/currently-active task).
+#   Deeper positions are never generated as candidates.
 # - ``task_index`` is 0-based into ``agent.task_sequence``.
 # - ``agent_idx`` is the index in ``Rs.agents`` (not necessarily ``agent.id``).
 
@@ -306,8 +310,15 @@ def slack(
     t: int,
     outbound_schedule: OutboundDeliverySchedule,
 ) -> float:
-    """Buffer wait slack before an insertion at ``insertion_position`` (1-based)."""
-    t_f = completion_time_before_insertion(G, Rs, agent_id, insertion_position, t)
+    """Buffer wait slack before an insertion at ``insertion_position``.
+
+    ``insertion_position == 0`` means the agent has no tasks at all right
+    now, so there's nothing to wait on -- it's available immediately (``t``).
+    """
+    if insertion_position == 0:
+        t_f = float(t)
+    else:
+        t_f = completion_time_before_insertion(G, Rs, agent_id, insertion_position, t)
     t_accept = accept(B, t_f, t, outbound_schedule, excluded_agent_id=agent_id)
     if t_accept == float("inf"):
         return float("inf")
@@ -328,9 +339,18 @@ def _next_rearrangement_task_id(
         return max(rearrangement_ids) + 1
     return REARRANGEMENT_TASK_ID_BASE
 
-def benefit(G: Graph, s, g, Rs: AgentLoader) -> float:
-    dummy_location = Rs.agents[0].home
-    return G.get_distance(s, dummy_location) - G.get_distance(g, dummy_location)
+def benefit(G: Graph, s: Location, g: Location) -> float:
+    """Benefit of relocating a SKU from ``s`` to ``g``.
+
+    Measured against a representative driveway cell in ``g``'s aisle column
+    (rather than a fixed dummy location), since the point of the move is to
+    get the SKU closer to wherever an outbound task assigned to that aisle
+    would eventually pick it up.
+    """
+    reference_location = G.get_driveway_column_reference(g[1])
+    if reference_location is None:
+        return 0.0
+    return G.get_distance(s, reference_location) - G.get_distance(g, reference_location)
 
 def compute_insertion_objectives(
     G: Graph,
@@ -343,9 +363,20 @@ def compute_insertion_objectives(
     pick_place_time: bool = False,
 ) -> Tuple[float, float, float]:
     """Return benefit, detour cost, and utility for a chosen insertion."""
-    prior_goal = Rs.agents[agent_idx].task_sequence[prior_task_index(insertion_position)][2]
-    next_anchor = Rs.agents[agent_idx].home
-    task_benefit = benefit(G, start, goal, Rs)
+    agent = Rs.agents[agent_idx]
+    seq = agent.task_sequence
+    if insertion_position == 0:
+        # Agent had no tasks -- there's no prior goal to chain from, so use
+        # its current location instead.
+        prior_goal = agent.state
+        next_anchor = agent.home
+    else:
+        prior_goal = seq[prior_task_index(insertion_position)][2]
+        # Mirror _build_insertion_slots: the next anchor is the start of the
+        # agent's actual next queued task, not always its home, so the
+        # reported detour reflects what was really scored during selection.
+        next_anchor = seq[insertion_position][1] if insertion_position < len(seq) else agent.home
+    task_benefit = benefit(G, start, goal)
     detour_cost = (
         dist(G, prior_goal, start)
         + dist(G, start, next_anchor)
@@ -366,11 +397,87 @@ def collect_V_alloc(Rs: AgentLoader) -> Set[Location]:
     return allocated
 
 
-def _reallocation_candidates(
-    task_data: ReallocationTask,
-) -> List[Tuple[frozenset, frozenset]]:
-    C_i, _release, _deadline, _sigma = task_data
-    return [(frozenset({s}), frozenset({g})) for s, g in C_i]
+@dataclass
+class InsertionSlot:
+    """An (agent, insertion_position) slot, with everything about it that is
+    independent of which candidate (s, g) pair might be inserted there."""
+
+    agent_idx: int
+    insertion_position: int
+    prior_goal: Location
+    next_anchor: Location
+    prior_goal_to_next_anchor: float
+    slack_value: float
+
+
+def _build_insertion_slots(
+    Rs: AgentLoader,
+    G: Graph,
+    J: Dict[int, Tuple],
+    J_a: Dict[int, Tuple],
+    B: OutputBuffer,
+    t: int,
+    outbound_schedule: OutboundDeliverySchedule,
+) -> List[InsertionSlot]:
+    """Precompute every valid insertion slot once, up front.
+
+    Each agent contributes at most one slot: if it has no tasks at all, the
+    rearrangement task can become its sole task (``insertion_position=0``,
+    reference point is the agent's current location); otherwise the only
+    eligible slot is right after its first/currently-active task
+    (``insertion_position=1``), and only when that first task is inbound.
+    Deeper positions are no longer considered.
+
+    ``p``, ``q``, and ``slack_value`` only depend on the (agent, position)
+    slot, never on the candidate (s, g) pair being considered for it. The
+    original construction loop recomputed them for every candidate visiting
+    that slot; hoisting them out here means each is computed exactly once
+    regardless of how many rearrangement candidates exist.
+    """
+    slots: List[InsertionSlot] = []
+    for a, ag in enumerate(Rs.agents):
+        seq = ag.task_sequence
+        L = len(seq)
+
+        if L == 0:
+            p = ag.state
+            q = ag.home
+            slack_value = slack(B, Rs, G, ag.id, 0, t, outbound_schedule)
+            slots.append(
+                InsertionSlot(
+                    agent_idx=a,
+                    insertion_position=0,
+                    prior_goal=p,
+                    next_anchor=q,
+                    prior_goal_to_next_anchor=dist(G, p, q),
+                    slack_value=slack_value,
+                )
+            )
+            continue
+
+        insertion_position = 1
+        prior_idx = prior_task_index(insertion_position)
+        prior_task_id = seq[prior_idx][0]
+
+        if prior_task_id in J_a:
+            continue
+        if J[prior_task_id][4] == 0 or J[prior_task_id][4] == 2:
+            continue
+
+        p = seq[prior_idx][2]
+        q = seq[insertion_position][1] if insertion_position < L else ag.home
+        slack_value = slack(B, Rs, G, ag.id, insertion_position, t, outbound_schedule)
+        slots.append(
+            InsertionSlot(
+                agent_idx=a,
+                insertion_position=insertion_position,
+                prior_goal=p,
+                next_anchor=q,
+                prior_goal_to_next_anchor=dist(G, p, q),
+                slack_value=slack_value,
+            )
+        )
+    return slots
 
 
 def apply_insertions(
@@ -380,6 +487,7 @@ def apply_insertions(
     chosen: Dict[InsertionKey, float],
     J: Dict[int, Tuple],
     J_a: Dict[int, Tuple],
+    S: Optional[Stats] = None,
     next_rearrangement_task_id: Optional[int] = None,
     lambda_: float = 1.0,
     pick_place_time: bool = False,
@@ -392,6 +500,13 @@ def apply_insertions(
         G: Warehouse graph (unused here; kept for API symmetry).
         chosen: Mapping of ``(n, k, s, g, a, i) -> value`` for selected variables.
         J: Live task dictionary; updated in-place for each inserted task.
+        S: Stats object; when an insertion lands at ``insertion_position == 0``
+            (agent had no tasks at all), this promotes the agent out of
+            ``STATUS_FREE`` and initializes its actual-distance/duration stats
+            the same way every other task-assignment path does -- otherwise
+            the agent is left with a non-empty task_sequence but a status/stats
+            state that still says "idle", and simulate.py's per-tick stat
+            updates KeyError on the un-initialized task id.
         next_task_id: Optional starting id; defaults to rearrangement id range.
         lambda_: Detour penalty used when computing insertion utility.
 
@@ -421,7 +536,23 @@ def apply_insertions(
                 G, Rs, start, goal, agent_idx, insertion_position, lambda_, pick_place_time
             )
             task_tuple = (current_id, start, goal, int(deadline))
-            modified.agents[agent_idx].task_sequence.insert(insertion_position, task_tuple)
+            agent = modified.agents[agent_idx]
+            agent.task_sequence.insert(insertion_position, task_tuple)
+
+            if insertion_position == 0:
+                # Agent had no tasks at all -- this insertion is its only
+                # task and becomes active immediately, so promote it out of
+                # STATUS_FREE and initialize its stats exactly like every
+                # other task-assignment path does (see e.g. fast_greedy_call).
+                if agent.status == STATUS_FREE:
+                    agent.status = STATUS_TO_PICKUP
+                if S is not None:
+                    S.append_early_task_ids(current_id)
+                    S.add_actual_distance(current_id)
+                    S.add_actual_pickup_distance(current_id)
+                    S.add_actual_duration(current_id)
+                    S.add_actual_pickup_duration(current_id)
+
             J_a[current_id] = (
                 start,
                 goal,
@@ -447,6 +578,7 @@ def solve_insertion(
     J_a: Dict[int, Tuple],
     B : OutputBuffer,
     *,
+    S: Optional[Stats] = None,
     lambda_: float = 1.0,
     t: int = 0,
     next_rearrangement_task_id: Optional[int] = None,
@@ -465,81 +597,43 @@ def solve_insertion(
 
     construct_tik = time.time()
     V_alloc = collect_V_alloc(Rs)
-    _outbound_schedule = OutboundDeliverySchedule.build(Rs, G, J, J_a, t)
+    outbound_schedule = OutboundDeliverySchedule.build(Rs, G, J, J_a, t)
 
     mdl = gp.Model("rearrangement_insertion")
     mdl.setParam("OutputFlag", 0)
 
-    #    # --- completion times of each agent's current route ---
-    #    T = {}
-    #    for a, ag in enumerate(Rs.agents):
-    #        acc, prev, T[a] = 0.0, ag.loc, {}
-    #        for i, tk in enumerate(ag.seq):
-    #            acc += dist(prev, tk.start) + dist(tk.start, tk.goal)
-    #            T[a][i], prev = acc, tk.goal
+    # Agent/position slots don't depend on which candidate gets inserted into
+    # them, so compute each one exactly once instead of once per candidate.
+    insertion_slots = _build_insertion_slots(Rs, G, J, J_a, B, t, outbound_schedule)
 
     z: Dict[InsertionKey, gp.Var] = {}
-    for n, task_data in tasks_a.items():
-        candidates = _reallocation_candidates(task_data)
-        _C_i, _release, _deadline, _sigma = task_data
-        for k, (S, D) in enumerate(candidates):
-            for s in S:
-                if s in V_alloc:
+    if insertion_slots:
+        for n, task_data in tasks_a.items():
+            C_i, _release, _deadline, _sigma = task_data
+            for k, (s, g) in enumerate(C_i):
+                if s in V_alloc or g in V_alloc:
                     continue
-                for g in D:
-                    if g in V_alloc:
-                        continue
-                    if benefit(G, s, g, Rs) <= 0:
-                        continue
-                    for a, ag in enumerate(Rs.agents):
-                        seq = ag.task_sequence
-                        L = len(seq)
-                        if L == 0:
-                            continue
-                        for insertion_position in range(1, L + 1):
-                            prior_idx = prior_task_index(insertion_position)
-                            prior_task_id = seq[prior_idx][0]
+                task_benefit = benefit(G, s, g)
+                if task_benefit <= 0:
+                    continue
+                for slot in insertion_slots:
+                    dfull = (
+                        dist(G, slot.prior_goal, s)
+                        + dist(G, s, g)
+                        + dist(G, g, slot.next_anchor)
+                        - slot.prior_goal_to_next_anchor
+                    )
+                    if pick_place_time:
+                        dfull += PICK_PLACE_DETOUR_ADJUSTMENT
 
-                            if prior_task_id in J_a:
-                                continue
-                            else:
-                                if J[prior_task_id][4] == 0 or J[prior_task_id][4] == 2:
-                                    continue
-                            p = seq[prior_idx][2]
-                            if insertion_position < L:
-                                q = seq[insertion_position][1]  # start of next task
-                            else:
-                                q = ag.home
-                            # ddet = dist(G, p, s) + dist(G, s, q) - dist(G, p, q)
-                            dfull = dist(G, p, s) + dist(G, s, g) + dist(G, g, q) - dist(G, p, q)
-
-                            if dfull > MAX_DETOUR_COST:
-                                continue
-                            # Add additional pick place time to the full distance cost
-                            if pick_place_time:
-                                dfull += PICK_PLACE_DETOUR_ADJUSTMENT
-                            
-                            slack_value = slack(
-                                        B,
-                                        Rs,
-                                        G,
-                                        ag.id,
-                                        insertion_position,
-                                        t,
-                                        _outbound_schedule,
-                                    )
-                            # print(f"slack_value: {slack_value}")
-                            # print(f"dfull: {dfull}")
-                            # print(f"benefit: {benefit(G, s, g, Rs)}")
-                            U = benefit(G, s, g, Rs) - lambda_ * max(0.0, (dfull - slack_value))
-                            if U <= 0:
-                                continue
-                            # print(f"U: {U}")
-                            z[(n, k, s, g, a, insertion_position)] = mdl.addVar(
-                                vtype=GRB.BINARY,
-                                obj=U,
-                                name=f"z_{n}_{k}_{s}_{g}_{a}_{insertion_position}",
-                            )
+                    U = task_benefit - lambda_ * max(0.0, (dfull - slot.slack_value))
+                    if U <= 0:
+                        continue
+                    z[(n, k, s, g, slot.agent_idx, slot.insertion_position)] = mdl.addVar(
+                        vtype=GRB.BINARY,
+                        obj=U,
+                        name=f"z_{n}_{k}_{s}_{g}_{slot.agent_idx}_{slot.insertion_position}",
+                    )
 
     num_binary_vars = len(z)
     print(f"Insertion MILP: {num_binary_vars} binary variables added to optimizer")
@@ -586,6 +680,7 @@ def solve_insertion(
         chosen,
         J,
         J_a,
+        S=S,
         next_rearrangement_task_id=next_rearrangement_task_id,
         lambda_=lambda_,
         pick_place_time=pick_place_time,
