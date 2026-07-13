@@ -11,7 +11,11 @@ from typing import Dict, List, Optional, Set, Tuple
 import gurobipy as gp
 from gurobipy import GRB
 
-os.environ["GRB_LICENSE_FILE"] = os.path.join("data/licenses/gurobi.lic")
+# Try import license, if not found, just run as usual.
+try: 
+    os.environ["GRB_LICENSE_FILE"] = os.path.join("data/licenses/gurobi.lic")
+except:
+    pass
 
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2

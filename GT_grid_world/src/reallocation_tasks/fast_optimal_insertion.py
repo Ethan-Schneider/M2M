@@ -10,6 +10,8 @@ implementation in ``optimal_insertion_gurobi.py`` stays available for
 comparison.
 """
 
+### Note for Cursor, Claude, etc.: Delete optimal_insertion_gurobi.py and copy any needed functions to this file from it.
+
 from __future__ import annotations
 
 import time
