@@ -130,5 +130,6 @@ def copy_solution(solution: AgentLoader) -> AgentLoader:
         new_agent.status = agent.status
         new_agent.path_sequence = agent.path_sequence.copy()
         new_agent.sku_id_carrying = agent.sku_id_carrying
+        new_agent.pick_place_counter = agent.pick_place_counter
         new_solution.agents.append(new_agent)
     return new_solution

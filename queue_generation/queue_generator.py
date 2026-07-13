@@ -13,10 +13,55 @@ TASK_TYPE_INBOUND = 1
 
 QUEUE_SKU_ID = 0
 QUEUE_TASK_TYPE = 1
+QUEUE_DEADLINE = 2
+QUEUE_DRIVEWAY_COLUMN = 3
+
+# Outbound tasks carry the sampled driveway column; inbound tasks carry this
+# dummy value since the system does not read a driveway column for inbound.
+DUMMY_DRIVEWAY_COLUMN = -1
 
 
 def save_queue(queue: NDArray, file_name: str) -> None:
     np.savetxt("data/queues/" + file_name + ".txt", queue, fmt="%d")
+
+
+def tasks_per_second(deadline_rate: float) -> float:
+    """Convert tasks/min release rate to tasks per simulated second."""
+    if deadline_rate <= 0:
+        raise ValueError(f"deadline_rate must be positive, got {deadline_rate}")
+    return deadline_rate / 60.0
+
+
+def deadline_second_for_task_index(task_index: int, deadline_rate: float) -> int:
+    """Return the 1-based deadline second for a zero-based queue task index.
+
+    At ``deadline_rate=60``, tasks release one per second (00:01, 00:02, …).
+    At ``deadline_rate=120``, two tasks per second on average (00:01, 00:01, …).
+    At ``deadline_rate=90``, 1.5 tasks per second on average (some seconds
+    carry one task, others two).
+    """
+    return int(np.ceil((task_index + 1) * 60.0 / deadline_rate))
+
+
+def assign_queue_deadlines(number_of_tasks: int, deadline_rate: float) -> NDArray:
+    """Return 1-based deadline timesteps (seconds) for each queue index."""
+    if number_of_tasks <= 0:
+        return np.array([], dtype=int)
+    indices = np.arange(number_of_tasks, dtype=int)
+    return np.ceil((indices + 1) * 60.0 / deadline_rate).astype(int)
+
+
+def expected_queue_duration_seconds(number_of_tasks: int, deadline_rate: float) -> int:
+    """Wall-clock seconds spanned by ``number_of_tasks`` at ``deadline_rate`` tasks/min."""
+    if number_of_tasks <= 0:
+        return 0
+    return deadline_second_for_task_index(number_of_tasks - 1, deadline_rate)
+
+
+def format_deadline_seconds(seconds: int) -> str:
+    """Format a 1-based deadline second as mm:ss (e.g. 1 -> 00:01)."""
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes:02d}:{secs:02d}"
 
 
 def save_weight_plots(weight_profiles: NDArray, file_name: str) -> None:
@@ -155,32 +200,27 @@ def _load_aisle_locations(map_file: str) -> List[Tuple[int, int]]:
     return aisle_locations
 
 
-def _location_depth(
-    location: Tuple[int, int],
-    aisle_locations: List[Tuple[int, int]],
-) -> float:
-    """Return depth in [0, 1], where 0 is the back and 1 is the front (near driveway)."""
-    rows = [row for row, _ in aisle_locations]
-    min_row, max_row = min(rows), max(rows)
-    if max_row == min_row:
-        return 0.5
-    row, _ = location
-    return (row - min_row) / (max_row - min_row)
+def _load_driveway_locations(map_file: str) -> List[Tuple[int, int]]:
+    """Parse driveway ('s') cell locations from a map file."""
+    map_path = "./data/maps/" + map_file
+    with open(map_path, "r") as f:
+        f.readline()
+        f.readline()
+        driveway_locations = []
+        for i, line in enumerate(f):
+            for j, character in enumerate(line):
+                if character == "s":
+                    driveway_locations.append((i, j))
+    return driveway_locations
 
 
-def _normalize_sku_weights(sku_tasking_weights: Dict[int, float]) -> Dict[int, float]:
-    values = list(sku_tasking_weights.values())
-    lo, hi = min(values), max(values)
-    if hi <= lo:
-        return {sku_id: 0.5 for sku_id in sku_tasking_weights}
-    return {sku_id: (weight - lo) / (hi - lo) for sku_id, weight in sku_tasking_weights.items()}
+def _load_driveway_columns(map_file: str) -> List[int]:
+    """Parse driveway ('s') cell columns from a map file.
 
-
-def _mean_sku_tasking_weights(tasking_weight_profiles: NDArray) -> Dict[int, float]:
-    return {
-        sku_id: float(tasking_weight_profiles[sku_id].mean())
-        for sku_id in range(tasking_weight_profiles.shape[0])
-    }
+    Each unique column occupied by an "s" character is a candidate driveway
+    aisle that an outbound task can be routed to.
+    """
+    return sorted({loc[1] for loc in _load_driveway_locations(map_file)})
 
 
 def _sample_uniform_inventory(
@@ -200,53 +240,161 @@ def _sample_uniform_inventory(
     return init_inventory
 
 
+def _back_to_front_order(
+    locations: List[Tuple[int, int]], driveway_reference_row: Optional[float]
+) -> List[Tuple[int, int]]:
+    """Sort a single aisle column's locations from farthest to nearest the driveway.
+
+    ``driveway_reference_row`` is the driveway row closest to the aisle for
+    this column; distance from it stands in for distance from the driveway.
+    Falls back to the given order (no driveway cells in this column) when
+    ``None``.
+    """
+    if driveway_reference_row is None:
+        return list(locations)
+    return sorted(locations, key=lambda loc: -abs(loc[0] - driveway_reference_row))
+
+
 def _sample_adversarial_inventory(
     num_init_inventory: int,
     num_skus: int,
     aisle_locations: List[Tuple[int, int]],
+    driveway_locations: List[Tuple[int, int]],
     available_locations: List[Tuple[int, int]],
     appearance_probs: List[float],
-    sku_tasking_weights: Dict[int, float],
 ) -> List[Tuple[int, int, int]]:
-    """Place high-weight SKUs toward the back and low-weight SKUs toward the front."""
-    normalized_weights = _normalize_sku_weights(sku_tasking_weights)
-    init_inventory: List[Tuple[int, int, int]] = []
+    """Maximise per-SKU Gini by concentrating each SKU into as few aisle columns as possible.
 
+    Each SKU is pre-assigned a home column (round-robin) used as the initial
+    target and as a tiebreaker when the SKU has no inventory yet. After the
+    first placement, every subsequent item for that SKU goes to whichever
+    column already holds the most instances of it, extending the most
+    concentrated cluster and driving its Gini toward 1. Falls back to the
+    next best column if the preferred one has no available locations.
+
+    Within a chosen column, locations are filled back-to-front: the cell
+    farthest from that column's driveway aisle is used first, and each
+    additional item placed in the same column works forward from there,
+    packing occupied cells against the back wall instead of scattering them
+    across the column.
+    """
+    columns = sorted({loc[1] for loc in aisle_locations})
+    sku_home_column = {sku_id: columns[sku_id % len(columns)] for sku_id in range(num_skus)}
+
+    driveway_reference_row: Dict[int, Optional[float]] = {col: None for col in columns}
+    for col in columns:
+        rows_in_col = [loc[0] for loc in driveway_locations if loc[1] == col]
+        if rows_in_col:
+            driveway_reference_row[col] = min(rows_in_col)
+
+    col_to_locs: Dict[int, List[Tuple[int, int]]] = {col: [] for col in columns}
+    for loc in available_locations:
+        col_to_locs[loc[1]].append(loc)
+    for col in columns:
+        col_to_locs[col] = _back_to_front_order(col_to_locs[col], driveway_reference_row[col])
+
+    available_set: set = set(map(tuple, available_locations))
+    sku_col_counts: Dict[int, Dict[int, int]] = {
+        sku_id: {col: 0 for col in columns} for sku_id in range(num_skus)
+    }
+
+    init_inventory: List[Tuple[int, int, int]] = []
     for _ in range(num_init_inventory):
-        if not available_locations:
+        if not available_set:
             break
 
         sku_id = int(np.random.choice(num_skus, p=appearance_probs))
-        sku_weight = normalized_weights[sku_id]
 
-        location_weights = []
-        for location in available_locations:
-            depth = _location_depth(location, aisle_locations)
-            affinity = sku_weight * (1.0 - depth) + (1.0 - sku_weight) * depth
-            location_weights.append(max(affinity, 1e-6))
+        home_col = sku_home_column[sku_id]
+        col_counts = sku_col_counts[sku_id]
+        # Primary sort: descending instance count (concentrate into fewest columns).
+        # Tiebreaker: home column first so distinct SKUs spread across columns
+        # before any single SKU has been placed.
+        sorted_cols = sorted(columns, key=lambda c: (-col_counts[c], c != home_col))
 
-        location_probs = np.array(location_weights, dtype=float)
-        location_probs /= location_probs.sum()
-        loc_idx = int(np.random.choice(len(available_locations), p=location_probs))
-        location = available_locations.pop(loc_idx)
+        location = None
+        for col in sorted_cols:
+            location = next(
+                (loc for loc in col_to_locs[col] if loc in available_set), None
+            )
+            if location is not None:
+                break
+
+        if location is None:
+            break
+
+        available_set.discard(location)
+        sku_col_counts[sku_id][location[1]] += 1
         init_inventory.append((sku_id, location[0], location[1]))
 
     return init_inventory
 
 
-def compute_inventory_tally(
-    initial_counts: Dict[int, int],
-    queue_rows: List[List[int]],
-) -> Dict[int, int]:
-    """Project inventory after all queued tasks (outbound removes, inbound adds)."""
-    counts = {sku_id: initial_counts[sku_id] for sku_id in initial_counts}
-    for sku_id, task_type in queue_rows:
-        sku_id = int(sku_id)
-        if task_type == TASK_TYPE_OUTBOUND:
-            counts[sku_id] -= 1
-        elif task_type == TASK_TYPE_INBOUND:
-            counts[sku_id] += 1
-    return counts
+def _sample_perfect_inventory(
+    num_init_inventory: int,
+    num_skus: int,
+    aisle_locations: List[Tuple[int, int]],
+    available_locations: List[Tuple[int, int]],
+    appearance_probs: List[float],
+) -> List[Tuple[int, int, int]]:
+    """Minimise per-SKU Gini by spreading each SKU as evenly as possible across aisle columns.
+
+    For each item placed, picks the column where that SKU has the fewest
+    existing instances, driving the column-count distribution toward uniform
+    and Gini toward 0. Ties are broken randomly so no column is systematically
+    preferred over another.
+    """
+    columns = sorted({loc[1] for loc in aisle_locations})
+
+    col_to_locs: Dict[int, List[Tuple[int, int]]] = {col: [] for col in columns}
+    for loc in available_locations:
+        col_to_locs[loc[1]].append(loc)
+
+    available_set: set = set(map(tuple, available_locations))
+    sku_col_counts: Dict[int, Dict[int, int]] = {
+        sku_id: {col: 0 for col in columns} for sku_id in range(num_skus)
+    }
+
+    init_inventory: List[Tuple[int, int, int]] = []
+    for _ in range(num_init_inventory):
+        if not available_set:
+            break
+
+        sku_id = int(np.random.choice(num_skus, p=appearance_probs))
+
+        col_counts = sku_col_counts[sku_id]
+        # Shuffle first so equal-count columns get a random ordering, then
+        # stable-sort ascending by count to always fill the most under-
+        # represented column first.
+        shuffled = list(columns)
+        np.random.shuffle(shuffled)
+        sorted_cols = sorted(shuffled, key=lambda c: col_counts[c])
+
+        location = None
+        for col in sorted_cols:
+            candidates = [loc for loc in col_to_locs[col] if loc in available_set]
+            if candidates:
+                location = candidates[int(np.random.choice(len(candidates)))]
+                break
+
+        if location is None:
+            break
+
+        available_set.discard(location)
+        sku_col_counts[sku_id][location[1]] += 1
+        init_inventory.append((sku_id, location[0], location[1]))
+
+    return init_inventory
+
+
+def _apply_task_to_tally(tally: Dict[int, int], sku_id: int, task_type: int) -> int:
+    """Update projected inventory tally in place. Returns change in total count."""
+    sku_id = int(sku_id)
+    if task_type == TASK_TYPE_OUTBOUND:
+        tally[sku_id] -= 1
+        return -1
+    tally[sku_id] += 1
+    return 1
 
 
 def try_generate_task(
@@ -254,12 +402,11 @@ def try_generate_task(
     task_idx: int,
     sku_ids: List[int],
     tasking_weight_profiles: NDArray,
-    initial_counts: Dict[int, int],
-    queue_rows: List[List[int]],
+    tally: Dict[int, int],
+    total_count: int,
     num_endpoints: int,
 ) -> Tuple[bool, int]:
     """Return (success, sku_id). Uses running inventory tally (initial + queued tasks)."""
-    tally = compute_inventory_tally(initial_counts, queue_rows)
     tasking_weights = _tasking_weights_at_index(task_idx, sku_ids, tasking_weight_profiles)
 
     if task_type == TASK_TYPE_OUTBOUND:
@@ -272,18 +419,16 @@ def try_generate_task(
         sku_id = int(np.random.choice(eligible, p=eligible_weights))
         return True, sku_id
 
-    if sum(tally.values()) >= num_endpoints:
+    if total_count >= num_endpoints:
         return False, -1
 
     total_weight = sum(tasking_weights[sku_id] for sku_id in sku_ids)
     weights = [tasking_weights[sku_id] / total_weight for sku_id in sku_ids]
     sku_id = int(np.random.choice(sku_ids, p=weights))
 
-    trial_queue = queue_rows + [[sku_id, TASK_TYPE_INBOUND]]
-    trial_tally = compute_inventory_tally(initial_counts, trial_queue)
-    if sum(trial_tally.values()) > num_endpoints:
+    if total_count + 1 > num_endpoints:
         return False, sku_id
-    if any(count < 0 for count in trial_tally.values()):
+    if tally[sku_id] + 1 < 0:
         return False, sku_id
 
     return True, sku_id
@@ -295,6 +440,8 @@ def build_queue(
     tasking_weight_profiles: NDArray,
     initial_inventory_percentage: float,
     number_of_tasks: int,
+    deadline_rate: float,
+    driveway_columns: List[int],
 ) -> NDArray:
     """Generate a feasible task queue using feedback_control inventory logic."""
     sku_ids = list(range(tasking_weight_profiles.shape[0]))
@@ -305,11 +452,17 @@ def build_queue(
     p_max = 0.85
 
     print(f"Number of SKUs: {len(sku_ids)}")
+    rate_per_sec = tasks_per_second(deadline_rate)
+    duration_sec = expected_queue_duration_seconds(number_of_tasks, deadline_rate)
+    print(
+        f"Deadline rate: {deadline_rate} tasks/min "
+        f"({rate_per_sec:.4g} tasks/s, ~{duration_sec}s for {number_of_tasks} tasks)"
+    )
     queue_rows: List[List[int]] = []
+    tally = {sku_id: initial_counts[sku_id] for sku_id in sku_ids}
+    total_count = sum(tally.values())
 
     for task_idx in range(number_of_tasks):
-        tally = compute_inventory_tally(initial_counts, queue_rows)
-        total_count = sum(tally.values())
         current_inventory = (total_count / num_endpoints) * 100 if num_endpoints > 0 else 0.0
         p_in = np.clip(0.5 + k * (initial_inventory_percentage - current_inventory), p_min, p_max)
         p_out = 1 - p_in
@@ -322,12 +475,18 @@ def build_queue(
                 task_idx,
                 sku_ids,
                 tasking_weight_profiles,
-                initial_counts,
-                queue_rows,
+                tally,
+                total_count,
                 num_endpoints,
             )
             if success:
-                queue_rows.append([sku_id, task_type])
+                deadline = deadline_second_for_task_index(len(queue_rows), deadline_rate)
+                if task_type == TASK_TYPE_OUTBOUND:
+                    driveway_column = int(np.random.choice(driveway_columns))
+                else:
+                    driveway_column = DUMMY_DRIVEWAY_COLUMN
+                queue_rows.append([sku_id, task_type, deadline, driveway_column])
+                total_count += _apply_task_to_tally(tally, sku_id, task_type)
                 break
             attempts += 1
 
@@ -343,16 +502,13 @@ def build_init_inventory(
     num_skus: int,
     output_file_name: str,
     inventory_layout_mode: str = "uniform",
-    sku_tasking_weights: Optional[Dict[int, float]] = None,
 ) -> Tuple[Dict[int, int], int]:
     """Initialize warehouse inventory placement."""
-    if inventory_layout_mode not in ("uniform", "adversarial"):
+    if inventory_layout_mode not in ("uniform", "adversarial", "perfect"):
         raise ValueError(
             f"Unknown inventory_layout_mode {inventory_layout_mode!r}; "
-            "expected 'uniform' or 'adversarial'"
+            "expected 'uniform', 'adversarial', or 'perfect'"
         )
-    if inventory_layout_mode == "adversarial" and sku_tasking_weights is None:
-        raise ValueError("adversarial inventory layout requires sku_tasking_weights")
 
     aisle_locations = _load_aisle_locations(map_file)
     num_endpoints = len(aisle_locations)
@@ -372,14 +528,23 @@ def build_init_inventory(
         init_inventory = _sample_uniform_inventory(
             num_init_inventory, num_skus, available_locations, appearance_probs
         )
-    else:
+    elif inventory_layout_mode == "adversarial":
+        driveway_locations = _load_driveway_locations(map_file)
         init_inventory = _sample_adversarial_inventory(
+            num_init_inventory,
+            num_skus,
+            aisle_locations,
+            driveway_locations,
+            available_locations,
+            appearance_probs,
+        )
+    else:
+        init_inventory = _sample_perfect_inventory(
             num_init_inventory,
             num_skus,
             aisle_locations,
             available_locations,
             appearance_probs,
-            sku_tasking_weights,
         )
 
     sku_counts = {sku_id: 0 for sku_id in range(num_skus)}
@@ -411,21 +576,20 @@ def validate_queue(
     num_endpoints: int,
 ) -> None:
     """Check inventory stays feasible after each prefix of the queue."""
-    queue_rows: List[List[int]] = []
-    initial_total = sum(initial_sku_counts.values())
-    maximum_storage_taken = initial_total
-    minimum_storage_taken = initial_total
+    tally = {sku_id: initial_sku_counts[sku_id] for sku_id in initial_sku_counts}
+    total = sum(tally.values())
+    maximum_storage_taken = total
+    minimum_storage_taken = total
 
     for row in queue.tolist():
-        queue_rows.append(row)
-        tally = compute_inventory_tally(initial_sku_counts, queue_rows)
+        sku_id, task_type = int(row[QUEUE_SKU_ID]), int(row[QUEUE_TASK_TYPE])
+        total += _apply_task_to_tally(tally, sku_id, task_type)
         if any(count < 0 for count in tally.values()):
             raise ValueError(f"SKU count became negative after queue prefix: {tally}")
-        total = sum(tally.values())
         if total > num_endpoints:
             raise ValueError(
                 f"Total SKU count {total} exceeded warehouse capacity {num_endpoints} "
-                f"after queue prefix of length {len(queue_rows)}"
+                f"after queue prefix"
             )
         maximum_storage_taken = max(maximum_storage_taken, total)
         minimum_storage_taken = min(minimum_storage_taken, total)
@@ -436,6 +600,7 @@ def validate_queue(
 
 
 def main(
+    seed: int,
     output_file_name: str,
     map_file_name: str,
     init_inventory_full_percentage: float,
@@ -446,12 +611,14 @@ def main(
     inventory_layout_mode: str,
     save_plots: bool,
     args_json: str,
+    deadline_rate: float,
 ) -> None:
+    np.random.seed(seed)
+    print(f"Random seed: {seed}")
+
     tasking_weight_profiles = build_sku_weight_profiles(
         num_skus, number_of_tasks, weight_mode, sku_weights_json
     )
-    sku_tasking_weights = _mean_sku_tasking_weights(tasking_weight_profiles)
-
     print("Building Initial Inventory...")
     initial_sku_counts, num_endpoints = build_init_inventory(
         map_file_name,
@@ -459,9 +626,10 @@ def main(
         num_skus,
         output_file_name,
         inventory_layout_mode=inventory_layout_mode,
-        sku_tasking_weights=sku_tasking_weights,
     )
     initial_inventory_percentage = init_inventory_full_percentage * 100.0
+    driveway_columns = _load_driveway_columns(map_file_name)
+    print(f"Driveway columns: {driveway_columns}")
     print(f"Building Queue (feedback_control, weight_mode={weight_mode})...")
     queue = build_queue(
         initial_sku_counts,
@@ -469,9 +637,24 @@ def main(
         tasking_weight_profiles,
         initial_inventory_percentage,
         number_of_tasks,
+        deadline_rate,
+        driveway_columns,
     )
 
     print(f"Total Tasks: {queue.shape[0]} (target: {number_of_tasks})")
+    if queue.shape[0] > 0:
+        last_deadline = int(queue[-1, QUEUE_DEADLINE])
+        print(
+            f"Queue spans {last_deadline}s "
+            f"({format_deadline_seconds(last_deadline)}) at {deadline_rate} tasks/min"
+        )
+        sample = min(6, queue.shape[0])
+        print("First queue deadlines (mm:ss):")
+        for row in queue[:sample]:
+            print(f"  task -> {format_deadline_seconds(int(row[QUEUE_DEADLINE]))}")
+        if queue.shape[0] >= 60:
+            last_in_minute = queue[59, QUEUE_DEADLINE]
+            print(f"Deadline at queue index 59: {format_deadline_seconds(int(last_in_minute))}")
 
     for sku_idx in range(num_skus):
         num_inbound_tasks_sku = np.sum(
@@ -506,6 +689,7 @@ def main(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Construct task queue with specified parameters")
 
+    parser.add_argument("--seed", type=int, default=1, help="Random seed for reproducibility")
     parser.add_argument("--output_file_name", type=str)
     parser.add_argument("--map_file_name", type=str)
     parser.add_argument("--init_inventory_full_percentage", type=float, default=0.5)
@@ -528,9 +712,10 @@ if __name__ == "__main__":
         "--inventory_layout_mode",
         type=str,
         default="uniform",
-        choices=["uniform", "adversarial"],
-        help="Initial inventory placement: uniform (random locations) or adversarial "
-             "(high-weight SKUs toward back, low-weight toward front)",
+        choices=["uniform", "adversarial", "perfect"],
+        help="Initial inventory placement: uniform (random), adversarial "
+             "(each SKU concentrated in one column, maximising per-SKU Gini), "
+             "or perfect (each SKU spread evenly across all columns, minimising per-SKU Gini)",
     )
     parser.add_argument(
         "--save-plots",
@@ -544,9 +729,18 @@ if __name__ == "__main__":
         default="[]",
         help="Optional legacy JSON for inbound/outbound frequency plots",
     )
+    parser.add_argument(
+        "--deadline-rate",
+        type=float,
+        default=60.0,
+        help="Task release rate in tasks/min. Deadlines are 1-based simulated "
+             "seconds computed as ceil((task_index + 1) * 60 / rate). "
+             "Examples: 60 -> 5000 tasks over 5000s; 120 -> 2500s; 90 -> ~3334s.",
+    )
     args = parser.parse_args()
 
     main(
+        seed=args.seed,
         output_file_name=args.output_file_name,
         map_file_name=args.map_file_name,
         init_inventory_full_percentage=args.init_inventory_full_percentage,
@@ -557,4 +751,5 @@ if __name__ == "__main__":
         inventory_layout_mode=args.inventory_layout_mode,
         save_plots=args.save_plots,
         args_json=args.args_json,
+        deadline_rate=args.deadline_rate,
     )

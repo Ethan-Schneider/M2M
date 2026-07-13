@@ -3,14 +3,18 @@
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 repo_root="$( cd "${parent_path}/.." ; pwd -P )"
 
-output_file_name="1000_25_percent_inventory_high_frequency_adversarial"
-map_file_name="study_small_restricted"
+output_file_name="small_skinny_adversarial_2"
+map_file_name="study_small_skinny"
 init_inventory_full_percentage=0.25
-number_of_tasks=1000
-num_skus=30
+number_of_tasks=20000
+num_skus=10
+seed=0
+
+# Task deadlines: release rate in tasks/min (60 -> 1/s; 120 -> 2/s; 90 -> 1.5/s)
+deadline_rate=60
 
 # Initial inventory layout: "uniform" (random) or "adversarial" (high-weight SKUs in back)
-inventory_layout_mode="uniform"
+inventory_layout_mode="adversarial"
 
 # Save per-SKU weight plots to data/queues/ (true or false)
 save_plots=false
@@ -18,7 +22,7 @@ save_plots=false
 # SKU tasking weights: "uniform" (equal) or "custom" (per-SKU functions from JSON)
 # Custom sinusoid weight_args: [min_weight, max_weight, period_tasks, phase]
 #   period_tasks is queue indices per full cycle (independent of number_of_tasks)
-weight_mode="custom"
+weight_mode="uniform"
 sku_weights_json_file="${repo_root}/data/queues/sku_weights_alternating_sinusoid_30min.json"
 
 if [ "$weight_mode" = "custom" ]; then
@@ -38,10 +42,12 @@ else
 fi
 
 python3 ${parent_path}/queue_generator.py \
+    --seed "$seed" \
     --output_file_name $output_file_name \
     --map_file_name $map_file_name \
     --init_inventory_full_percentage $init_inventory_full_percentage \
     --number_of_tasks $number_of_tasks \
+    --deadline-rate $deadline_rate \
     --num_skus $num_skus \
     --weight_mode $weight_mode \
     --inventory_layout_mode $inventory_layout_mode \

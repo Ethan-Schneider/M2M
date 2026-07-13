@@ -439,6 +439,7 @@ class LNS:
             new_agent.status = agent.status
             new_agent.path_sequence = agent.path_sequence.copy()
             new_agent.sku_id_carrying = agent.sku_id_carrying
+            new_agent.pick_place_counter = agent.pick_place_counter
             new_solution.agents.append(new_agent)
         return new_solution
     
@@ -465,7 +466,7 @@ class LNS:
                 total_cost -= G.get_distance(agent.task_sequence[i][2], agent.task_sequence[i+1][1])
         return total_cost
     
-def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
+def M2M_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",
                 removal_operator: str = "worst", repair_operator: str = "greedy", t: int = None,
@@ -480,7 +481,7 @@ def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
                 crm2m_cpp: float = 0.0,
                 crm2m_return_margin: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
-    Call the LNS algorithm with given parameters.
+    Call the M2M algorithm with given parameters.
     
     Args:
         S: Statistics object

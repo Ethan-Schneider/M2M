@@ -127,25 +127,39 @@ def test_refresh_updates_other_sku_shuffle_goal_locs(populated_graph):
 
 
 def test_refresh_outbound_task_goal_locs_track_driveway_empty(populated_graph):
-    """Outbound (type=0) tasks dropoff at the driveway, so their goal_locs
-    are driveway-empty cells. The refresh must leave them tracking driveway
-    state, not warehouse state.
+    """Outbound (type=0) tasks dropoff at the driveway, so their goal_locs are
+    driveway-empty cells. The refresh keeps them tracking driveway state within
+    the driveway column the task was already committed to -- it never re-expands
+    an outbound task's goals back out across every driveway column.
     """
     sku = next(iter(populated_graph.warehouse.get_all_skus()))
     instances = list(populated_graph.warehouse.get_sku_instances(sku))
     if not instances:
         pytest.skip("populated_graph has no SKU instances for this test")
 
+    driveway_empty = frozenset(populated_graph.driveway.get_empty_locations())
+    if not driveway_empty:
+        pytest.skip("populated_graph has no empty driveway cells for this test")
+
+    # Commit the outbound task to a single real driveway column.
+    committed_column = next(iter(driveway_empty))[1]
+    committed_goals = frozenset(
+        loc for loc in driveway_empty if loc[1] == committed_column
+    )
     stale_starts = frozenset(instances)
-    stale_goals = frozenset({(0, 0)})  # deliberately wrong, refresh should fix
     J = {
-        5: (stale_starts, stale_goals, 100, sku, TASK_TYPE_OUTBOUND),
+        5: (stale_starts, committed_goals, 100, sku, TASK_TYPE_OUTBOUND),
     }
 
     _refresh_tasks_after_warehouse_change(J, populated_graph, changed_task_id=999, sku_id=sku)
 
+    # A warehouse change leaves driveway occupancy untouched, so the refreshed
+    # goals stay the empty cells of the committed column (never the warehouse).
     _, new_goals, _, _, _ = J[5]
-    expected_goals = frozenset(populated_graph.driveway.get_empty_locations())
+    expected_goals = frozenset(
+        loc for loc in populated_graph.driveway.get_empty_locations()
+        if loc[1] == committed_column
+    )
     assert new_goals == expected_goals
 
 

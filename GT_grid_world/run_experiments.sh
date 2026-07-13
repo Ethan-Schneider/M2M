@@ -10,21 +10,21 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(900)
-num_robots=(40)
-time_horizons=(600)
+seeds=(120)
+num_robots=(10)
+time_horizons=(1000)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
-num_skus=(30)
-initial_inventory=(30.0)
+num_skus=(10)
+initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="c_lns"
+improvement_task_assign_strategy="M2M"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
-map="$repo_root/data/maps/study_small_restricted"
+map="$repo_root/data/maps/study_small_skinny"
 removal_operator="shaw"
 repair_operator="greedy"
 acceptance_function="simulated_annealing"
@@ -35,26 +35,47 @@ deadline_offset=180
 output_intermediate_data=False
 intermediate_data_interval=4000
 base_cost_weight=1.0
-deadline_weight=0.0
+deadline_weight=0.25
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
+W=50
+B=0
+queue_release_window=60
+lambda_=1.0
+# One of: none, simultaneous, insertion, fast_insertion (numpy-vectorized MILP
+# construction -- same result as insertion, faster to build)
+reallocation_task_method="none"
+pick_place_time=true
+buffer_capacity_k=20
+buffer_consumption_rate=120
+log_buffer_predictions=true
 
-# Precomputed schedule/inventory (set use_precomputed_schedule=true to enable)
-use_precomputed_schedule=true
-schedule_file="$repo_root/data/schedules/schedule_20.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/schedule_20_init_inventory.txt"
-run_until_schedule_complete=true
+# Precomputed queue/inventory (set use_precomputed_queue=true to enable)
+use_precomputed_queue=true
+queue_file="$repo_root/data/queues/small_skinny_adversarial_2.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/small_skinny_adversarial_2_init_inventory.txt"
+run_until_queue_complete=false
 
 precomputed_args=()
-if [ "$use_precomputed_schedule" = true ]; then
-    precomputed_args+=(--use-precomputed-schedule)
-    precomputed_args+=(--schedule-file "$schedule_file")
+if [ "$use_precomputed_queue" = true ]; then
+    precomputed_args+=(--use-precomputed-queue)
+    precomputed_args+=(--queue-file "$queue_file")
     precomputed_args+=(--initial-inventory-file "$initial_inventory_file")
-    if [ "$run_until_schedule_complete" = true ]; then
-        precomputed_args+=(--run-until-schedule-complete)
+    if [ "$run_until_queue_complete" = true ]; then
+        precomputed_args+=(--run-until-queue-complete)
     fi
+fi
+
+pick_place_args=()
+if [ "$pick_place_time" = true ]; then
+    pick_place_args+=(--pick-place-time)
+fi
+
+buffer_prediction_args=()
+if [ "$log_buffer_predictions" = true ]; then
+    buffer_prediction_args+=(--log-buffer-predictions)
 fi
 
 # Loop through all combinations
@@ -89,11 +110,20 @@ for seed in "${seeds[@]}"; do
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
                         echo "  Solution Repair Detection Function: $solution_repair_detection_function"
                         echo "  Solution Repair Function: $solution_repair_function"
-                        echo "  Use Precomputed Schedule: $use_precomputed_schedule"
-                        if [ "$use_precomputed_schedule" = true ]; then
-                            echo "  Schedule File: $schedule_file"
+                        echo "  Use Precomputed Queue: $use_precomputed_queue"
+                        echo "  Lookahead Window (W): $W"
+                        echo "  Lookahead Beginning (B): $B"
+                        echo "  Queue Release Window: $queue_release_window"
+                        echo "  Detour Penalty (lambda_): $lambda_"
+                        echo "  Reallocation Task Method: $reallocation_task_method"
+                        echo "  Pick/Place Time: $pick_place_time"
+                        echo "  Buffer Capacity (K): $buffer_capacity_k"
+                        echo "  Buffer Consumption Rate (tasks/min): $buffer_consumption_rate"
+                        echo "  Log Buffer Predictions: $log_buffer_predictions"
+                        if [ "$use_precomputed_queue" = true ]; then
+                            echo "  Queue File: $queue_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
-                            echo "  Run Until Schedule Complete: $run_until_schedule_complete"
+                            echo "  Run Until Queue Complete: $run_until_queue_complete"
                         fi
                         echo "----------------------------------------"
                         
@@ -129,7 +159,16 @@ for seed in "${seeds[@]}"; do
                             --agent-unallocated-penalty "$agent_unallocated_penalty" \
                             --solution-repair-detection-function "$solution_repair_detection_function" \
                             --solution-repair-function "$solution_repair_function" \
-                            "${precomputed_args[@]}"
+                            --W "$W" \
+                            --B "$B" \
+                            --queue-release-window "$queue_release_window" \
+                            --lambda_ "$lambda_" \
+                            --reallocation-task-method "$reallocation_task_method" \
+                            --buffer-capacity-k "$buffer_capacity_k" \
+                            --buffer-consumption-rate "$buffer_consumption_rate" \
+                            "${precomputed_args[@]}" \
+                            "${pick_place_args[@]}" \
+                            "${buffer_prediction_args[@]}"
 
                         # Optional: Add a small delay between runs
                         sleep 1

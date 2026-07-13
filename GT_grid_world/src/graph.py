@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import time
+from typing import Optional
 from scipy.spatial import KDTree
 
 from .node import Node
@@ -89,7 +90,8 @@ class Graph:
         self.__num_robots = num_robots
         self.__occupancy_graph, self.__obstacle_graph = self.__load_graph(file_name, initial_warehouse_capacity, num_skus, weight_init_method)
         self.__aisle_start, self.__driveway_start = self.__get_aisle_driveway_start()
-        
+        self.__driveway_column_reference = {loc[1]: loc for loc in self.station_locations}
+
         # Initialize distance matrix
         self.__distance_matrix = None
         if file_name:
@@ -468,7 +470,17 @@ class Graph:
             return []
         column = loc[1]
         return [a for a in self.aisle_locations if a[1] == column]
-                    
+
+    def get_driveway_column_reference(self, column: int) -> Optional[tuple]:
+        """Return a representative driveway (station) cell in ``column``.
+
+        Driveway columns line up 1:1 with warehouse aisle columns, so this
+        gives any warehouse location in that aisle a stand-in "exit point"
+        for that aisle without needing a specific outbound task to already
+        exist. Returns ``None`` if the column has no driveway cell.
+        """
+        return self.__driveway_column_reference.get(column)
+
     def __load_or_compute_distance_matrix(self, map_file: str) -> None:
         """Load the distance matrix from file if it exists, otherwise compute and save it.
         
@@ -595,22 +607,27 @@ class Graph:
         np.save(matrix_file, self.__distance_matrix)
         print("Distance matrix saved to", matrix_file)
         
+    def location_index(self, loc: tuple) -> int:
+        """Flatten a ``(row, col)`` location to its row/column index in the
+        distance matrix returned by ``get_distance_matrix``."""
+        return loc[0] * self.width + loc[1]
+
     def get_distance(self, start: tuple, goal: tuple) -> float:
         """Get the shortest path distance between two locations.
-        
+
         Args:
             start (tuple): Starting location (row, col)
             goal (tuple): Goal location (row, col)
-            
+
         Returns:
             float: Shortest path distance, or inf if no path exists
         """
         if self.__distance_matrix is None:
             raise ValueError("Distance matrix not initialized. Make sure to provide a map file when creating the Graph.")
-            
-        start_idx = start[0] * self.width + start[1]
-        goal_idx = goal[0] * self.width + goal[1]
-        
+
+        start_idx = self.location_index(start)
+        goal_idx = self.location_index(goal)
+
         return self.__distance_matrix[start_idx, goal_idx]
     
     def get_distance_matrix(self) -> np.ndarray:

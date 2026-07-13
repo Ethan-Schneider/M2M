@@ -606,7 +606,7 @@ def test_fast_greedy_allocates_beneficial_shuffle(populated_graph, minimal_stats
 def test_py_lns_handles_shuffle_via_greedy_repair(populated_graph, minimal_stats, seeded_rng):
     """The LNS improver (py_lns_call -> greedy_repair) must thread the crM2M
     type=2 path without raising and keep a clearly-beneficial shuffle assigned."""
-    from GT_grid_world.src.task_allocation_algorithms.py_lns_V2 import py_lns_call
+    from GT_grid_world.src.task_allocation_algorithms.M2M import M2M_call
 
     G = populated_graph
     scenario = _beneficial_shuffle_scenario(G)
@@ -620,7 +620,7 @@ def test_py_lns_handles_shuffle_via_greedy_repair(populated_graph, minimal_stats
     shuffle_id = REARRANGEMENT_TASK_ID_BASE
     J = {shuffle_id: (frozenset({s}), frozenset({g}), 100, sku, TASK_TYPE_SHUFFLE)}
 
-    Rs_out, allocations, _ = py_lns_call(
+    Rs_out, allocations, _ = M2M_call(
         minimal_stats, G, Rs, J, initial_task_assignment_strategy="fast_greedy",
         time_limit=0.05, cost_calculation_method="manhattan", repair_operator="greedy",
         t=0, crm2m_lambda=1.5, crm2m_detour_cutoff=100.0,

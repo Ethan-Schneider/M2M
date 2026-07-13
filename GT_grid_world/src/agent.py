@@ -23,6 +23,9 @@ class Agent:
         # it moves, holds a pick/place service, or is replanned. A sustained
         # block escalates to a global replan via ``router.needs_path_plan``.
         self.blocked_ticks = 0
+        # True while the agent is waiting at the buffer after being rejected
+        # from placing an item there; cleared once it begins placing.
+        self.waiting_at_buffer = False
     
     def set_sku_id_carrying(self, sku_id : int):
         self.sku_id_carrying = sku_id
@@ -124,5 +127,6 @@ class AgentLoader:
             new_agent.sku_id_carrying = agent.sku_id_carrying
             new_agent.pick_place_counter = agent.pick_place_counter
             new_agent.blocked_ticks = agent.blocked_ticks
+            new_agent.waiting_at_buffer = agent.waiting_at_buffer
             new_solution.agents.append(new_agent)
         return new_solution

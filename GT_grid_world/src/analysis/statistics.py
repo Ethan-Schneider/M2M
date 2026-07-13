@@ -83,6 +83,53 @@ def compute_sku_spread(eta: np.ndarray) -> float:
     return float((N_active.squeeze(-1) * H).sum())
 
 
+def compute_gini_coefficient(values: np.ndarray) -> float:
+    """Gini coefficient for a distribution across ``n`` units.
+
+    Uses the mean-difference form from warehouse analytics references:
+
+        G = (1 / (2 n^2 x_bar)) * sum_i sum_j |x_i - x_j|
+
+    where ``x_i`` is the value for unit ``i`` (e.g. inventory units at a
+    storage location) and ``x_bar`` is the mean. Returns ``0.0`` for empty
+    input, all-zero values, or perfectly equal non-zero values.
+
+    Interpretation: ``0`` = perfectly equal, ``1`` = maximally unequal.
+    """
+    x = np.asarray(values, dtype=np.float64).ravel()
+    n = x.size
+    if n == 0:
+        return 0.0
+
+    x_bar = float(x.mean())
+    if x_bar == 0.0:
+        return 0.0
+
+    diff_sum = np.abs(x[:, np.newaxis] - x[np.newaxis, :]).sum()
+    return float(diff_sum / (2.0 * n * n * x_bar))
+
+
+def compute_gini_from_counts(counts) -> float:
+    """Gini coefficient over a sequence of non-negative bucket counts."""
+    if counts is None or len(counts) == 0:
+        return 0.0
+    return compute_gini_coefficient(np.asarray(counts, dtype=np.float64))
+
+
+def compute_nonzero_tardiness_stats(task_tardiness: dict) -> dict:
+    """Mean, median, and std dev of tardiness for tasks with tardiness > 0."""
+    nonzero = [float(t) for t in task_tardiness.values() if t > 0]
+    if len(nonzero) == 0:
+        return {"average": 0.0, "median": 0.0, "std": 0.0}
+    arr = np.asarray(nonzero, dtype=np.float64)
+    std = float(arr.std(ddof=0)) if len(nonzero) > 1 else 0.0
+    return {
+        "average": float(arr.mean()),
+        "median": float(np.median(arr)),
+        "std": std,
+    }
+
+
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
@@ -94,7 +141,17 @@ class Stats:
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
                  base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
                  agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None,
-                 buffer_capacity_k: int = None, buffer_consumption_rate: float = None) -> None:
+                 buffer_capacity_k: int = None, buffer_consumption_rate: float = None,
+                 schedule_name: str = None, W: int = None, B: int = None,
+                 lambda_: float = None,
+                 reallocation_task_method: str = None,
+                 queue_release_window: int = None,
+                 pick_place_time: bool = None,
+                 use_precomputed_queue: bool = None,
+                 queue_file: str = None,
+                 initial_inventory_file: str = None,
+                 run_until_queue_complete: bool = None,
+                 log_buffer_predictions: bool = False) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -131,6 +188,18 @@ class Stats:
         self.__solution_repair_function = solution_repair_function
         self.__buffer_capacity_k = buffer_capacity_k
         self.__buffer_consumption_rate = buffer_consumption_rate
+        self.__schedule_name = schedule_name
+        self.__W = W
+        self.__B = B
+        self.__lambda_ = lambda_
+        self.__reallocation_task_method = reallocation_task_method
+        self.__queue_release_window = queue_release_window
+        self.__pick_place_time = pick_place_time
+        self.__use_precomputed_queue = use_precomputed_queue
+        self.__queue_file = queue_file
+        self.__initial_inventory_file = initial_inventory_file
+        self.__run_until_queue_complete = run_until_queue_complete
+        self.__log_buffer_predictions = log_buffer_predictions
 
         self.__num_improved_assignments = 0
         self.__num_worse_assignments = 0
@@ -216,6 +285,15 @@ class Stats:
         # ``__rearrangement_task_completion_timestamps`` at plot time so only
         # completed shuffles are charted.
         self.__rearrangement_task_scores = {}
+        self.__completed_rearrangement_task_benefit = {}  # task_id -> benefit
+        self.__completed_rearrangement_task_utility = {}  # task_id -> utility
+        self.__completed_rearrangement_task_detour_cost = {}  # task_id -> detour cost
+        self.__reallocation_tasks_generated_per_timestep = {}  # t -> len(Ta)
+        self.__reallocation_tasks_chosen_per_timestep = {}  # t -> MILP-selected insertions
+        self.__reallocation_generation_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_construct_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_solve_time_per_timestep = {}  # t -> seconds
+        self.__reallocation_milp_binary_vars_per_timestep = {}  # t -> count
         self.__completed_to_pickup_task_ids = []
 
         # crM2M reallocation diagnostics (per-tick)
@@ -264,7 +342,11 @@ class Stats:
         self.__driveway_sku_counts_per_timestep = []
         
         self.__py_lns_logs = []
-        
+
+        # Per-SKU Gini snapshots at t=0, t%1800==0, and end-of-simulation.
+        # Each entry: {"t": int, "sku_gini": {sku_id: float}, "label": str|None}
+        self.__sku_gini_snapshots = []
+
         # Centroids of each SKU per timestep
         self.__sku_centroids_per_timestep = []
         # Locations of each SKU per timestep
@@ -272,6 +354,11 @@ class Stats:
         # SKU Spread (hierarchical entropy) per timestep -- roadmap 1.7 / plan 3.6.
         # Computed by ``append_sku_spread`` clustered by warehouse aisle column.
         self.__sku_spread_per_timestep = []
+        # Gini of warehouse inventory counts aggregated by row / aisle column.
+        self.__inventory_row_gini_per_timestep = []
+        self.__inventory_aisle_gini_per_timestep = []
+        # Cumulative pick/place events at warehouse aisle columns (col -> count).
+        self.__pick_place_count_by_aisle_column = {}
         
         # SKU Agents carrying over time
         
@@ -279,7 +366,19 @@ class Stats:
         
         # Deadline tracking
         self.__task_deadlines = {}  # task_id -> deadline
+        self.__task_tardiness = {}  # task_id -> seconds past deadline (0 if on time)
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
+        self.__outbound_buffer_placement_blocks = 0  # times outbound place blocked by full buffer
+        self.__agent_buffer_block_start = {}  # agent_id -> timestep when current block started
+        self.__buffer_block_durations = []    # timesteps blocked for each completed blocking event
+        self.__agents_waiting_at_buffer_per_timestep = []  # t -> count of agents flagged waiting_at_buffer
+
+        # Buffer-level forecast diagnostics: every ``__BUFFER_PREDICTION_INTERVAL``
+        # timesteps, predicts the output buffer level at each of the next
+        # ``__BUFFER_PREDICTION_HORIZON`` timesteps (using the same
+        # OutboundDeliverySchedule / predict_output_buffer_level logic the
+        # fast_insertion reallocation path uses to score buffer slack).
+        self.__buffer_predictions_per_timestep = {}  # t -> [predicted level at t+1, ..., t+horizon]
 
         self.reallocation_data = {}
 
@@ -507,12 +606,31 @@ class Stats:
         if start_location is not None and goal_location is not None:
             self.__completed_task_details[task_id] = (start_location, goal_location, deadline, sku_id, inbound_task)
         
-        # Check if task was completed after its deadline
-        if task_id in self.__task_deadlines:
-            deadline = self.__task_deadlines[task_id]
-            if timestep > deadline:
+        task_deadline = self._task_deadline(task_id, deadline)
+        if task_deadline is not None:
+            tardiness = max(0, int(timestep) - int(task_deadline))
+            self.__task_tardiness[task_id] = tardiness
+            if tardiness > 0:
                 self.__overdue_task_completions += 1
         
+    def _task_deadline(self, task_id: int, deadline: int = None) -> int | None:
+        """Return the deadline for a task from stored metadata."""
+        if task_id in self.__task_deadlines:
+            return self.__task_deadlines[task_id]
+        if deadline is not None:
+            return deadline
+        details = self.__completed_task_details.get(task_id)
+        if details is not None and len(details) > 2 and details[2] is not None:
+            return details[2]
+        return None
+
+    def get_task_tardiness(self) -> dict:
+        """Return task_id -> tardiness (seconds past deadline, 0 if on time)."""
+        return self.__task_tardiness
+
+    def get_cumulative_tardy_tasks(self) -> int:
+        """Return the number of completed tasks with tardiness > 0."""
+        return sum(1 for tardiness in self.__task_tardiness.values() if tardiness > 0)
     def get_completed_task_ids(self) -> list:
         return self.__completed_task_ids
 
@@ -525,6 +643,9 @@ class Stats:
         deadline: int = None,
         sku_id: int = None,
         task_type: int = None,
+        benefit: float = None,
+        utility: float = None,
+        detour_cost: float = None,
     ) -> None:
         """Record completion of a rearrangement (shuffle / type=2) task.
 
@@ -543,6 +664,12 @@ class Stats:
                 sku_id,
                 task_type,
             )
+        if benefit is not None:
+            self.__completed_rearrangement_task_benefit[task_id] = float(benefit)
+        if utility is not None:
+            self.__completed_rearrangement_task_utility[task_id] = float(utility)
+        if detour_cost is not None:
+            self.__completed_rearrangement_task_detour_cost[task_id] = float(detour_cost)
 
     def get_completed_rearrangement_task_ids(self) -> list:
         return self.__completed_rearrangement_task_ids
@@ -567,23 +694,45 @@ class Stats:
         return len(self.__completed_rearrangement_task_ids)
 
     def log_reallocation_tasks_generated(self, t: int, count: int) -> None:
-        """Record how many shuffle candidates the generator produced at tick ``t``."""
+        """Record how many shuffle/reallocation candidates were generated at tick ``t``.
+
+        Writes to both the crM2M store (``__reallocation_tasks_generated``) and the
+        irM2M per-timestep store so getters on either path resolve correctly.
+        """
         self.__reallocation_tasks_generated[int(t)] = int(count)
+        self.__reallocation_tasks_generated_per_timestep[int(t)] = int(count)
+
+    def log_reallocation_tasks_chosen(self, t: int, count: int) -> None:
+        """Record how many reallocation tasks were selected by the insertion MILP at t."""
+        self.__reallocation_tasks_chosen_per_timestep[int(t)] = int(count)
 
     def log_reallocation_generation_time(self, t: int, seconds: float) -> None:
-        """Record candidate-generation wall time (seconds) at tick ``t``."""
+        """Record candidate-generation wall time (seconds) at tick ``t``.
+
+        Writes to both the crM2M and irM2M per-timestep stores.
+        """
         self.__reallocation_generation_time[int(t)] = float(seconds)
+        self.__reallocation_generation_time_per_timestep[int(t)] = float(seconds)
 
     def log_reallocation_tasks_committed(self, t: int, count: int) -> None:
         """Record how many shuffles remain staged in ``J_a`` after pruning at ``t``."""
         self.__reallocation_tasks_committed[int(t)] = int(count)
 
+    def log_reallocation_milp_construct_time(self, t: int, elapsed: float) -> None:
+        """Record wall time to build the insertion MILP at timestep t."""
+        self.__reallocation_milp_construct_time_per_timestep[int(t)] = float(elapsed)
+
+    def log_reallocation_milp_solve_time(self, t: int, elapsed: float) -> None:
+        """Record wall time to solve the insertion MILP at timestep t."""
+        self.__reallocation_milp_solve_time_per_timestep[int(t)] = float(elapsed)
+
+    def log_reallocation_milp_binary_vars(self, t: int, count: int) -> None:
+        """Record number of binary variables in the insertion MILP at timestep t."""
+        self.__reallocation_milp_binary_vars_per_timestep[int(t)] = int(count)
+
     def log_output_buffer_level(self, t: int, level: float) -> None:
         """Record the shared output-buffer level at tick ``t``."""
         self.__output_buffer_level_per_timestep[int(t)] = float(level)
-
-    def get_output_buffer_level_per_timestep(self) -> dict:
-        return self.__output_buffer_level_per_timestep
 
     def record_outbound_buffer_placement_blocked(self, agent_id: int, t: int) -> None:
         """Increment when an outbound delivery is blocked by a full output buffer.
@@ -615,6 +764,85 @@ class Stats:
 
     def get_buffer_blocks_per_timestep(self) -> dict:
         return self.__buffer_blocks_per_timestep
+
+    def append_agents_waiting_at_buffer(self, count: int) -> None:
+        """Record how many agents are flagged as waiting at the buffer at this timestep."""
+        self.__agents_waiting_at_buffer_per_timestep.append(int(count))
+
+    def get_agents_waiting_at_buffer_per_timestep(self) -> list:
+        return self.__agents_waiting_at_buffer_per_timestep
+
+    # Cadence for the buffer-level forecast: forecast every 100 timesteps,
+    # looking 300 timesteps ahead.
+    BUFFER_PREDICTION_INTERVAL = 100
+    BUFFER_PREDICTION_HORIZON = 300
+
+    def record_buffer_prediction(self, t: int, G, Rs, J: dict, J_a: dict, output_buffer) -> None:
+        """Forecast the shared output buffer level for the next horizon timesteps.
+
+        No-op unless ``log_buffer_predictions`` was enabled, a buffer exists,
+        and ``t`` falls on the prediction cadence. Reuses the
+        ``OutboundDeliverySchedule`` / ``predict_output_buffer_level`` logic
+        that the ``fast_insertion`` reallocation path (see
+        ``reallocation_tasks/fast_optimal_insertion.py``) uses to score buffer
+        slack, so the forecast reflects the same estimated delivery times the
+        task allocator is acting on. The real (observed) buffer levels for
+        the same window are reconstructed from ``log_output_buffer_level``
+        entries in ``save_data``.
+        """
+        if not self.__log_buffer_predictions or output_buffer is None:
+            return
+        if t % self.BUFFER_PREDICTION_INTERVAL != 0:
+            return
+
+        # Deferred import: avoids a circular import (optimal_insertion_gurobi
+        # imports Stats from this module) and keeps the gurobipy dependency
+        # scoped to when this diagnostic is actually enabled.
+        from ..reallocation_tasks.optimal_insertion_gurobi import (
+            OutboundDeliverySchedule,
+            predict_output_buffer_level,
+        )
+
+        outbound_schedule = OutboundDeliverySchedule.build(Rs, G, J, J_a, t)
+        predicted_levels = [
+            predict_output_buffer_level(output_buffer, t + offset, t, outbound_schedule)
+            for offset in range(1, self.BUFFER_PREDICTION_HORIZON + 1)
+        ]
+        self.__buffer_predictions_per_timestep[int(t)] = predicted_levels
+
+    def get_buffer_predictions_per_timestep(self) -> dict:
+        return self.__buffer_predictions_per_timestep
+
+    def _buffer_prediction_actuals(self) -> dict:
+        """Real buffer levels observed over each prediction's forecast window."""
+        actuals = {}
+        for t, predicted in self.__buffer_predictions_per_timestep.items():
+            actuals[t] = [
+                self.__output_buffer_level_per_timestep.get(t + offset)
+                for offset in range(1, len(predicted) + 1)
+            ]
+        return actuals
+
+    def get_output_buffer_level_per_timestep(self) -> dict:
+        return self.__output_buffer_level_per_timestep
+
+    def get_reallocation_tasks_generated_per_timestep(self) -> dict:
+        return self.__reallocation_tasks_generated_per_timestep
+
+    def get_reallocation_tasks_chosen_per_timestep(self) -> dict:
+        return self.__reallocation_tasks_chosen_per_timestep
+
+    def get_reallocation_generation_time_per_timestep(self) -> dict:
+        return self.__reallocation_generation_time_per_timestep
+
+    def get_reallocation_milp_construct_time_per_timestep(self) -> dict:
+        return self.__reallocation_milp_construct_time_per_timestep
+
+    def get_reallocation_milp_solve_time_per_timestep(self) -> dict:
+        return self.__reallocation_milp_solve_time_per_timestep
+
+    def get_reallocation_milp_binary_vars_per_timestep(self) -> dict:
+        return self.__reallocation_milp_binary_vars_per_timestep
 
     # ====================== Completed To-Pickup Task Id Functions
     
@@ -905,6 +1133,17 @@ class Stats:
         avg_service_time, total_service_time = self.get_service_time_stats()
         avg_task_cost, total_costs = self.get_cost_stats()
 
+        for task_id in self.__completed_task_ids:
+            if task_id in self.__task_tardiness:
+                continue
+            completion_timestep = self.__task_completion_timestamps.get(task_id)
+            task_deadline = self._task_deadline(task_id)
+            if completion_timestep is None or task_deadline is None:
+                continue
+            self.__task_tardiness[task_id] = max(0, int(completion_timestep) - int(task_deadline))
+
+        tardiness_stats = compute_nonzero_tardiness_stats(self.__task_tardiness)
+
         # Finalize any outbound-buffer blocking events still open at end-of-run so
         # their durations are counted, then summarize (mirrors Ethan's task_queue).
         final_t = self.return_actual_timesteps()
@@ -912,6 +1151,7 @@ class Stats:
             duration = final_t - start_t
             if duration > 0:
                 self.__buffer_block_durations.append(duration)
+
         if self.__buffer_block_durations:
             _block_arr = np.asarray(self.__buffer_block_durations, dtype=np.float64)
             buffer_block_avg = float(_block_arr.mean())
@@ -923,7 +1163,7 @@ class Stats:
             buffer_block_avg = 0.0
             buffer_block_median = 0.0
             buffer_block_std = 0.0
-        
+
         data = {
             # Input parameters from main
             "seed": self.__seed,
@@ -959,6 +1199,20 @@ class Stats:
             "agent_unallocated_penalty": self.__agent_unallocated_penalty,
             "solution_repair_detection_function": self.__solution_repair_detection_function,
             "solution_repair_function": self.__solution_repair_function,
+            "schedule_name": self.__schedule_name,
+            "W": self.__W,
+            "B": self.__B,
+            "lambda_": self.__lambda_,
+            "reallocation_task_method": self.__reallocation_task_method,
+            "queue_release_window": self.__queue_release_window,
+            "pick_place_time": self.__pick_place_time,
+            "buffer_capacity_k": self.__buffer_capacity_k,
+            "buffer_consumption_rate": self.__buffer_consumption_rate,
+            "use_precomputed_queue": self.__use_precomputed_queue,
+            "queue_file": self.__queue_file,
+            "initial_inventory_file": self.__initial_inventory_file,
+            "run_until_queue_complete": self.__run_until_queue_complete,
+            "log_buffer_predictions": self.__log_buffer_predictions,
             # Simulation results
             "timesteps_completed": self.return_actual_timesteps(),
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -973,11 +1227,32 @@ class Stats:
                 self.__rearrangement_task_completion_timestamps
             ),
             "rearrangement_task_scores": self.__rearrangement_task_scores,
+            "completed_rearrangement_task_benefit": self.__completed_rearrangement_task_benefit,
+            "completed_rearrangement_task_utility": self.__completed_rearrangement_task_utility,
+            "completed_rearrangement_task_detour_cost": (
+                self.__completed_rearrangement_task_detour_cost
+            ),
             "reallocation_tasks_generated": self.__reallocation_tasks_generated,
             "reallocation_generation_time": self.__reallocation_generation_time,
             "reallocation_tasks_committed": self.__reallocation_tasks_committed,
-            "buffer_capacity_k": self.__buffer_capacity_k,
-            "buffer_consumption_rate": self.__buffer_consumption_rate,
+            "reallocation_tasks_generated_per_timestep": (
+                self.__reallocation_tasks_generated_per_timestep
+            ),
+            "reallocation_tasks_chosen_per_timestep": (
+                self.__reallocation_tasks_chosen_per_timestep
+            ),
+            "reallocation_generation_time_per_timestep": (
+                self.__reallocation_generation_time_per_timestep
+            ),
+            "reallocation_milp_construct_time_per_timestep": (
+                self.__reallocation_milp_construct_time_per_timestep
+            ),
+            "reallocation_milp_solve_time_per_timestep": (
+                self.__reallocation_milp_solve_time_per_timestep
+            ),
+            "reallocation_milp_binary_vars_per_timestep": (
+                self.__reallocation_milp_binary_vars_per_timestep
+            ),
             "output_buffer_level_per_timestep": self.__output_buffer_level_per_timestep,
             "outbound_buffer_placement_blocks": int(self.__outbound_buffer_placement_blocks),
             "buffer_blocks_per_timestep": self.__buffer_blocks_per_timestep,
@@ -985,6 +1260,9 @@ class Stats:
             "average_buffer_block_duration": buffer_block_avg,
             "median_buffer_block_duration": buffer_block_median,
             "std_dev_buffer_block_duration": buffer_block_std,
+            "agents_waiting_at_buffer_per_timestep": self.__agents_waiting_at_buffer_per_timestep,
+            "buffer_predictions_per_timestep": self.__buffer_predictions_per_timestep,
+            "buffer_predictions_actual_per_timestep": self._buffer_prediction_actuals(),
             "task_completion_timestamps": self.__task_completion_timestamps,
             "task_release_timestamps": self.__task_release_timestamps,
             "service_times": self.__service_times,
@@ -1030,10 +1308,24 @@ class Stats:
             "warehouse_sku_counts_per_timestep": self.__warehouse_sku_counts_per_timestep,
             "driveway_sku_counts_per_timestep": self.__driveway_sku_counts_per_timestep,
             "py_lns_logs": self.__py_lns_logs,
+            "task_tardiness": self.__task_tardiness,
+            "average_task_tardiness": tardiness_stats["average"],
+            "median_task_tardiness": tardiness_stats["median"],
+            "std_dev_task_tardiness": tardiness_stats["std"],
+            "cumulative_tardy_tasks": sum(
+                1 for tardiness in self.__task_tardiness.values() if tardiness > 0
+            ),
             "overdue_task_completions": self.__overdue_task_completions,
             "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
             "sku_locations_per_timestep": self.__sku_locations_per_timestep,
             "sku_spread_per_timestep": self.__sku_spread_per_timestep,
+            "inventory_row_gini_per_timestep": self.__inventory_row_gini_per_timestep,
+            "inventory_aisle_gini_per_timestep": self.__inventory_aisle_gini_per_timestep,
+            "pick_place_count_by_aisle_column": self.__pick_place_count_by_aisle_column,
+            "pick_place_aisle_gini": compute_gini_from_counts(
+                list(self.__pick_place_count_by_aisle_column.values())
+            ),
+            "sku_gini_snapshots": self.__sku_gini_snapshots,
             "num_improved_assignments": self.__num_improved_assignments,
             "num_worse_assignments": self.__num_worse_assignments,
             "num_same_assignments": self.__num_same_assignments,
@@ -1165,6 +1457,8 @@ class Stats:
         if not aisle_locations:
             self.__warehouse_row_counts_per_timestep.append([])
             self.__warehouse_col_counts_per_timestep.append([])
+            self.__inventory_row_gini_per_timestep.append(0.0)
+            self.__inventory_aisle_gini_per_timestep.append(0.0)
             return
 
         # Find bounds
@@ -1189,6 +1483,27 @@ class Stats:
             count = sum((r, c) in full_set for r in range(min_row, max_row + 1) if (r, c) in aisle_locations)
             col_counts.append(count)
         self.__warehouse_col_counts_per_timestep.append(col_counts)
+
+        self.__inventory_row_gini_per_timestep.append(compute_gini_from_counts(row_counts))
+        self.__inventory_aisle_gini_per_timestep.append(compute_gini_from_counts(col_counts))
+
+    def get_inventory_row_gini_per_timestep(self) -> list:
+        return self.__inventory_row_gini_per_timestep
+
+    def get_inventory_aisle_gini_per_timestep(self) -> list:
+        return self.__inventory_aisle_gini_per_timestep
+
+    def record_aisle_pick_place_activity(self, location, graph) -> None:
+        """Count a warehouse pick or place at the aisle column of ``location``."""
+        if location is None or not graph.is_warehouse_aisle_location(location):
+            return
+        col = int(location[1])
+        self.__pick_place_count_by_aisle_column[col] = (
+            self.__pick_place_count_by_aisle_column.get(col, 0) + 1
+        )
+
+    def get_pick_place_count_by_aisle_column(self) -> dict:
+        return self.__pick_place_count_by_aisle_column
 
     def append_driveway_inventory_state(self, driveway):
         full_locations = driveway.get_full_locations()
@@ -1246,6 +1561,39 @@ class Stats:
                     eta[sku_local, col_to_idx[col]] += 1
 
         self.__sku_spread_per_timestep.append(compute_sku_spread(eta))
+
+    def record_sku_gini_snapshot(
+        self, warehouse, num_skus: int, aisle_locations, t: int, label: str = None
+    ) -> None:
+        """Record per-SKU Gini coefficients (distribution across aisle columns).
+
+        Called at t=0, every 1800 timesteps, and end-of-simulation. For each
+        SKU the Gini is computed over the count-per-aisle-column vector, so
+        0 means perfectly uniform spread and 1 means all inventory in one column.
+        """
+        if num_skus is None or num_skus <= 0 or not aisle_locations:
+            return
+
+        columns = sorted({loc[1] for loc in aisle_locations})
+        col_to_idx = {col: idx for idx, col in enumerate(columns)}
+
+        sku_gini = {}
+        for sku_local in range(num_skus):
+            sku_id = sku_local + 1
+            eta = np.zeros(len(columns), dtype=np.float64)
+            for loc in warehouse.get_sku_instances(sku_id):
+                col = loc[1]
+                if col in col_to_idx:
+                    eta[col_to_idx[col]] += 1
+            sku_gini[sku_id] = compute_gini_coefficient(eta)
+
+        snapshot = {"t": int(t), "sku_gini": sku_gini}
+        if label is not None:
+            snapshot["label"] = label
+        self.__sku_gini_snapshots.append(snapshot)
+
+    def get_sku_gini_snapshots(self) -> list:
+        return self.__sku_gini_snapshots
 
     def append_sku_locations(self, warehouse, driveway, num_skus):
         """Log the locations of each SKU for this timestep."""

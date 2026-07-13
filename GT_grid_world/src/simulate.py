@@ -63,10 +63,12 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
         from current warehouse-empty cells (regardless of SKU, because adding
         or removing any SKU shifts the empty set).
       - For outbound tasks (dropoff = driveway), re-derive goal_locs from
-        current driveway-empty cells. The current execution flow only modifies
-        warehouse occupancy here, so this branch is mostly defensive but kept
-        consistent so the same helper is reusable when driveway-side
-        transitions are added.
+        currently-empty cells within the task's already-committed aisle
+        (the driveway column its goal_locs were originally restricted to),
+        never expanding back out to every empty driveway cell. The current
+        execution flow only modifies warehouse occupancy here, so this
+        branch is mostly defensive but kept consistent so the same helper
+        is reusable when driveway-side transitions are added.
     """
     if not J:
         return
@@ -88,8 +90,11 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             new_start_locs = same_sku_warehouse_instances
         if task_type in WAREHOUSE_DROPOFF_TASK_TYPES:
             new_goal_locs = warehouse_empty
-        elif task_type == TASK_TYPE_OUTBOUND:
-            new_goal_locs = driveway_empty
+        elif task_type == TASK_TYPE_OUTBOUND and goal_locations:
+            aisle_column = next(iter(goal_locations))[1]
+            new_goal_locs = frozenset(
+                loc for loc in driveway_empty if loc[1] == aisle_column
+            )
 
         if new_start_locs is not start_locations or new_goal_locs is not goal_locations:
             J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
@@ -143,6 +148,7 @@ def _attempt_pickup(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, T
 
             if agent.get_sku_id_carrying() is None:
                 raise ValueError(f"Agent should be holding item after pickup ... Exiting")
+            S.record_aisle_pick_place_activity(start_location, G)
             return "succeeded"
         except Exception as e:
             print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
@@ -162,6 +168,7 @@ def _attempt_pickup(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, T
 
             if agent.get_sku_id_carrying() is None:
                 raise ValueError(f"Agent should be holding item after pickup ... Exiting")
+            S.record_aisle_pick_place_activity(start_location, G)
             return "succeeded"
         except Exception as e:
             print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
@@ -172,6 +179,7 @@ def _attempt_pickup(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, T
 
 def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, Tuple],
                        S: Stats, Rs: AgentLoader, t: int,
+                       J_a_objectives: Dict[int, Dict[str, float]] = None,
                        output_buffer: Optional["OutputBuffer"] = None) -> bool:
     """Execute the delivery for ``agent``'s head ``task`` at its goal cell.
 
@@ -179,6 +187,9 @@ def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int
     when the task is outbound and the shared output buffer is full -- the caller
     keeps the agent waiting (backpressure). Shared between the immediate and the
     pick/place-delayed (status 4) execution paths.
+
+    ``J_a_objectives`` (irM2M insertion) carries the per-shuffle benefit/utility/
+    detour terms recorded on completion; ``None`` for crM2M / plain shuffles.
     """
     task_id = task[0]
     start_location = task[1]
@@ -218,6 +229,8 @@ def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int
             # A successful place closes any open blocking event for this agent.
             S.record_outbound_buffer_unblocked(agent.id, t)
 
+    S.record_aisle_pick_place_activity(goal_location, G)
+
     agent.set_sku_id_carrying(None)
 
     if inbound_task == TASK_TYPE_SHUFFLE:
@@ -225,7 +238,19 @@ def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int
         # the separate rearrangement track. Service time / tardiness are skipped
         # -- those are deadline-graded metrics for real tasks, whereas a
         # shuffle's "deadline" is just its look-ahead window edge.
-        S.add_completed_rearrangement_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
+        objectives = J_a_objectives.pop(task_id, None) if J_a_objectives else None
+        S.add_completed_rearrangement_task_id(
+            task_id,
+            t,
+            start_location,
+            goal_location,
+            int(deadline),
+            int(sku_id),
+            int(inbound_task),
+            benefit=objectives.get("benefit") if objectives else None,
+            utility=objectives.get("utility") if objectives else None,
+            detour_cost=objectives.get("detour_cost") if objectives else None,
+        )
     else:
         S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
         S.update_service_time(task_id, t)
@@ -265,17 +290,16 @@ def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int
 
 
 def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a : Dict[int, Tuple], map_name : str, t : int,
+             J_a_objectives: Dict[int, Dict[str, float]] = None,
              pick_place_time: bool = False,
              pick_place_duration: int = DEFAULT_PICK_PLACE_DURATION,
              output_buffer: Optional["OutputBuffer"] = None) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Tuple]]:
     """
     Simulate the system for one timestep.
 
-    Dual cycling (IB->OB at aisles, OB->IB at the driveway) is *not* handled
-    here any more. It is now a pipeline stage inside ``TaskAllocation`` (see
-    ``task_allocation_algorithms.dual_cycle_allocation``), so chained tails
-    appear in ``agent.task_sequence`` *before* the path planner runs. The
-    simulator is a pure executor of the plan it receives.
+    The simulator is a pure executor of the plan it receives: it steps agents
+    along their planned paths and executes pickups/deliveries for whatever is
+    in ``agent.task_sequence`` (real tasks in ``J``, shuffles in ``J_a``).
 
     Args:
         S (Stats): Statistics object
@@ -284,6 +308,8 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
         J (Dict[int, Tuple]): Dictionary of tasks
         map_name (str): Name of the map
         t (int): Current timestep
+        J_a_objectives: irM2M insertion per-shuffle benefit/utility/detour terms,
+            popped and recorded on shuffle completion. Empty/``None`` for crM2M.
         pick_place_time: When True, agents wait ``pick_place_duration`` ticks at
             pickup (status 3 = Picking) and at delivery (status 4 = Placing)
             before inventory is mutated -- a per-task service-time penalty
@@ -299,6 +325,15 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
         Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Tuple]]: Updated
         AgentLoader and the (possibly mutated) J and J_a dictionaries.
     """
+
+    if J_a_objectives is None:
+        J_a_objectives = {}
+
+    # Snapshot per-SKU Gini at t=0 (start) and every 1800 timesteps.
+    num_skus = S.get_num_skus()
+    if num_skus and (t == 0 or t % 1800 == 0):
+        label = "start" if t == 0 else None
+        S.record_sku_gini_snapshot(G.warehouse, num_skus, G.get_aisle_locations(), t, label)
 
     # Update state of robots
     for agent in Rs.agents:
@@ -387,10 +422,14 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
             agent.pick_place_counter -= 1
             if agent.pick_place_counter > 0:
                 continue
-            if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, output_buffer=output_buffer):
+            if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, J_a_objectives=J_a_objectives, output_buffer=output_buffer):
                 # Output buffer full (or transient race): revert to delivery and
-                # retry later (re-entering the place wait next time).
+                # retry later (re-entering the place wait next time). Flag the
+                # agent as buffer-waiting for the waiting-at-buffer diagnostic.
+                agent.waiting_at_buffer = True
                 agent.status = STATUS_TO_DELIVERY
+            else:
+                agent.waiting_at_buffer = False
             continue
 
         if agent.status == STATUS_TO_PICKUP:
@@ -421,17 +460,23 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
                 inbound_task = J_a[task_id][4] if task_id in J_a else J[task_id][4]
 
                 # Outbound + full buffer: wait at the driveway cell (backpressure)
-                # rather than starting a place that can't complete.
+                # rather than starting a place that can't complete. Flag the agent
+                # as buffer-waiting for the waiting-at-buffer diagnostic.
                 if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                     S.record_outbound_buffer_placement_blocked(agent.id, t)
+                    agent.waiting_at_buffer = True
                     continue
+                if inbound_task == TASK_TYPE_OUTBOUND:
+                    agent.waiting_at_buffer = False
                 if pick_place_time:
                     # Begin the place service wait; delivery completes when it ends.
                     agent.status = STATUS_PLACING
                     agent.pick_place_counter = pick_place_duration
                     continue
-                if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, output_buffer=output_buffer):
+                if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, J_a_objectives=J_a_objectives, output_buffer=output_buffer):
                     continue
+
+    S.append_agents_waiting_at_buffer(sum(1 for agent in Rs.agents if agent.waiting_at_buffer))
 
     # Drain the shared output buffer by one tick and log its level.
     consumption_tick(output_buffer)
