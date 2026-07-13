@@ -14,10 +14,11 @@ QUEUE_SKU_ID_OFFSET = 1
 QUEUE_SKU_ID = 0
 QUEUE_TASK_TYPE = 1
 QUEUE_DEADLINE = 2
+QUEUE_DRIVEWAY_COLUMN = 3
 
 
 def import_queue(file_path: str) -> NDArray:
-    """Load a precomputed task queue (sku_id, task_type[, deadline])."""
+    """Load a precomputed task queue (sku_id, task_type[, deadline[, driveway_column]])."""
     return np.atleast_2d(np.loadtxt(file_path, dtype=int))
 
 
@@ -31,6 +32,13 @@ def queue_row_deadline(
     if task.shape[0] > QUEUE_DEADLINE:
         return int(task[QUEUE_DEADLINE])
     return get_deadline(current_time, deadline_generation_method, deadline_offset)
+
+
+def queue_row_driveway_column(task: NDArray) -> Optional[int]:
+    """Return the precomputed outbound driveway column, or None when absent (legacy queues)."""
+    if task.shape[0] > QUEUE_DRIVEWAY_COLUMN:
+        return int(task[QUEUE_DRIVEWAY_COLUMN])
+    return None
 
 
 def load_initial_inventory(
@@ -98,6 +106,7 @@ def _add_outbound_task(
     deadline_generation_method: str,
     deadline_offset: float,
     deadline: int = None,
+    driveway_column: Optional[int] = None,
 ) -> Tuple[bool, int]:
     available_start_locations = set(G.warehouse.get_sku_instances(sku_id))
     driveway_empty = set(G.driveway.get_empty_locations())
@@ -107,8 +116,14 @@ def _add_outbound_task(
 
     # Restrict this task's goal locations to a single driveway aisle (column)
     # instead of every empty driveway cell, so the task doesn't fan out
-    # across the whole driveway.
-    chosen_column = random.choice(list({loc[1] for loc in driveway_empty}))
+    # across the whole driveway. Use the aisle assigned by the precomputed
+    # queue when available and currently reachable; otherwise fall back to a
+    # random aisle (legacy queues without a driveway column, or a full aisle).
+    driveway_columns_empty = {loc[1] for loc in driveway_empty}
+    if driveway_column is not None and driveway_column in driveway_columns_empty:
+        chosen_column = driveway_column
+    else:
+        chosen_column = random.choice(list(driveway_columns_empty))
     available_goal_locations = {loc for loc in driveway_empty if loc[1] == chosen_column}
 
     if deadline is None:
@@ -166,6 +181,7 @@ def _add_task_from_queue_row(
         deadline_generation_method,
         deadline_offset,
         deadline=deadline,
+        driveway_column=queue_row_driveway_column(task),
     )
 
 

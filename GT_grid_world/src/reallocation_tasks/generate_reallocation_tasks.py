@@ -20,7 +20,7 @@ def merge_reallocation_tasks_into_J(
     last_task_id: int,
 ) -> int:
     """Add candidate rearrangement tasks to ``J`` for simultaneous (crM2M) allocation."""
-    for _task_key, (C_i, _release, deadline, task_type) in tasks_a.items():
+    for _task_key, (C_i, _release, deadline, task_type, _aisle_reference) in tasks_a.items():
         if not C_i:
             continue
         starts = frozenset(start for start, _goal in C_i)
@@ -75,10 +75,14 @@ def generate_reallocation_tasks(
     Returns:
         A dictionary of reallocation tasks.
 
-        Reallocation task is defined as: tau=(C_i, r_i, d_i, sigma_i), where
+        Reallocation task is defined as: tau=(C_i, r_i, d_i, sigma_i, ref_i), where
         C_i = {(S_i^k, D_i^k)}_{k=1}^{|C_i|} is the set of (start_loc, end_loc) pairs for task i.
         r_i, d_i are the release time and deadline of the reallocation task
         sigma_i is the task type, 0 for outbound, 1 for inbound, 2 for shuffle.
+        ref_i is a representative driveway vertex in the aisle that the
+        corresponding real outbound task has been pre-committed to, used as
+        the benefit reference point instead of each candidate goal's own
+        column (see ``optimal_insertion_gurobi.benefit``).
     """
     flagged_real_tasks = _lookahead_outbound_tasks(queue, B, W)
 
@@ -133,6 +137,6 @@ def generate_reallocation_tasks(
         # Shuffle should finish before this outbound reaches the front of the queue.
         d_i = t + queue_index + 1
         sigma_i = TASK_TYPE_SHUFFLE
-        reallocation_tasks[reallocation_task_id] = (C_i, r_i, d_i, sigma_i)
+        reallocation_tasks[reallocation_task_id] = (C_i, r_i, d_i, sigma_i, reference_location)
 
     return reallocation_tasks

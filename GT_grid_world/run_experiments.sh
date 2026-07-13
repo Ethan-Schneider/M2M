@@ -10,13 +10,13 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(0)
-num_robots=(40)
-time_horizons=(1500)
+seeds=(120)
+num_robots=(10)
+time_horizons=(1000)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
-num_skus=(30)
+num_skus=(10)
 initial_inventory=(25.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
@@ -24,7 +24,7 @@ initial_task_assign_strategy="fast_greedy"
 improvement_task_assign_strategy="M2M"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
-map="$repo_root/data/maps/study_small_restricted"
+map="$repo_root/data/maps/study_small_skinny"
 removal_operator="shaw"
 repair_operator="greedy"
 acceptance_function="simulated_annealing"
@@ -40,19 +40,22 @@ sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
-W=300
-B=60
+W=50
+B=0
 queue_release_window=60
-lambda_=1.5
-reallocation_task_method="insertion"
+lambda_=1.0
+# One of: none, simultaneous, insertion, fast_insertion (numpy-vectorized MILP
+# construction -- same result as insertion, faster to build)
+reallocation_task_method="none"
 pick_place_time=true
 buffer_capacity_k=20
-buffer_consumption_rate=25
+buffer_consumption_rate=120
+log_buffer_predictions=true
 
 # Precomputed queue/inventory (set use_precomputed_queue=true to enable)
 use_precomputed_queue=true
-queue_file="$repo_root/data/queues/restricted_small_uniform_with_deadlines_20000_arrival_rate_60.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/restricted_small_uniform_with_deadlines_20000_arrival_rate_60_init_inventory.txt"
+queue_file="$repo_root/data/queues/small_skinny_adversarial_2.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/small_skinny_adversarial_2_init_inventory.txt"
 run_until_queue_complete=false
 
 precomputed_args=()
@@ -68,6 +71,11 @@ fi
 pick_place_args=()
 if [ "$pick_place_time" = true ]; then
     pick_place_args+=(--pick-place-time)
+fi
+
+buffer_prediction_args=()
+if [ "$log_buffer_predictions" = true ]; then
+    buffer_prediction_args+=(--log-buffer-predictions)
 fi
 
 # Loop through all combinations
@@ -111,6 +119,7 @@ for seed in "${seeds[@]}"; do
                         echo "  Pick/Place Time: $pick_place_time"
                         echo "  Buffer Capacity (K): $buffer_capacity_k"
                         echo "  Buffer Consumption Rate (tasks/min): $buffer_consumption_rate"
+                        echo "  Log Buffer Predictions: $log_buffer_predictions"
                         if [ "$use_precomputed_queue" = true ]; then
                             echo "  Queue File: $queue_file"
                             echo "  Initial Inventory File: $initial_inventory_file"
@@ -158,7 +167,8 @@ for seed in "${seeds[@]}"; do
                             --buffer-capacity-k "$buffer_capacity_k" \
                             --buffer-consumption-rate "$buffer_consumption_rate" \
                             "${precomputed_args[@]}" \
-                            "${pick_place_args[@]}"
+                            "${pick_place_args[@]}" \
+                            "${buffer_prediction_args[@]}"
 
                         # Optional: Add a small delay between runs
                         sleep 1

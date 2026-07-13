@@ -3,11 +3,11 @@
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 repo_root="$( cd "${parent_path}/.." ; pwd -P )"
 
-output_file_name="restricted_small_adversarial_with_deadlines_20000_arrival_rate_60"
-map_file_name="study_small_restricted"
+output_file_name="small_skinny_adversarial_2"
+map_file_name="study_small_skinny"
 init_inventory_full_percentage=0.25
 number_of_tasks=20000
-num_skus=30
+num_skus=10
 seed=0
 
 # Task deadlines: release rate in tasks/min (60 -> 1/s; 120 -> 2/s; 90 -> 1.5/s)

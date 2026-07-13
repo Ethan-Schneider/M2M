@@ -14,6 +14,11 @@ TASK_TYPE_INBOUND = 1
 QUEUE_SKU_ID = 0
 QUEUE_TASK_TYPE = 1
 QUEUE_DEADLINE = 2
+QUEUE_DRIVEWAY_COLUMN = 3
+
+# Outbound tasks carry the sampled driveway column; inbound tasks carry this
+# dummy value since the system does not read a driveway column for inbound.
+DUMMY_DRIVEWAY_COLUMN = -1
 
 
 def save_queue(queue: NDArray, file_name: str) -> None:
@@ -195,6 +200,28 @@ def _load_aisle_locations(map_file: str) -> List[Tuple[int, int]]:
     return aisle_locations
 
 
+def _load_driveway_locations(map_file: str) -> List[Tuple[int, int]]:
+    """Parse driveway ('s') cell locations from a map file."""
+    map_path = "./data/maps/" + map_file
+    with open(map_path, "r") as f:
+        f.readline()
+        f.readline()
+        driveway_locations = []
+        for i, line in enumerate(f):
+            for j, character in enumerate(line):
+                if character == "s":
+                    driveway_locations.append((i, j))
+    return driveway_locations
+
+
+def _load_driveway_columns(map_file: str) -> List[int]:
+    """Parse driveway ('s') cell columns from a map file.
+
+    Each unique column occupied by an "s" character is a candidate driveway
+    aisle that an outbound task can be routed to.
+    """
+    return sorted({loc[1] for loc in _load_driveway_locations(map_file)})
+
 
 def _sample_uniform_inventory(
     num_init_inventory: int,
@@ -213,10 +240,26 @@ def _sample_uniform_inventory(
     return init_inventory
 
 
+def _back_to_front_order(
+    locations: List[Tuple[int, int]], driveway_reference_row: Optional[float]
+) -> List[Tuple[int, int]]:
+    """Sort a single aisle column's locations from farthest to nearest the driveway.
+
+    ``driveway_reference_row`` is the driveway row closest to the aisle for
+    this column; distance from it stands in for distance from the driveway.
+    Falls back to the given order (no driveway cells in this column) when
+    ``None``.
+    """
+    if driveway_reference_row is None:
+        return list(locations)
+    return sorted(locations, key=lambda loc: -abs(loc[0] - driveway_reference_row))
+
+
 def _sample_adversarial_inventory(
     num_init_inventory: int,
     num_skus: int,
     aisle_locations: List[Tuple[int, int]],
+    driveway_locations: List[Tuple[int, int]],
     available_locations: List[Tuple[int, int]],
     appearance_probs: List[float],
 ) -> List[Tuple[int, int, int]]:
@@ -228,13 +271,27 @@ def _sample_adversarial_inventory(
     column already holds the most instances of it, extending the most
     concentrated cluster and driving its Gini toward 1. Falls back to the
     next best column if the preferred one has no available locations.
+
+    Within a chosen column, locations are filled back-to-front: the cell
+    farthest from that column's driveway aisle is used first, and each
+    additional item placed in the same column works forward from there,
+    packing occupied cells against the back wall instead of scattering them
+    across the column.
     """
     columns = sorted({loc[1] for loc in aisle_locations})
     sku_home_column = {sku_id: columns[sku_id % len(columns)] for sku_id in range(num_skus)}
 
+    driveway_reference_row: Dict[int, Optional[float]] = {col: None for col in columns}
+    for col in columns:
+        rows_in_col = [loc[0] for loc in driveway_locations if loc[1] == col]
+        if rows_in_col:
+            driveway_reference_row[col] = min(rows_in_col)
+
     col_to_locs: Dict[int, List[Tuple[int, int]]] = {col: [] for col in columns}
     for loc in available_locations:
         col_to_locs[loc[1]].append(loc)
+    for col in columns:
+        col_to_locs[col] = _back_to_front_order(col_to_locs[col], driveway_reference_row[col])
 
     available_set: set = set(map(tuple, available_locations))
     sku_col_counts: Dict[int, Dict[int, int]] = {
@@ -257,9 +314,10 @@ def _sample_adversarial_inventory(
 
         location = None
         for col in sorted_cols:
-            candidates = [loc for loc in col_to_locs[col] if loc in available_set]
-            if candidates:
-                location = candidates[int(np.random.choice(len(candidates)))]
+            location = next(
+                (loc for loc in col_to_locs[col] if loc in available_set), None
+            )
+            if location is not None:
                 break
 
         if location is None:
@@ -383,6 +441,7 @@ def build_queue(
     initial_inventory_percentage: float,
     number_of_tasks: int,
     deadline_rate: float,
+    driveway_columns: List[int],
 ) -> NDArray:
     """Generate a feasible task queue using feedback_control inventory logic."""
     sku_ids = list(range(tasking_weight_profiles.shape[0]))
@@ -422,7 +481,11 @@ def build_queue(
             )
             if success:
                 deadline = deadline_second_for_task_index(len(queue_rows), deadline_rate)
-                queue_rows.append([sku_id, task_type, deadline])
+                if task_type == TASK_TYPE_OUTBOUND:
+                    driveway_column = int(np.random.choice(driveway_columns))
+                else:
+                    driveway_column = DUMMY_DRIVEWAY_COLUMN
+                queue_rows.append([sku_id, task_type, deadline, driveway_column])
                 total_count += _apply_task_to_tally(tally, sku_id, task_type)
                 break
             attempts += 1
@@ -466,10 +529,12 @@ def build_init_inventory(
             num_init_inventory, num_skus, available_locations, appearance_probs
         )
     elif inventory_layout_mode == "adversarial":
+        driveway_locations = _load_driveway_locations(map_file)
         init_inventory = _sample_adversarial_inventory(
             num_init_inventory,
             num_skus,
             aisle_locations,
+            driveway_locations,
             available_locations,
             appearance_probs,
         )
@@ -563,6 +628,8 @@ def main(
         inventory_layout_mode=inventory_layout_mode,
     )
     initial_inventory_percentage = init_inventory_full_percentage * 100.0
+    driveway_columns = _load_driveway_columns(map_file_name)
+    print(f"Driveway columns: {driveway_columns}")
     print(f"Building Queue (feedback_control, weight_mode={weight_mode})...")
     queue = build_queue(
         initial_sku_counts,
@@ -571,6 +638,7 @@ def main(
         initial_inventory_percentage,
         number_of_tasks,
         deadline_rate,
+        driveway_columns,
     )
 
     print(f"Total Tasks: {queue.shape[0]} (target: {number_of_tasks})")

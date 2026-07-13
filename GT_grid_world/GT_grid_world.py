@@ -84,6 +84,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     
     global_tik = time.time()
     t = 0
+    allow_reallocation_tasks = True
+
+    max_task_number = 0
     while True:
         if not run_until_queue_complete and t >= T:
             break
@@ -92,6 +95,17 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         if use_precomputed_queue:
             print(f"Number of tasks remaining in queue: {queue.shape[0]}")
             print(f"Number of deferred tasks: {len(deferred_queue)}")
+
+        if t == 300:
+            allow_reallocation_tasks = False
+
+        if t%500 == 0 and t > 0:
+            if max_task_number == 0:
+                max_task_number = 20
+                allow_reallocation_tasks = False
+            else:
+                max_task_number = 0
+                allow_reallocation_tasks = True
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -191,70 +205,71 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             and queue is not None
         ):
             print("=============================" + "Reallocation Tasks" + "=============================")
-            tik = time.time()
-            Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
-            generation_time = time.time() - tik
-            S.log_reallocation_tasks_generated(t, len(Ta))
-            S.log_reallocation_generation_time(t, generation_time)
-            tok = time.time()
-            print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
+            if allow_reallocation_tasks:
+                tik = time.time()
+                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
+                generation_time = time.time() - tik
+                S.log_reallocation_tasks_generated(t, len(Ta))
+                S.log_reallocation_generation_time(t, generation_time)
+                tok = time.time()
+                print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
 
-            if reallocation_task_method in ("insertion", "fast_insertion"):
-                solve_insertion_fn = (
-                    solve_insertion_fast if reallocation_task_method == "fast_insertion" else solve_insertion
-                )
-                tik = time.time()
-                Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time, new_objectives = solve_insertion_fn(
-                    Ta,
-                    Rs,
-                    G,
-                    J,
-                    J_a,
-                    output_buffer,
-                    S=S,
-                    lambda_=lambda_,
-                    t=t,
-                    next_rearrangement_task_id=last_rearrangement_task_id,
-                    pick_place_time=pick_place_time,
-                )
-                J_a_objectives.update(new_objectives)
-                S.log_reallocation_tasks_chosen(t, num_chosen)
-                S.log_reallocation_milp_binary_vars(t, num_binary_vars)
-                S.log_reallocation_milp_construct_time(t, construct_time)
-                S.log_reallocation_milp_solve_time(t, solve_time)
-                if J_a:
-                    last_rearrangement_task_id = max(J_a.keys())
-                tok = time.time()
-                print(
-                    f"MILP insertion time: {tok - tik:.4f}s "
-                    f"(construct: {construct_time:.4f}s, solve: {solve_time:.4f}s, "
-                    f"{num_binary_vars} binary vars, {num_chosen} tasks chosen)"
-                )
-            elif reallocation_task_method == "simultaneous":
-                tik = time.time()
-                last_task_id = merge_reallocation_tasks_into_J(Ta, J, G, last_task_id)
-                Rs, _, _ = task_allocation.TaskAllocation(
-                    S,
-                    G,
-                    Rs,
-                    J,
-                    initial_task_assignment_strategy,
-                    improvement_task_assignment_strategy,
-                    map,
-                    t,
-                    cost_calculation_method,
-                    removal_operator,
-                    repair_operator,
-                    acceptance_function,
-                    T_0,
-                    alpha,
-                    base_cost_weight,
-                    deadline_weight,
-                    sku_distribution_weight,
-                    agent_unallocated_penalty,
-                )
-                tok = time.time()
-                print(f"Simultaneous reallocation allocation time: {tok - tik}")
+                if reallocation_task_method in ("insertion", "fast_insertion"):
+                    solve_insertion_fn = (
+                        solve_insertion_fast if reallocation_task_method == "fast_insertion" else solve_insertion
+                    )
+                    tik = time.time()
+                    Rs, J_a, num_chosen, num_binary_vars, construct_time, solve_time, new_objectives = solve_insertion_fn(
+                        Ta,
+                        Rs,
+                        G,
+                        J,
+                        J_a,
+                        output_buffer,
+                        S=S,
+                        lambda_=lambda_,
+                        t=t,
+                        next_rearrangement_task_id=last_rearrangement_task_id,
+                        pick_place_time=pick_place_time,
+                    )
+                    J_a_objectives.update(new_objectives)
+                    S.log_reallocation_tasks_chosen(t, num_chosen)
+                    S.log_reallocation_milp_binary_vars(t, num_binary_vars)
+                    S.log_reallocation_milp_construct_time(t, construct_time)
+                    S.log_reallocation_milp_solve_time(t, solve_time)
+                    if J_a:
+                        last_rearrangement_task_id = max(J_a.keys())
+                    tok = time.time()
+                    print(
+                        f"MILP insertion time: {tok - tik:.4f}s "
+                        f"(construct: {construct_time:.4f}s, solve: {solve_time:.4f}s, "
+                        f"{num_binary_vars} binary vars, {num_chosen} tasks chosen)"
+                    )
+                elif reallocation_task_method == "simultaneous":
+                    tik = time.time()
+                    last_task_id = merge_reallocation_tasks_into_J(Ta, J, G, last_task_id)
+                    Rs, _, _ = task_allocation.TaskAllocation(
+                        S,
+                        G,
+                        Rs,
+                        J,
+                        initial_task_assignment_strategy,
+                        improvement_task_assignment_strategy,
+                        map,
+                        t,
+                        cost_calculation_method,
+                        removal_operator,
+                        repair_operator,
+                        acceptance_function,
+                        T_0,
+                        alpha,
+                        base_cost_weight,
+                        deadline_weight,
+                        sku_distribution_weight,
+                        agent_unallocated_penalty,
+                    )
+                    tok = time.time()
+                    print(f"Simultaneous reallocation allocation time: {tok - tik}")
 
         S.record_buffer_prediction(t, G, Rs, J, J_a, output_buffer)
 

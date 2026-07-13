@@ -40,7 +40,7 @@ from ..simulate import (
 )
 
 Location = Tuple[int, int]
-ReallocationTask = Tuple[Set[Location], float, float, int]
+ReallocationTask = Tuple[Set[Location], float, float, int, Location]
 InsertionKey = Tuple[int, int, Location, Location, int, int]
 # (task_key, candidate_idx, start, goal, agent_idx, insertion_position)
 #
@@ -339,15 +339,16 @@ def _next_rearrangement_task_id(
         return max(rearrangement_ids) + 1
     return REARRANGEMENT_TASK_ID_BASE
 
-def benefit(G: Graph, s: Location, g: Location) -> float:
+def benefit(G: Graph, s: Location, g: Location, reference_location: Optional[Location]) -> float:
     """Benefit of relocating a SKU from ``s`` to ``g``.
 
-    Measured against a representative driveway cell in ``g``'s aisle column
-    (rather than a fixed dummy location), since the point of the move is to
-    get the SKU closer to wherever an outbound task assigned to that aisle
-    would eventually pick it up.
+    Measured against ``reference_location``, a representative driveway cell
+    in the aisle that the reallocation task's corresponding real outbound
+    task has been pre-committed to (see
+    ``generate_reallocation_tasks.generate_reallocation_tasks``) -- not
+    derived from ``g``'s own column -- since the point of the move is to get
+    the SKU closer to wherever that outbound task will actually be picked up.
     """
-    reference_location = G.get_driveway_column_reference(g[1])
     if reference_location is None:
         return 0.0
     return G.get_distance(s, reference_location) - G.get_distance(g, reference_location)
@@ -360,6 +361,7 @@ def compute_insertion_objectives(
     agent_idx: int,
     insertion_position: int,
     lambda_: float,
+    reference_location: Optional[Location],
     pick_place_time: bool = False,
 ) -> Tuple[float, float, float]:
     """Return benefit, detour cost, and utility for a chosen insertion."""
@@ -376,7 +378,7 @@ def compute_insertion_objectives(
         # agent's actual next queued task, not always its home, so the
         # reported detour reflects what was really scored during selection.
         next_anchor = seq[insertion_position][1] if insertion_position < len(seq) else agent.home
-    task_benefit = benefit(G, start, goal)
+    task_benefit = benefit(G, start, goal, reference_location)
     detour_cost = (
         dist(G, prior_goal, start)
         + dist(G, start, next_anchor)
@@ -531,9 +533,10 @@ def apply_insertions(
         for insertion_position, task_key, start, goal in sorted(
             insertions, key=lambda item: -item[0]
         ):
-            _C_i, _release, deadline, sigma = tasks_a[task_key]
+            _C_i, _release, deadline, sigma, reference_location = tasks_a[task_key]
             task_benefit, detour_cost, utility = compute_insertion_objectives(
-                G, Rs, start, goal, agent_idx, insertion_position, lambda_, pick_place_time
+                G, Rs, start, goal, agent_idx, insertion_position, lambda_,
+                reference_location, pick_place_time
             )
             task_tuple = (current_id, start, goal, int(deadline))
             agent = modified.agents[agent_idx]
@@ -609,11 +612,11 @@ def solve_insertion(
     z: Dict[InsertionKey, gp.Var] = {}
     if insertion_slots:
         for n, task_data in tasks_a.items():
-            C_i, _release, _deadline, _sigma = task_data
+            C_i, _release, _deadline, _sigma, reference_location = task_data
             for k, (s, g) in enumerate(C_i):
                 if s in V_alloc or g in V_alloc:
                     continue
-                task_benefit = benefit(G, s, g)
+                task_benefit = benefit(G, s, g, reference_location)
                 if task_benefit <= 0:
                     continue
                 for slot in insertion_slots:

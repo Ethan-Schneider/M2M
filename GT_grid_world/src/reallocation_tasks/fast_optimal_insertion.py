@@ -33,10 +33,24 @@ from .optimal_insertion_gurobi import (
     apply_insertions,
     benefit,
     collect_V_alloc,
-    prior_task_index,
     slack,
 )
 
+def collect_V_ineligible(Rs: AgentLoader) -> set[Location]:
+    """Collect vertices which are in aisles which the aisles are already allocated to other agents. These vertices are not eligible for insertion."""
+    V_ineligible = set()
+    for ag in Rs.agents:
+        if ag.task_sequence:
+            # If the agent has a task assigned, then the aisle of the task is allocated to this agent.
+            # Therefore, all vertices in this aisle are ineligible for insertion.
+            task = ag.task_sequence[0]
+            s, g = task[1], task[2]
+            # Collect column
+            aisle_s = s[1]
+            aisle_g = g[1]
+            V_ineligible.add(aisle_s)
+            V_ineligible.add(aisle_g)
+    return V_ineligible
 
 def _build_insertion_slot_arrays(
     Rs: AgentLoader,
@@ -49,11 +63,9 @@ def _build_insertion_slot_arrays(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Precompute every valid (agent, position) insertion slot as parallel arrays.
 
-    Each agent contributes at most one slot: if it has no tasks at all, the
-    rearrangement task can become its sole task (``pos=0``, reference point
-    is the agent's current location); otherwise the only eligible slot is
-    right after its first/currently-active task (``pos=1``), and only when
-    that first task is inbound. Deeper positions are no longer considered.
+    Only agents with no tasks assigned are eligible: the rearrangement task
+    can become their sole task (``pos=0``, reference point is the agent's
+    current location). Agents that already have a task assigned are skipped.
 
     Returns ``(agent_idx, insertion_position, p_idx, q_idx, slack_value)``,
     each of length ``num_slots``. ``p_idx``/``q_idx`` are distance-matrix
@@ -71,32 +83,16 @@ def _build_insertion_slot_arrays(
         seq = ag.task_sequence
         L = len(seq)
 
-        if L == 0:
-            p = ag.state
-            q = ag.home
-            agent_idx.append(a)
-            insertion_position.append(0)
-            p_idx.append(G.location_index(p))
-            q_idx.append(G.location_index(q))
-            slack_value.append(slack(B, Rs, G, ag.id, 0, t, outbound_schedule))
+        if L != 0:
             continue
 
-        pos = 1
-        prior_idx = prior_task_index(pos)
-        prior_task_id = seq[prior_idx][0]
-        if prior_task_id in J_a:
-            continue
-        if J[prior_task_id][4] == 0 or J[prior_task_id][4] == 2:
-            continue
-
-        p = seq[prior_idx][2]
-        q = seq[pos][1] if pos < L else ag.home
-
+        p = ag.state
+        q = ag.home
         agent_idx.append(a)
-        insertion_position.append(pos)
+        insertion_position.append(0)
         p_idx.append(G.location_index(p))
         q_idx.append(G.location_index(q))
-        slack_value.append(slack(B, Rs, G, ag.id, pos, t, outbound_schedule))
+        slack_value.append(slack(B, Rs, G, ag.id, 0, t, outbound_schedule))
 
     return (
         np.array(agent_idx, dtype=int),
@@ -132,6 +128,8 @@ def solve_insertion_fast(
 
     construct_tik = time.time()
     V_alloc = collect_V_alloc(Rs)
+    # Collect vertices which are in aisles which the aisles are already allocated to other agents. These vertices are not eligible for insertion.
+    # V_ineligible = collect_V_ineligible(Rs)
     outbound_schedule = OutboundDeliverySchedule.build(Rs, G, J, J_a, t)
 
     slot_agent, slot_position, slot_p_idx, slot_q_idx, slot_slack = _build_insertion_slot_arrays(
@@ -150,12 +148,12 @@ def solve_insertion_fast(
         dq_row = D[slot_q_idx]  # (num_slots, num_locations): dist(q_slot, *) == dist(*, q_slot)
 
         for n, task_data in tasks_a.items():
-            C_i, _release, _deadline, _sigma = task_data
-            candidates = [(s, g) for s, g in C_i if s not in V_alloc and g not in V_alloc]
+            C_i, _release, _deadline, _sigma, reference_location = task_data
+            candidates = [(s, g) for s, g in C_i if s not in V_alloc and g not in V_alloc and s[1]]
             if not candidates:
                 continue
 
-            benefits = np.array([benefit(G, s, g) for s, g in candidates])
+            benefits = np.array([benefit(G, s, g, reference_location) for s, g in candidates])
             keep = benefits > 0
             if not keep.any():
                 continue
@@ -173,9 +171,10 @@ def solve_insertion_fast(
             if pick_place_time:
                 dfull = dfull + PICK_PLACE_DETOUR_ADJUSTMENT
 
-            U = benefits[np.newaxis, :] - lambda_ * np.maximum(
-                0.0, dfull - slot_slack[:, np.newaxis]
-            )
+            # U = benefits[np.newaxis, :] - lambda_ * np.maximum(
+            #     0.0, dfull - slot_slack[:, np.newaxis]
+            # )
+            U = benefits[np.newaxis, :]
             slot_rows, cand_cols = np.nonzero(U > 0)
 
             new_obj: Dict[InsertionKey, float] = {}
