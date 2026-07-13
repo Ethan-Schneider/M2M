@@ -20,7 +20,8 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
                          outbound_sku_distribution_costs=None, rearrangement_sku_distribution_costs=None,
                          base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
                          agent_task_sequence_limit=-1,
-                         crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
+                         crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF,
+                         crm2m_slack=0.0, crm2m_cpp=0.0, crm2m_return_margin=0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
     This is a batched greedy algorithm that allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -133,6 +134,8 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
                     agent_start_cost_tensor, crm2m_agent_home, crm2m_start_home,
                     crm2m_goal_home, crm2m_coupling_mask, valid_p, valid_q,
                     crm2m_lambda, crm2m_detour_cutoff,
+                    slack=crm2m_slack, c_pp=crm2m_cpp,
+                    return_margin=crm2m_return_margin,
                 )
             else:
                 # Mask out all invalid start and goal locations
@@ -287,7 +290,8 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
 def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
                      current_time: int, method : str = "manhattan", base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_limit=-1,
-                     crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                     crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF,
+                     crm2m_slack=0.0, crm2m_cpp=0.0, crm2m_return_margin=0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm (batched greedy version).
     Allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -360,6 +364,9 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
         agent_task_sequence_limit=agent_task_sequence_limit,
         crm2m_lambda=crm2m_lambda,
         crm2m_detour_cutoff=crm2m_detour_cutoff,
+        crm2m_slack=crm2m_slack,
+        crm2m_cpp=crm2m_cpp,
+        crm2m_return_margin=crm2m_return_margin,
     )
     total_allocation_time += time.time() - allocation_tik
         

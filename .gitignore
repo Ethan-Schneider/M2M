@@ -167,6 +167,9 @@ cython_debug/
 *.json
 *.xml
 
+# Large simulation log dumps (regenerable experiment artifacts, 10-100+ MB each)
+data/logs_*.txt
+
 # IDE / project configuration: re-allow shared VS Code / Cursor launch configs
 !.vscode/launch.json
 

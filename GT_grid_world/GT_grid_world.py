@@ -18,7 +18,11 @@ from src.reallocation_tasks.jr_consumer import (
 from src.task_allocation_algorithms.initial_solutions.construct_cost_elements import (
     CRM2M_DEFAULT_LAMBDA,
     CRM2M_DEFAULT_DETOUR_CUTOFF,
+    CRM2M_DEFAULT_RETURN_MARGIN,
+    compute_ambient_slack,
+    committed_shuffle_terms,
 )
+from src.output_buffer import OutputBuffer, QUEUE_DEADLINE, tasks_per_min_to_per_tick
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -52,9 +56,23 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             B: int = 60,
             enable_rearrangement: bool = False,
             crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
-            crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF) -> int:
+            crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+            crm2m_return_margin: float = CRM2M_DEFAULT_RETURN_MARGIN,
+            pick_place_time: bool = False,
+            pick_place_duration: int = simulate.DEFAULT_PICK_PLACE_DURATION,
+            buffer_capacity_k: int = 0,
+            buffer_consumption_rate: float = 70.0) -> int:
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, inbound))
     J = {}
+    # Shared outbound output buffer (capacity model). Disabled when K <= 0 so
+    # default behaviour is unchanged. When enabled it throttles *outbound*
+    # throughput at the consumption rate; inbound/shuffle are unaffected.
+    output_buffer = None
+    if buffer_capacity_k > 0:
+        output_buffer = OutputBuffer(
+            capacity=buffer_capacity_k,
+            consumption_rate_per_min=buffer_consumption_rate,
+        )
     # crM2M: rearrangement (shuffle) tasks live in their own pool, kept separate
     # from the persistent real-task pool ``J``. They are scored alongside real
     # tasks via a transient union ``{**J, **J_a}`` handed to the allocator, but
@@ -214,7 +232,43 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 else schedule
             )
             print(f"Attempting to allocate tasks")
-            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J_for_alloc, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty, schedule=schedule_for_alloc, aisle_dual_cycle=aisle_dual_cycle, driveway_dual_cycle=driveway_dual_cycle, crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff)
+
+            # Buffer-aware crM2M: sample the ambient slack scalar from the live
+            # output buffer and derive the shuffle pick+place service time. A
+            # shuffle incurs one pick (at s_p) plus one place (at d_q), hence
+            # 2 x pick_place_duration. Both default to 0.0 when the buffer /
+            # pick-place timing are disabled, so the rearrangement utility
+            # reduces exactly to the original ``b - lambda * Delta``.
+            crm2m_slack = 0.0
+            crm2m_cpp = 2.0 * pick_place_duration if pick_place_time else 0.0
+            if output_buffer is not None:
+                # alpha := outbound arrival rate into the buffer (items/tick).
+                # Preferred: read it from the arrival/deadline timestamp column of
+                # the look-ahead window (Ethan's task_queue format) via
+                # ``estimate_arrival_rate``, which decouples alpha from the drain
+                # rate mu. Fall back to the outbound-share x mu heuristic only for
+                # the timeless 2-column queue format (no timestamp column).
+                arrival_per_tick = 0.0
+                if use_precomputed_queue and queue is not None and queue.size > 0:
+                    if np.atleast_2d(queue).shape[1] > QUEUE_DEADLINE:
+                        rate_per_min = OutputBuffer.estimate_arrival_rate(queue, W)
+                        arrival_per_tick = tasks_per_min_to_per_tick(rate_per_min)
+                    else:
+                        outbound_fraction = OutputBuffer.estimate_outbound_fraction(queue, W)
+                        arrival_per_tick = (
+                            outbound_fraction * output_buffer.consumption_rate_per_tick
+                        )
+                crm2m_slack = compute_ambient_slack(
+                    buffer_level=output_buffer.level,
+                    capacity=output_buffer.capacity,
+                    drain_per_tick=output_buffer.consumption_rate_per_tick,
+                    arrival_per_tick=arrival_per_tick,
+                    lambda_=crm2m_lambda,
+                    detour_cutoff=crm2m_detour_cutoff,
+                    c_pp=crm2m_cpp,
+                )
+
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J_for_alloc, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty, schedule=schedule_for_alloc, aisle_dual_cycle=aisle_dual_cycle, driveway_dual_cycle=driveway_dual_cycle, crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff, crm2m_slack=crm2m_slack, crm2m_cpp=crm2m_cpp, crm2m_return_margin=crm2m_return_margin)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
@@ -227,6 +281,45 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         if enable_rearrangement:
             prune_uncommitted_rearrangements(J_a, Rs)
             S.log_reallocation_tasks_committed(t, len(J_a))
+
+            # Record the objective terms (benefit, actual detour, utility) for
+            # every committed shuffle from the freshly-decided task sequences, so
+            # each completed rearrangement can be charted with the exact numbers
+            # the allocator scored it with. FIRST-write-wins: the utility that
+            # justified the shuffle is the one at its *commit* tick (where it
+            # cleared the U>0 gate at that tick's ambient slack). A shuffle stays
+            # committed while in-flight, so overwriting each tick would instead
+            # log a later tick's slack -- after the buffer has drained, slack -> 0
+            # and the recomputed U goes spuriously negative. Recording only on the
+            # first commit pins U to the decision that actually drove execution.
+            if len(J_a) > 0:
+                crm2m_home = Rs.agents[0].home
+                already_scored = S.get_rearrangement_task_scores()
+                for crm2m_agent in Rs.agents:
+                    for seq_i, seq_task in enumerate(crm2m_agent.task_sequence):
+                        shuffle_id = seq_task[0]
+                        if shuffle_id not in J_a or shuffle_id in already_scored:
+                            continue
+                        prev_cell = (
+                            crm2m_agent.task_sequence[seq_i - 1][2]
+                            if seq_i > 0
+                            else crm2m_agent.state
+                        )
+                        benefit, detour, utility = committed_shuffle_terms(
+                            G,
+                            prev_cell=prev_cell,
+                            s_p=seq_task[1],
+                            d_q=seq_task[2],
+                            home=crm2m_home,
+                            slack=crm2m_slack,
+                            c_pp=crm2m_cpp,
+                            lambda_=crm2m_lambda,
+                            method=cost_calculation_method,
+                            return_margin=crm2m_return_margin,
+                        )
+                        S.record_rearrangement_task_score(
+                            shuffle_id, benefit, detour, utility
+                        )
 
         # Check if any agent is allocated the same tasks
         for agent in Rs.agents:
@@ -289,10 +382,15 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # Skip the external router for these strategies and let the
         # native MAPF-aware paths drive the simulator.
         if improvement_task_assignment_strategy not in ("hbh_mla_star", "ta_hybrid"):
-            for agent in Rs.agents:
-                if agent.path_sequence == []:
-                    Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
-                    break    
+            # Replan when some agent needs its next route (empty plan) or has
+            # been blocked in place too long (see router.needs_path_plan). On a
+            # PBS failure the router now clears all plans so agents hold instead
+            # of running stale, uncoordinated paths -- together with the reactive
+            # move-guard in simulate this removes the aisle in/out oscillation
+            # and drives collisions to ~0. pathPlan replans all agents in one
+            # call, so a single trigger suffices.
+            if router.needs_path_plan(Rs):
+                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
 
         tok = time.time()
         S.add_total_PF_time(tok-tik)
@@ -454,7 +552,12 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
         print("=============================" +"Taking Step"+ "=============================")
         tik = time.time()
-        Rs, J, J_a = simulate.simulate(S, G, Rs, J, J_a, map, t)
+        Rs, J, J_a = simulate.simulate(
+            S, G, Rs, J, J_a, map, t,
+            pick_place_time=pick_place_time,
+            pick_place_duration=pick_place_duration,
+            output_buffer=output_buffer,
+        )
         tok = time.time()
         S.add_total_SIM_time(tok-tik)
         
@@ -565,7 +668,13 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          B: int = 60,
          enable_rearrangement: bool = False,
          crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
-         crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF) -> None:
+         crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+         crm2m_return_margin: float = CRM2M_DEFAULT_RETURN_MARGIN,
+         pick_place_time: bool = False,
+         pick_place_duration: int = simulate.DEFAULT_PICK_PLACE_DURATION,
+         buffer_capacity_k: int = 0,
+         buffer_consumption_rate: float = 70.0,
+         output_file_override: str = None) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -661,6 +770,11 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     )
     
     output_file = f"data/raw_data/{T}_{effective_task_generation_strategy}_{initial_inventory}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
+    # An explicit override lets otherwise-identical configs (e.g. M2M vs crM2M,
+    # which share the py_lns strategy and thus the auto-name) run concurrently
+    # without clobbering each other's output / intermediate files.
+    if output_file_override:
+        output_file = output_file_override
     buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
@@ -698,7 +812,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         sku_distribution_weight=sku_distribution_weight,
         agent_unallocated_penalty=agent_unallocated_penalty,
         solution_repair_detection_function=solution_repair_detection_function,
-        solution_repair_function=solution_repair_function
+        solution_repair_function=solution_repair_function,
+        buffer_capacity_k=buffer_capacity_k,
+        buffer_consumption_rate=buffer_consumption_rate,
     )
     schedule = None
     queue = None
@@ -767,6 +883,11 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             enable_rearrangement=enable_rearrangement,
             crm2m_lambda=crm2m_lambda,
             crm2m_detour_cutoff=crm2m_detour_cutoff,
+            crm2m_return_margin=crm2m_return_margin,
+            pick_place_time=pick_place_time,
+            pick_place_duration=pick_place_duration,
+            buffer_capacity_k=buffer_capacity_k,
+            buffer_consumption_rate=buffer_consumption_rate,
     )
     if run_until_schedule_complete or run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -903,6 +1024,30 @@ if __name__=="__main__":
     parser.add_argument('--crm2m-detour-cutoff', type=float, default=CRM2M_DEFAULT_DETOUR_CUTOFF,
                        help='crM2M weighted-detour cutoff: shuffles with lambda*Delta >= this '
                             'value are rejected (gated to +inf).')
+    parser.add_argument('--crm2m-return-margin', type=float, default=CRM2M_DEFAULT_RETURN_MARGIN,
+                       help='crM2M return margin (ticks) added to the effective delay in the '
+                            'utility penalty only: a shuffle is credited as free only when '
+                            'slack >= Delta + c_pp + margin, forcing it to finish with that much '
+                            'spare buffer-time before a freed slot is re-consumed by other '
+                            'agents\' outbound arrivals. 0 reproduces the pre-margin behaviour.')
+    parser.add_argument('--pick-place-time', action='store_true',
+                       help='When set, agents spend --pick-place-duration ticks picking up '
+                            '(status 3) and the same placing (status 4) before inventory is '
+                            'updated. Applied uniformly to every method; default off.')
+    parser.add_argument('--pick-place-duration', type=int, default=4,
+                       help='Ticks spent at each pick and each place when --pick-place-time '
+                            'is set (default 4).')
+    parser.add_argument('--buffer-capacity-k', type=int, default=0,
+                       help='Shared outbound output buffer capacity K (0 disables). Outbound '
+                            'deliveries block when the buffer is full; inbound/shuffle are '
+                            'unaffected.')
+    parser.add_argument('--buffer-consumption-rate', type=float, default=70.0,
+                       help='Output buffer consumption rate in tasks/min (drains rate/60 '
+                            'items per tick).')
+    parser.add_argument('--output-file', type=str, default=None,
+                       help='Explicit output JSON path, overriding the auto-generated name. '
+                            'Use to run configs that share an auto-name (e.g. M2M vs crM2M) '
+                            'concurrently without clobbering each other.')
     args = parser.parse_args()
     
     main(
@@ -953,4 +1098,10 @@ if __name__=="__main__":
         enable_rearrangement=args.enable_rearrangement,
         crm2m_lambda=args.crm2m_lambda,
         crm2m_detour_cutoff=args.crm2m_detour_cutoff,
+        crm2m_return_margin=args.crm2m_return_margin,
+        pick_place_time=args.pick_place_time,
+        pick_place_duration=args.pick_place_duration,
+        buffer_capacity_k=args.buffer_capacity_k,
+        buffer_consumption_rate=args.buffer_consumption_rate,
+        output_file_override=args.output_file,
     )

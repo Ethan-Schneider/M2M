@@ -4,7 +4,43 @@ from src.path_finding_algorithms.external_algorithms.PBS import pbs
 from .agent import *
 from .utils import *
 from .analysis.statistics import *
+from .simulate import STATUS_PICKING, STATUS_PLACING
 from typing import Dict, Tuple
+
+# Consecutive ticks an agent may sit blocked (its next cell held by another
+# agent) before we escalate from "just wait" to a full global replan that can
+# route it around the obstruction. Mirrors Ethan's task_queue default.
+BLOCKED_REPLAN_THRESHOLD = 5
+
+
+def needs_path_plan(Rs: AgentLoader, blocked_threshold: int = BLOCKED_REPLAN_THRESHOLD) -> bool:
+    """Return True when the PBS router should replan this tick.
+
+    Replan when some agent has no remaining plan (it just finished and needs its
+    next route) or has been blocked in place for ``blocked_threshold`` ticks (a
+    sustained stand-off the reactive move-guard in ``simulate`` cannot clear on
+    its own -- e.g. two agents wanting to swap cells).
+    """
+    for agent in Rs.agents:
+        if agent.path_sequence == []:
+            return True
+        if agent.blocked_ticks >= blocked_threshold:
+            return True
+    return False
+
+
+def clear_all_paths(Rs: AgentLoader) -> None:
+    """Drop every agent's plan and reset its block counter.
+
+    Called when PBS cannot find any solution (common under heavy congestion).
+    Agents then hold position (empty plan -> wait) instead of continuing to
+    execute a stale, now-uncoordinated plan -- that stale-plan execution is what
+    made box-carrying agents reverse in and out of aisles.
+    """
+    for agent in Rs.agents:
+        agent.path_sequence = []
+        agent.blocked_ticks = 0
+
 
 def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
     states = [agent.state for agent in Rs.agents]
@@ -19,7 +55,11 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
         # If robot is going to delivery, set goal location to the task's goal location
         elif agent.status == 2:
             goal_locations.append(agent.task_sequence[0][2])
-            
+
+        # Pick/place service: hold position while waiting at pickup or delivery.
+        elif agent.status in (STATUS_PICKING, STATUS_PLACING):
+            goal_locations.append(agent.state)
+
         # If robot is a free_agent, set goal location to current state
         else:
             goal_locations.append(agent.home)
@@ -78,16 +118,24 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
                 break
             for i, agent in enumerate(Rs.agents):
                 if agent.path_sequence == []:
-                    goal_locations[i] = agent.home
+                    # Pick/place agents must hold position, not return home.
+                    if agent.status in (STATUS_PICKING, STATUS_PLACING):
+                        goal_locations[i] = agent.state
+                    else:
+                        goal_locations[i] = agent.home
             latch = True
         w += 5.0
 
     if not sequences:
+        # No feasible joint plan: hold everyone in place rather than run stale
+        # paths that ignore each other (the aisle in/out oscillation source).
+        clear_all_paths(Rs)
         return Rs
     
     # Remove first item in sequences, as they are the robot's current location
     for i, agent in enumerate(Rs.agents):
         temp_sequence = sequences[i][1:]
         agent.path_sequence = temp_sequence
+        agent.blocked_ticks = 0
     
     return Rs

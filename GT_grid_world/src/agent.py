@@ -11,8 +11,18 @@ class Agent:
         # 0 == Free Agent
         # 1 == To_Pickup
         # 2 == To_Delivery
+        # 3 == Picking (waiting at pickup location for pick/place delay)
+        # 4 == Placing (waiting at delivery location for pick/place delay)
         self.status = 0
         self.sku_id_carrying = None
+        # Countdown (ticks) remaining in a pick (status 3) or place (status 4)
+        # service action; only used when pick/place time is enabled.
+        self.pick_place_counter = 0
+        # Consecutive ticks this agent has been unable to advance because its
+        # next planned cell was occupied by another agent. Reset to 0 whenever
+        # it moves, holds a pick/place service, or is replanned. A sustained
+        # block escalates to a global replan via ``router.needs_path_plan``.
+        self.blocked_ticks = 0
     
     def set_sku_id_carrying(self, sku_id : int):
         self.sku_id_carrying = sku_id
@@ -25,6 +35,8 @@ class Agent:
         0 == Free Agent
         1 == To_Pickup
         2 == To_Delivery
+        3 == Picking
+        4 == Placing
 
         Args:
             status (int): Current status of agent
@@ -110,5 +122,7 @@ class AgentLoader:
             new_agent.status = agent.status
             new_agent.path_sequence = agent.path_sequence.copy()
             new_agent.sku_id_carrying = agent.sku_id_carrying
+            new_agent.pick_place_counter = agent.pick_place_counter
+            new_agent.blocked_ticks = agent.blocked_ticks
             new_solution.agents.append(new_agent)
         return new_solution

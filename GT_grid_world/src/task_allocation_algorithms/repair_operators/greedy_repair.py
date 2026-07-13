@@ -24,7 +24,8 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                  task_deadline_costs: np.ndarray = None,
                  base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
                  agent_task_sequence_time: np.ndarray = None, current_time: int = 0, agent_task_sequence_limit: int = -1,
-                 crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+                 crm2m_slack: float = 0.0, crm2m_cpp: float = 0.0, crm2m_return_margin: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -121,6 +122,8 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                     agent_start_cost_tensor, crm2m_agent_home, crm2m_start_home,
                     crm2m_goal_home, crm2m_coupling_mask, valid_p, valid_q,
                     crm2m_lambda, crm2m_detour_cutoff,
+                    slack=crm2m_slack, c_pp=crm2m_cpp,
+                    return_margin=crm2m_return_margin,
                 )
             else:
                 # Compute the total cost for all valid (p, q) pairs for the task

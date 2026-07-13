@@ -114,6 +114,83 @@ def per_task_type_sku_distribution_term(
 # (so e.g. Delta=5, lambda=2 is rejected even though Delta alone is < 10).
 CRM2M_DEFAULT_LAMBDA = 1.5
 CRM2M_DEFAULT_DETOUR_CUTOFF = 10.0
+# Return margin (ticks) added to the effective delay in the utility penalty ONLY
+# (not the slack cap, not the reject-gate). It requires a shuffle to finish with
+# ``m`` ticks of spare buffer-time before its slack "pays off": a shuffle is only
+# credited as free when ``slack >= Delta + c_pp + m``. This targets the observed
+# failure mode where a shuffle finishes just as a buffer slot opens, but the slot
+# is re-consumed by other agents' outbound arrivals before this agent can return
+# to place -- so the move was not actually worthwhile. ``0.0`` reproduces the
+# pre-margin behaviour exactly.
+CRM2M_DEFAULT_RETURN_MARGIN = 0.0
+# Floor on the net-clearing-rate denominator of the ambient slack formula
+# (items/tick). Keeps slack finite as arrivals approach the drain rate; the
+# real bound on slack is ``slack_cap`` (see ``compute_ambient_slack``), so this
+# only needs to be a small positive number to avoid divide-by-zero / negatives.
+CRM2M_DEFAULT_SLACK_EPS = 1e-3
+
+
+def compute_ambient_slack(
+    buffer_level: float,
+    capacity: float,
+    drain_per_tick: float,
+    arrival_per_tick: float,
+    lambda_: float,
+    detour_cutoff: float,
+    c_pp: float = 0.0,
+    eps: float = CRM2M_DEFAULT_SLACK_EPS,
+) -> float:
+    """System-wide ambient slack scalar ``slack(t)`` for buffer-aware crM2M.
+
+    ::
+
+        slack(t) = min( slack_cap , max(0, B(t) - (K-1)) / max(mu - alpha, eps) )
+        slack_cap = c_pp + detour_cutoff / lambda_
+
+    - ``buffer_level`` (``B``), ``capacity`` (``K``): current / max output-buffer
+      occupancy in items.
+    - ``drain_per_tick`` (``mu``): buffer consumption rate, items/tick.
+    - ``arrival_per_tick`` (``alpha``): estimated outbound arrival rate, items/tick
+      (already converted from the queue's items/min).
+    - ``c_pp``: the shuffle pick+place service time (one pick + one place).
+
+    The numerator ``max(0, B - (K-1))`` is the *overshoot* -- how many items must
+    drain before one free slot opens. The denominator ``mu - alpha`` is the *net*
+    clearing rate (drain minus the refill from new outbound arrivals competing
+    for slots), so overshoot / net-rate converts items into a predicted wait in
+    ticks.
+
+    ``slack_cap`` ceilings the creditable slack so a saturated buffer cannot
+    excuse an unbounded free move. It is ``c_pp + detour_cutoff / lambda_``, NOT
+    ``detour_cutoff / lambda_`` alone: the utility penalizes the *effective delay*
+    ``Delta + c_pp``, so to let a fully-congested buffer credit a physically-allowed
+    shuffle (raw detour ``Delta`` up to the gate ceiling ``detour_cutoff / lambda_``,
+    plus the fixed pick+place ``c_pp``) the cap must cover both terms. Pinning the
+    cap at ``detour_cutoff / lambda_`` alone -- when that is *smaller* than ``c_pp``
+    -- means slack can never fully offset even a zero-detour shuffle's pick+place
+    cost, so shuffles almost never clear the ``U>0`` gate (the collision that made
+    rearrangements vanishingly rare). Decoupling the two restores the intended
+    behavior: at max slack, the penalty on any gate-passing shuffle is
+    ``lambda_ * max(0, (Delta + c_pp) - (c_pp + detour_cutoff/lambda_))
+    = lambda_ * max(0, Delta - detour_cutoff/lambda_) = 0`` (since the gate already
+    forces ``Delta < detour_cutoff / lambda_``), i.e. a saturated buffer judges a
+    shuffle purely on its benefit.
+
+    Returns ``0.0`` when the buffer is disabled (``capacity <= 0``) so callers can
+    invoke it unconditionally; with ``slack == 0`` the utility reduces to the
+    original ``b - lambda_ * Delta``.
+    """
+    if capacity <= 0:
+        return 0.0
+    overshoot = max(0.0, float(buffer_level) - (float(capacity) - 1.0))
+    if overshoot == 0.0:
+        return 0.0
+    net_rate = max(float(drain_per_tick) - float(arrival_per_tick), float(eps))
+    slack = overshoot / net_rate
+    slack_cap = (
+        float(c_pp) + detour_cutoff / lambda_ if lambda_ > 0 else float("inf")
+    )
+    return float(min(slack_cap, slack))
 
 
 def _crm2m_distance(G: Graph, a: Tuple[int, int], b: Tuple[int, int], method: str) -> float:
@@ -192,6 +269,51 @@ def compute_crm2m_terms(
     return home, start_home, goal_home, agent_home, coupling_mask
 
 
+def committed_shuffle_terms(
+    G: Graph,
+    prev_cell: Tuple[int, int],
+    s_p: Tuple[int, int],
+    d_q: Tuple[int, int],
+    home: Tuple[int, int],
+    slack: float = 0.0,
+    c_pp: float = 0.0,
+    lambda_: float = CRM2M_DEFAULT_LAMBDA,
+    method: str = "manhattan",
+    return_margin: float = 0.0,
+) -> Tuple[float, float, float]:
+    """Reproduce the rearrangement objective's ``(benefit, detour, utility)`` for a
+    single *committed* shuffle, evaluated from live post-allocation state.
+
+    This mirrors :func:`rearrangement_cost_cube` exactly for one winning
+    ``(agent, s_p, d_q)`` triple, so a completed shuffle can be logged with the
+    same numbers the allocator scored it with (Ethan's request: record the
+    benefit, the actual detour cost, and the actual utility of each completed
+    rearrangement). ``prev_cell`` is the agent's anchor immediately before the
+    shuffle in its task sequence (``g^m_{i-1}``, or the agent's state when the
+    shuffle is the first queued task) -- the same anchor the allocator's
+    ``agent_start_cost_tensor`` / ``agent_home`` encode:
+
+        Delta   = dist(prev_cell, s_p) + dist(s_p, h0) - dist(prev_cell, h0)
+        benefit = dist(s_p, h0) - dist(d_q, h0)
+        U       = benefit - lambda_ * max(0, (Delta + c_pp + return_margin) - slack)
+
+    ``return_margin`` (>= 0) raises the free-move bar so the shuffle must finish
+    with that many ticks of spare buffer-time; ``0.0`` reproduces the original.
+
+    Returns ``(benefit, detour, utility)``.
+    """
+    d_prev_sp = _crm2m_distance(G, prev_cell, s_p, method)
+    d_sp_h0 = _crm2m_distance(G, s_p, home, method)
+    d_dq_h0 = _crm2m_distance(G, d_q, home, method)
+    d_prev_h0 = _crm2m_distance(G, prev_cell, home, method)
+
+    detour = d_prev_sp + d_sp_h0 - d_prev_h0
+    benefit = d_sp_h0 - d_dq_h0
+    discounted_delay = max(0.0, (detour + c_pp + return_margin) - slack)
+    utility = benefit - lambda_ * discounted_delay
+    return float(benefit), float(detour), float(utility)
+
+
 def rearrangement_cost_cube(
     agent_start_cost_tensor: np.ndarray,
     agent_home: np.ndarray,
@@ -202,6 +324,9 @@ def rearrangement_cost_cube(
     valid_q: np.ndarray,
     lambda_: float,
     detour_cutoff: float,
+    slack: float = 0.0,
+    c_pp: float = 0.0,
+    return_margin: float = 0.0,
 ) -> np.ndarray:
     """Per-task crM2M cost cube ``-U`` over ``(M, |valid_p|, |valid_q|)``.
 
@@ -210,8 +335,38 @@ def rearrangement_cost_cube(
     entirely (per plan section 3.4 -- the rearrangement objective is a complete
     utility, not an additive placement term).
 
+    Buffer-aware utility (ambient-slack model):
+
+        effective_delay = Delta + c_pp + return_margin
+        U = b - lambda_ * max(0, effective_delay - slack)
+
+    ``return_margin`` (>= 0, default 0) is a safety headroom added to the penalty
+    term ONLY -- not to ``slack_cap`` and not to the reject-gate. It requires a
+    shuffle to finish with ``return_margin`` ticks of spare buffer-time before its
+    slack fully "pays off" (free when ``slack >= Delta + c_pp + return_margin``),
+    which shrinks the creditable-detour window from ``Delta <= detour_cutoff/lambda_``
+    to ``Delta <= detour_cutoff/lambda_ - return_margin``. This suppresses shuffles
+    that would finish just as a buffer slot opens only for competing outbound
+    arrivals to re-consume it before this agent returns to place. ``0.0`` leaves the
+    cube byte-for-byte identical to the pre-margin behaviour.
+
+    where ``c_pp`` is the pick+place service time of the shuffle (a scalar in the
+    same tick/cell currency as ``Delta``; one pick plus one place) and ``slack``
+    is the single system-wide ambient slack scalar ``slack(t)`` -- the predicted
+    idle time an outbound delivery would wait for a free output-buffer slot. Both
+    default to ``0.0``, in which case ``U`` collapses exactly to the original
+    ``b - lambda_ * Delta`` and this function is byte-for-byte unchanged.
+
+    Slack only *softens the penalty*; it does not unlock longer physical moves.
+    The hard reject-gate acts on the *raw travel detour* ``Delta`` alone -- not on
+    the effective delay and not on the discounted overflow. ``c_pp`` is a fixed
+    service cost, not a travel distance, so it is excluded from the physical-length
+    ceiling (matching Ethan's insertion model, which caps the raw detour before
+    adding the pick+place adjustment):
+
     Gating (entry set to ``+inf`` -> never chosen by ``argmin``):
-        - ``lambda_ * Delta >= detour_cutoff`` (weighted-detour cutoff),
+        - ``lambda_ * Delta >= detour_cutoff`` (raw-detour cutoff -- a
+          physical-sanity ceiling that ignores c_pp and slack),
         - ``U <= 0`` (no net benefit; rearrangement is opportunistic/droppable),
         - ``coupling_mask`` False (``s_p`` / ``d_q`` not in the same aisle group).
 
@@ -226,14 +381,27 @@ def rearrangement_cost_cube(
         + start_home[valid_p][None, :]
         - agent_home[:, None]
     )
+    # effective_delay = Delta + c_pp + return_margin (travel detour + pick+place
+    # service time + the safety headroom that forces the shuffle to finish before
+    # a freed buffer slot is re-consumed by competing outbound arrivals).
+    effective_delay = detour + c_pp + return_margin  # (M, |valid_p|)
+    # Slack hides part of the delay; only the overflow beyond slack is penalized.
+    discounted_delay = np.maximum(0.0, effective_delay - slack)  # (M, |valid_p|)
     # b: (|valid_p|, |valid_q|).
     benefit = start_home[valid_p][:, None] - goal_home[valid_q][None, :]
     # U: (M, |valid_p|, |valid_q|).
-    U = benefit[None, :, :] - lambda_ * detour[:, :, None]
+    U = benefit[None, :, :] - lambda_ * discounted_delay[:, :, None]
     cost = -U
 
-    weighted_detour = lambda_ * detour  # (M, |valid_p|)
-    cost = np.where(weighted_detour[:, :, None] >= detour_cutoff, np.inf, cost)
+    # Hard cutoff acts on the *raw travel detour* only (ignores c_pp AND slack):
+    # never make a physically long move. c_pp is a fixed pick+place service cost,
+    # not a travel distance, so it belongs in the utility penalty term -- not in
+    # the physical-length gate. Folding c_pp into the gate is self-defeating
+    # (lambda_ * c_pp alone can exceed the cutoff and reject every shuffle);
+    # gating on Delta alone matches Ethan's insertion model, which caps the raw
+    # detour before adding the pick+place adjustment.
+    weighted_travel = lambda_ * detour  # (M, |valid_p|)
+    cost = np.where(weighted_travel[:, :, None] >= detour_cutoff, np.inf, cost)
     cost = np.where(U <= 0, np.inf, cost)
     coupling = coupling_mask[np.ix_(valid_p, valid_q)]  # (|valid_p|, |valid_q|)
     cost = np.where(coupling[None, :, :], cost, np.inf)
