@@ -11,11 +11,14 @@ from typing import Dict, List, Optional, Set, Tuple
 import gurobipy as gp
 from gurobipy import GRB
 
-# Try import license, if not found, just run as usual.
-try: 
-    os.environ["GRB_LICENSE_FILE"] = os.path.join("data/licenses/gurobi.lic")
-except:
-    pass
+# Use a repo-local Gurobi license if one is present; otherwise leave the
+# environment untouched so gurobipy falls back to its default license
+# resolution (e.g. the pip package's size-limited restricted license, or a
+# system/WLS license). Pointing GRB_LICENSE_FILE at a missing path would make
+# Gurobi error out instead of falling back, so we only set it when it exists.
+_GUROBI_LICENSE_PATH = os.path.join("data", "licenses", "gurobi.lic")
+if os.path.isfile(_GUROBI_LICENSE_PATH):
+    os.environ["GRB_LICENSE_FILE"] = _GUROBI_LICENSE_PATH
 
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2

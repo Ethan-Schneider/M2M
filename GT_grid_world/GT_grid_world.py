@@ -75,7 +75,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             buffer_capacity_k: int = 0,
             buffer_consumption_rate: float = 70.0,
             queue_release_window: int = 60,
-            log_buffer_predictions: bool = False) -> int:
+            log_buffer_predictions: bool = False,
+            pulse_load_experiment: bool = False) -> int:
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
@@ -131,7 +132,14 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     t = 0
     allow_reallocation_tasks = True
 
-    max_task_number = 0
+    # ``pulse_load_experiment`` is Ethan's irM2M microbenchmark scaffolding
+    # (task_queue commit ba05069): shadow the CLI ``--max-tasks`` value with a
+    # 500-tick 0/20 pulse and shut off reallocation-task generation after
+    # t=300, to stress-test optimal-insertion behaviour under choppy demand.
+    # Disabled by default so the CLI ``--max-tasks`` value controls the WIP
+    # cap normally. Set ``--pulse-load-experiment`` to reproduce Ethan's runs.
+    if pulse_load_experiment:
+        max_task_number = 0
     while True:
         if not run_until_schedule_complete and not run_until_queue_complete and t >= T:
             break
@@ -143,16 +151,21 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             print(f"Number of tasks remaining in queue: {queue.shape[0]}")
             print(f"Number of deferred tasks: {len(deferred_queue)}")
 
-        if t == 300:
-            allow_reallocation_tasks = False
-
-        if t%500 == 0 and t > 0:
-            if max_task_number == 0:
-                max_task_number = 20
+        # See the ``pulse_load_experiment`` note above -- only when this flag
+        # is set do we override the CLI ``max_task_number`` and gate
+        # reallocation-task generation on the 500-tick pulse. Under normal
+        # runs the CLI value drives the WIP cap and reallocation stays on.
+        if pulse_load_experiment:
+            if t == 300:
                 allow_reallocation_tasks = False
-            else:
-                max_task_number = 0
-                allow_reallocation_tasks = True
+
+            if t%500 == 0 and t > 0:
+                if max_task_number == 0:
+                    max_task_number = 20
+                    allow_reallocation_tasks = False
+                else:
+                    max_task_number = 0
+                    allow_reallocation_tasks = True
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -799,6 +812,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          buffer_consumption_rate: float = 70.0,
          queue_release_window: int = 60,
          log_buffer_predictions: bool = False,
+         pulse_load_experiment: bool = False,
          output_file_override: str = None) -> None:
     """
     Run a single instance of the simulation with specified parameters.
@@ -1037,6 +1051,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             buffer_capacity_k=buffer_capacity_k,
             buffer_consumption_rate=buffer_consumption_rate,
             queue_release_window=queue_release_window,
+            pulse_load_experiment=pulse_load_experiment,
     )
     if run_until_schedule_complete or run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -1148,6 +1163,14 @@ if __name__=="__main__":
                             'used by the fast_insertion reallocation path) and record '
                             'it alongside the real observed buffer levels for that '
                             'window. Requires --buffer-capacity-k > 0.')
+    parser.add_argument('--pulse-load-experiment', action='store_true',
+                       help='Enable Ethan\'s irM2M optimal-insertion microbenchmark '
+                            'scaffolding (task_queue commit ba05069): override the '
+                            'CLI --max-tasks value with a 500-tick 0/20 pulse and '
+                            'disable further reallocation-task generation after '
+                            't=300. Off by default so --max-tasks controls the WIP '
+                            'cap normally; only set this to reproduce Ethan\'s '
+                            'insertion-under-choppy-demand runs.')
     parser.add_argument('--use-precomputed-queue', action='store_true',
                        help='Load tasks from a precomputed queue file and skip CRG. '
                             'Requires --queue-file and --initial-inventory-file.')
@@ -1273,5 +1296,6 @@ if __name__=="__main__":
         buffer_consumption_rate=args.buffer_consumption_rate,
         queue_release_window=args.queue_release_window,
         log_buffer_predictions=args.log_buffer_predictions,
+        pulse_load_experiment=args.pulse_load_experiment,
         output_file_override=args.output_file,
     )
