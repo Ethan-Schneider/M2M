@@ -2,6 +2,7 @@ import numpy as np
 from typing import Union
 
 from .graph import Graph
+from .agent import Agent
 
 def get_assigned_task_id(Ra : list, robot_id : int) -> int:
     for assignment in Ra:
@@ -44,8 +45,74 @@ def get_assigned_task_ids(Ra : list) -> set:
 def euclidian_distance(p1 : tuple, p2 : tuple) -> float:
     return ((p2[1]-p1[1])**2 + (p2[0]-p1[0])**2)**0.5
 
-def manhattan_distance(p1 : tuple, p2 : tuple) -> float: 
+def manhattan_distance(p1 : tuple, p2 : tuple) -> float:
     return np.abs(p2[1] - p1[1]) + np.abs(p2[0] - p1[0])
+
+def compute_agent_idle_steps(agent : Agent) -> int:
+    """Count the number of steps in an agent's planned path where it remains stationary.
+
+    Args:
+        agent (Agent): The agent whose path_sequence to inspect
+
+    Returns:
+        int: Number of steps where the agent's location does not change from the previous step
+    """
+    if not agent.path_sequence:
+        return 0
+
+    idle_steps = 0
+    prev_loc = agent.state
+    for loc in agent.path_sequence:
+        if loc == prev_loc:
+            idle_steps += 1
+        prev_loc = loc
+    return idle_steps
+
+def get_agent_goal_location(agent : Agent) -> tuple:
+    """Get an agent's current goal location based on its status.
+
+    Args:
+        agent (Agent): The agent whose goal location to look up
+
+    Returns:
+        tuple: The pickup location if going to pickup, the delivery location if going to delivery,
+               or None if the agent is free or has no task sequence
+    """
+    if not agent.task_sequence:
+        return None
+
+    if agent.status == 1:
+        return agent.task_sequence[0][1]
+    elif agent.status == 2:
+        return agent.task_sequence[0][2]
+    return None
+
+def compute_agent_backtrack_steps(agent : Agent) -> int:
+    """Count the number of steps in an agent's planned path that increase its L1 distance to its current target.
+
+    Args:
+        agent (Agent): The agent whose path_sequence to inspect
+
+    Returns:
+        int: Number of steps where the agent's distance to its current task target location increases
+    """
+    if not agent.path_sequence or not agent.task_sequence:
+        return 0
+
+    if agent.status == 1:
+        target = agent.task_sequence[0][1]
+    elif agent.status == 2:
+        target = agent.task_sequence[0][2]
+    else:
+        return 0
+
+    backtrack_steps = 0
+    prev_loc = agent.state
+    for loc in agent.path_sequence:
+        if manhattan_distance(target, loc) > manhattan_distance(target, prev_loc):
+            backtrack_steps += 1
+        prev_loc = loc
+    return backtrack_steps
 
 def a_star(G : Graph, start : tuple, goal : tuple) -> list:
     astar = AStar(G, start, goal)

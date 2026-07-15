@@ -4,11 +4,13 @@ import argparse
 
 from src import graph, simulate, task_allocation, case_request_generator, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
+from src.task_allocation_algorithms.local_repair.branch_and_bound_dynamic_group import BnB_dynamic_group
 from src.task_allocation_algorithms.local_repair.exact_repair import HA_exact_repair
 from src.task_allocation_algorithms.repair_detection.backtracking import detect_backtracking
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
+from src.utils import compute_agent_idle_steps, compute_agent_backtrack_steps, get_agent_goal_location
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
@@ -148,16 +150,18 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         if solution_repair_function != "none":
             
             detection_tik = time.time()
-            
+
+            duration_percent_difference = None
+
             if solution_repair_detection_function == "Backtracking":
                 aisle_groups = detect_backtracking(Rs)
             elif solution_repair_detection_function == "Duration":
-                aisle_groups = duration_difference(Rs, G)
+                aisle_groups, duration_percent_difference = duration_difference(Rs, G)
             elif solution_repair_detection_function == "Progress":
                 aisle_groups = sliding_window_progress(Rs, G)
             elif solution_repair_detection_function == "Ensamble":
                 aisle_groups_bt = detect_backtracking(Rs)
-                aisle_groups_du = duration_difference(Rs, G)
+                aisle_groups_du, duration_percent_difference = duration_difference(Rs, G)
                 aisle_groups_sw = sliding_window_progress(Rs, G)
 
                 # Combine the aisle groups, remove duplicates
@@ -184,7 +188,8 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S.reallocation_data[t_key]["tasks"] = []
                 S.reallocation_data[t_key]["prior_path_cost"] = []
                 S.reallocation_data[t_key]["post_path_cost"] = [] 
-                S.reallocation_data[t_key]["change_in_path_cost"] = []     
+                S.reallocation_data[t_key]["change_in_path_cost"] = []
+                S.reallocation_data[t_key]["delta_path_cost"] = []
                 S.reallocation_data[t_key]["path_planning_compute_time"] = []
                 S.reallocation_data[t_key]["lower_bound_and_checks"] = []
                 S.reallocation_data[t_key]["rejected_solution"] = []
@@ -192,11 +197,19 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S.reallocation_data[t_key]["bnb_solve_time"] = []
                 S.reallocation_data[t_key]["bnb_routing_time"] = []
                 S.reallocation_data[t_key]["detection_computation_time"] = np.abs(detection_tok - detection_tik)
+                S.reallocation_data[t_key]["duration_percent_difference"] = duration_percent_difference
 
                 S.reallocation_data[t_key]["prior_agent_path_cost"] = []
                 S.reallocation_data[t_key]["post_agent_path_cost"] = []
                 S.reallocation_data[t_key]["prior_group_path_cost"] = []
                 S.reallocation_data[t_key]["post_group_path_cost"] = []
+                S.reallocation_data[t_key]["prior_agent_idle"] = []
+                S.reallocation_data[t_key]["post_agent_idle"] = []
+                S.reallocation_data[t_key]["prior_agent_backtrack"] = []
+                S.reallocation_data[t_key]["post_agent_backtrack"] = []
+                S.reallocation_data[t_key]["prior_agent_goal_location"] = []
+                S.reallocation_data[t_key]["post_agent_goal_location"] = []
+                S.reallocation_data[t_key]["num_candidate_goal_locations"] = []
                 repair_tik = time.time()
                 for agent_group in agents:
                     temp_Rs = Rs.copy()
@@ -211,6 +224,13 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     if len(agent_group) <= 1:
                         continue
 
+                    # Skip groups too large for the configured repair function before logging
+                    # any data for them, so the "tasks"/"agents"/prior_*/post_* lists stay aligned
+                    if solution_repair_function == "HA" and len(agent_group) >= 5:
+                        continue
+                    elif solution_repair_function == "BnB" and len(agent_group) >= 4:
+                        continue
+
                     task_ids = []
                     for agent_id in agent_group:
                         task = temp_Rs.get_agent(agent_id).task_sequence[0][0]
@@ -223,27 +243,38 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                     S.reallocation_data[t_key]["prior_path_cost"].append(prior_cost)
                     S.reallocation_data[t_key]["prior_agent_path_cost"].append(temp_Rs.get_agent(agent_group[0]).path_sequence.__len__())
 
-                    prior_group_cost  = 0
-                    for agent_id in agent_group:
-                        prior_group_cost += len(temp_Rs.get_agent(agent_id).path_sequence)
+                    prior_agent_costs = {agent.id: len(agent.path_sequence) for agent in temp_Rs.agents}
+                    prior_group_cost = sum(prior_agent_costs[agent_id] for agent_id in agent_group)
                     S.reallocation_data[t_key]["prior_group_path_cost"].append(prior_group_cost)
 
-                    if solution_repair_function == "HA":
-                        if len(agent_group) >= 5:
-                            continue
+                    prior_agent_idle = {agent.id: compute_agent_idle_steps(agent) for agent in temp_Rs.agents}
+                    prior_agent_backtrack = {agent.id: compute_agent_backtrack_steps(agent) for agent in temp_Rs.agents}
+                    S.reallocation_data[t_key]["prior_agent_idle"].append(prior_agent_idle)
+                    S.reallocation_data[t_key]["prior_agent_backtrack"].append(prior_agent_backtrack)
 
+                    prior_agent_goal_location = {agent.id: get_agent_goal_location(agent) for agent in temp_Rs.agents}
+                    S.reallocation_data[t_key]["prior_agent_goal_location"].append(prior_agent_goal_location)
+
+                    if solution_repair_function == "HA":
                         HA_agent_group = agent_group.copy()
                         S.reallocation_data[t_key]["agents"].append(HA_agent_group)
                         # temp_Rs = Rs.copy()
-                        temp_Rs = HA_exact_repair(temp_Rs, G, S, J, HA_agent_group)
+                        temp_Rs = HA_exact_repair(temp_Rs, G, S, J, HA_agent_group, t_key)
                     elif solution_repair_function == "BnB":
-                        if len(agent_group) >= 4:
-                            continue
-                            
                         S.reallocation_data[t_key]["agents"].append(agent_group)
                         
                         init_tik = time.time()
                         bnb = BnB(temp_Rs, G, J, S, agent_group, map, t_key, prior_cost)
+                        S.reallocation_data[t_key]["bnb_init_compute_time"].append(np.abs(time.time() - init_tik))
+                        
+                        solve_tik = time.time()
+                        temp_Rs = bnb.solve()
+                        S.reallocation_data[t_key]["bnb_solve_time"].append(np.abs(time.time() - solve_tik))
+                    elif solution_repair_function == "BnB_dynamic_group":
+                        S.reallocation_data[t_key]["agents"].append(agent_group)
+                        
+                        init_tik = time.time()
+                        bnb = BnB_dynamic_group(temp_Rs, G, J, S, agent_group, map, t_key, prior_cost)
                         S.reallocation_data[t_key]["bnb_init_compute_time"].append(np.abs(time.time() - init_tik))
                         
                         solve_tik = time.time()
@@ -265,17 +296,20 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         
                     S.reallocation_data[t_key]["post_agent_path_cost"].append(temp_Rs.get_agent(agent_group[0]).path_sequence.__len__())
                     
-                    post_group_cost = 0
-                    for agent_id in agent_group:
-                        post_group_cost += len(temp_Rs.get_agent(agent_id).path_sequence)
+                    post_agent_costs = {agent.id: len(agent.path_sequence) for agent in temp_Rs.agents}
+                    post_group_cost = sum(post_agent_costs[agent_id] for agent_id in agent_group)
                     S.reallocation_data[t_key]["post_group_path_cost"].append(post_group_cost)
 
-                    post_goals = []
-                    for agent_id in agent_group:
-                        if temp_Rs.get_agent(agent_id).status == 1:
-                            post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][1])
-                        elif temp_Rs.get_agent(agent_id).status == 2:
-                            post_goals.append(temp_Rs.get_agent(agent_id).task_sequence[0][2])
+                    delta_path_cost = {agent_id: post_agent_costs[agent_id] - prior_agent_costs[agent_id] for agent_id in prior_agent_costs}
+                    S.reallocation_data[t_key]["delta_path_cost"].append(delta_path_cost)
+
+                    post_agent_idle = {agent.id: compute_agent_idle_steps(agent) for agent in temp_Rs.agents}
+                    post_agent_backtrack = {agent.id: compute_agent_backtrack_steps(agent) for agent in temp_Rs.agents}
+                    S.reallocation_data[t_key]["post_agent_idle"].append(post_agent_idle)
+                    S.reallocation_data[t_key]["post_agent_backtrack"].append(post_agent_backtrack)
+
+                    post_agent_goal_location = {agent.id: get_agent_goal_location(agent) for agent in temp_Rs.agents}
+                    S.reallocation_data[t_key]["post_agent_goal_location"].append(post_agent_goal_location)
 
                     S.reallocation_data[t_key]["post_path_cost"].append(post_cost)
                     S.reallocation_data[t_key]["change_in_path_cost"].append(post_cost - prior_cost)

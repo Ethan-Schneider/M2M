@@ -10,8 +10,11 @@ from sortedcontainers import SortedList
 
 from ...path_finding_algorithms.external_algorithms.PBS import pbs
 
-class BnB:
-    def __init__(self, Rs : AgentLoader, G : Graph, J : set, S : Stats, 
+class BnB_dynamic_group:
+    # Row separating the warehouse aisles (row < threshold) from the driveway aisles (row > threshold)
+    AISLE_DRIVEWAY_ROW_THRESHOLD = 17
+
+    def __init__(self, Rs : AgentLoader, G : Graph, J : set, S : Stats,
                  reallocation_group : list, map_name : str, t_key : float, initial_cost : float) -> None:
 
         S.reallocation_data[t_key]["path_planning_compute_time"].append(0)
@@ -156,55 +159,68 @@ class BnB:
         return lb
 
     
+    def _aisle_key(self, loc : tuple) -> tuple:
+        """Classify a location by (region, column), where region is "warehouse" for rows
+        above the driveway (row < AISLE_DRIVEWAY_ROW_THRESHOLD) or "driveway" for rows below
+        it (row > AISLE_DRIVEWAY_ROW_THRESHOLD). Returns None for the boundary row, which
+        belongs to neither aisle.
+        """
+        row, col = loc
+        if row < self.AISLE_DRIVEWAY_ROW_THRESHOLD:
+            return ("warehouse", col)
+        elif row > self.AISLE_DRIVEWAY_ROW_THRESHOLD:
+            return ("driveway", col)
+        return None
+
     def mapf_cost(self, assignments: Dict[int, int]) -> float:
         """
         assignments: agent -> goal
         """
         goal_locations = []
         agent_states = []
-        
-        # agents in self.agents but not in assignment, choose their best goal location from self.cost_matrix and add that to agent_states and goal_locations
-        # for agent_id in self.agents:
-        #     if agent_id not in assignments:
-        #         best_goal = np.argmin(self.cost_matrix[self.agents.index(agent_id)])
-        #         goal_locations.append(self.original_goals[best_goal])
-        #         agent_states.append(self.Rs.get_agent(agent_id).state)
 
         for assignment in assignments.items():
             goal_locations.append(self.original_goals[assignment[1]])
             agent_states.append(self.Rs.get_agent(assignment[0]).state)
-            
-        # # For all agents not included in self.agents, add their state and goal locations to sequences
-        # for agent in self.Rs.agents:
-        #     # if agent.id not in list(assignments.keys()):
-        #     if agent.id not in self.agents:
-        #         agent_states.append(agent.state)
-        #         # If robot is going to pickup, set goal location to the task's start location
-        #         if agent.status == 1:
-        #             # Get current assigned task's start location
-        #             goal_locations.append(agent.task_sequence[0][1])
-                    
-        #         # If robot is going to delivery, set goal location to the task's goal location
-        #         elif agent.status == 2:
-        #             goal_locations.append(agent.task_sequence[0][2])
-                    
-        #         # If robot is a free_agent, set goal location to current state
-        #         else:
-        #             goal_locations.append(agent.state)
+
+        # Only the group agents' paths count toward the returned cost
+        num_group_agents = len(agent_states)
+
+        # Pull in nearby robots sharing an aisle (same warehouse/driveway region and column)
+        # with one of the proposed goal locations, so the path planner accounts for their
+        # traffic without path planning for the entire fleet.
+        aisle_keys = {self._aisle_key(loc) for loc in goal_locations}
+        aisle_keys.discard(None)
+
+        if aisle_keys:
+            for agent in self.Rs.agents:
+                if agent.id in self.agents or not agent.task_sequence:
+                    continue
+
+                if agent.status == 1:
+                    goal_loc = agent.task_sequence[0][1]
+                elif agent.status == 2:
+                    goal_loc = agent.task_sequence[0][2]
+                else:
+                    continue
+
+                if self._aisle_key(goal_loc) in aisle_keys:
+                    agent_states.append(agent.state)
+                    goal_locations.append(goal_loc)
 
         sequences = []
         w = 1.2
-        
+
         latch = False
         while not sequences:
             if np.abs(time.time() - self.start_time) >= self.time_limit:
                 return np.inf
-            
+
             # Execute the path planning algorithm
             sequences = pbs.test_cpp_func(self.map_name, len(agent_states), 1, w, agent_states, goal_locations)
             if sequences == []:
                 print("+++++++++++++++++++Execution Failed with w = ", w)
-                
+
             # If a solution cannot be found with a higher suboptimality bound, break
             if w >= 1.2:
                 if latch:
@@ -216,7 +232,7 @@ class BnB:
             return np.inf
 
         cost = 0
-        for sequence in sequences:
+        for sequence in sequences[:num_group_agents]:
             cost += len(sequence[1:])
 
         return cost

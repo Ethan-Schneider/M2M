@@ -1,27 +1,32 @@
 import numpy as np
+from typing import Tuple
 from ...agent import AgentLoader
 from ...graph import Graph
 
-def duration_difference(Rs : AgentLoader, G : Graph) -> dict:
+def duration_difference(Rs : AgentLoader, G : Graph) -> Tuple[dict, dict]:
     agents_to_reallocate = []
-    
-    
+    percent_difference = {}
+
+
     for agent in Rs.agents:
         if agent.task_sequence:
             if agent.status == 1:
                 goal_loc = agent.task_sequence[0][1]
             elif agent.status == 2:
                 goal_loc = agent.task_sequence[0][2]
-                
+            else:
+                continue
+
             state = agent.state
-            
+
             estimated_cost = G.get_distance(state, goal_loc)
             actual_cost = len(agent.path_sequence)
-            
-            percent_difference = np.abs((actual_cost - estimated_cost) / estimated_cost) * 100
-            
-            if percent_difference >= 10:
+
+            agent_percent_difference = np.abs((actual_cost - estimated_cost) / estimated_cost) * 100
+
+            if agent_percent_difference >= 10:
                 agents_to_reallocate.append(agent)
+                percent_difference[agent.id] = agent_percent_difference
                 
     aisle_groups = {}
     
@@ -48,5 +53,5 @@ def duration_difference(Rs : AgentLoader, G : Graph) -> dict:
                         continue
                     if goal_aisle == comp_aisle and comparison_agent not in aisle_groups[goal_aisle]:
                         aisle_groups[goal_aisle].append(comparison_agent)
-                    
-    return aisle_groups
+
+    return aisle_groups, percent_difference

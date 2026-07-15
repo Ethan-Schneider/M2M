@@ -7,7 +7,7 @@ from ...agent import AgentLoader, Agent
 from ...graph import Graph
 from ...analysis.statistics import Stats
 
-def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocation_group : list) -> AgentLoader:
+def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocation_group : list, t_key : float) -> AgentLoader:
     
     # print(f"Initial Agent Task Locations:")
     # for agent in Rs.agents:
@@ -55,7 +55,9 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
             print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
             
     locations = list(locations)
-    
+
+    S.reallocation_data[t_key]["num_candidate_goal_locations"].append(len(locations))
+
     cost_matrix = []
     
     for agent_id in reallocation_group:
