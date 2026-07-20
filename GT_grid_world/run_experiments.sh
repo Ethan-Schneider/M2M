@@ -2,25 +2,23 @@
 
 # Create directories if they don't exist
 mkdir -p data/raw_data
-mkdir -p data/buffer_data
-mkdir -p data/videos
 
 #Init absolute path
 parent_path=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
 
 # Define arrays of parameters to test
-seeds=(900 901 902 903)
+seeds=(900)
 num_robots=(40)
-time_horizons=(28800)
+time_horizons=(10)
 max_tasks=(120)
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
 num_skus=(30)
-initial_inventory=(60.0)
+initial_inventory=(30.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
-improvement_task_assign_strategy="c_lns"
+improvement_task_assign_strategy="LNS_PBS"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
 map="data/maps/study_small_restricted"
@@ -31,14 +29,10 @@ T_0=1.0
 alpha=0.99
 deadline_generation_method="normal"
 deadline_offset=180
-output_intermediate_data=False
-intermediate_data_interval=4000
 base_cost_weight=1.0
 deadline_weight=0.0
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
-solution_repair_detection_function="none"
-solution_repair_function="none"
 
 # Loop through all combinations
 for seed in "${seeds[@]}"; do
@@ -70,8 +64,6 @@ for seed in "${seeds[@]}"; do
                         echo "  Deadline Weight: $deadline_weight"
                         echo "  Sku Distribution Weight: $sku_distribution_weight"
                         echo "  Agent Unallocated Penalty: $agent_unallocated_penalty"
-                        echo "  Solution Repair Detection Function: $solution_repair_detection_function"
-                        echo "  Solution Repair Function: $solution_repair_function"
                         echo "----------------------------------------"
                         
                         python3 $parent_path/GT_grid_world.py \
@@ -98,14 +90,10 @@ for seed in "${seeds[@]}"; do
                             --alpha "$alpha" \
                             --deadline-generation-method "$deadline_generation_method" \
                             --deadline-offset "$deadline_offset" \
-                            $( [ "$output_intermediate_data" = "True" ] && echo --output-intermediate-data ) \
-                            --intermediate-data-interval "$intermediate_data_interval" \
                             --base-cost-weight "$base_cost_weight" \
                             --deadline-weight "$deadline_weight" \
                             --sku-distribution-weight "$sku_distribution_weight" \
-                            --agent-unallocated-penalty "$agent_unallocated_penalty" \
-                            --solution-repair-detection-function "$solution_repair_detection_function" \
-                            --solution-repair-function "$solution_repair_function"
+                            --agent-unallocated-penalty "$agent_unallocated_penalty" 
 
                         # Optional: Add a small delay between runs
                         sleep 1

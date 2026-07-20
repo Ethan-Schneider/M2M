@@ -2,20 +2,18 @@ import numpy as np
 import json
 
 from ..utils import *
-from .graphing import *
 from ..agent import *
 
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
                  seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
                  initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
-                 time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
-                 frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
+                 time_limit: int = None, initial_inventory: float = None,
+                 frequency: float = None, inbound_outbound_ratio: float = None,
                  num_skus: int = None, weight_init_method: str = None, removal_operator: str = None, repair_operator: str = None,
                  acceptance_function: str = None, T_0: float = None, alpha: float = None, deadline_generation_method: str = None,
-                 deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
-                 base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
-                 agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None) -> None:
+                 deadline_offset: float = None, base_cost_weight: float = None, deadline_weight: float = None,
+                 sku_distribution_weight: float = None, agent_unallocated_penalty: float = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -27,11 +25,9 @@ class Stats:
         self.__path_planning_strategy = path_planning_strategy
         self.__map_name = map_name
         self.__time_limit = time_limit
-        self.__visualize_output = visualize_output
         self.__initial_inventory = initial_inventory
         self.__frequency = frequency
         self.__inbound_outbound_ratio = inbound_outbound_ratio
-        self.__output_graphs = output_graphs
         self.__num_skus = num_skus
         self.__weight_init_method = weight_init_method
         self.__cost_calculation_method = cost_calculation_method
@@ -42,18 +38,10 @@ class Stats:
         self.__alpha = alpha
         self.__deadline_generation_method = deadline_generation_method
         self.__deadline_offset = deadline_offset
-        self.__output_intermediate_data = output_intermediate_data
-        self.__intermediate_data_interval = intermediate_data_interval
         self.__base_cost_weight = base_cost_weight
         self.__deadline_weight = deadline_weight
         self.__sku_distribution_weight = sku_distribution_weight
         self.__agent_unallocated_penalty = agent_unallocated_penalty
-        self.__solution_repair_detection_function = solution_repair_detection_function
-        self.__solution_repair_function = solution_repair_function
-
-        self.__num_improved_assignments = 0
-        self.__num_worse_assignments = 0
-        self.__num_same_assignments = 0
 
         self.__output_file = output_file
         
@@ -169,43 +157,6 @@ class Stats:
         self.__overdue_task_completions = 0  # Counter for tasks completed after deadline
 
         self.reallocation_data = {}
-
-    def create_new_realloc_data(self, t : int) -> float:
-        while t in self.reallocation_data.keys():
-            t = t + 0.01
-
-        self.reallocation_data[t] = {"agents" : None,
-                                       "tasks" : None,
-                                       "nodes_expanded" : None,
-                                       "nodes_pruned" : None,
-                                       "possible_number_nodes" : None,
-                                       "prior_path_cost" : None,
-                                       "post_path_cost" : None,
-                                       "change_in_path_cost" : None,
-                                       "delta_path_cost" : None,
-                                       "prior_agent_path_cost" : None,
-                                       "post_agent_path_cost" : None,
-                                       "prior_group_path_cost" : None,
-                                       "post_group_path_cost" : None,
-                                       "prior_agent_idle" : None,
-                                       "post_agent_idle" : None,
-                                       "prior_agent_backtrack" : None,
-                                       "post_agent_backtrack" : None,
-                                       "prior_agent_goal_location" : None,
-                                       "post_agent_goal_location" : None,
-                                       "duration_percent_difference" : None,
-                                       "num_candidate_goal_locations" : None,
-                                       "computation_time" : None,
-                                       "detection_computation_time" : None,
-                                       "bnb_init_compute_time" : None,
-                                       "bnb_solve_time" : None,
-                                       "bnb_routing_time" : None,
-                                       "lower_bound_and_checks" : None,
-                                       "path_planning_compute_time" : None,
-                                       "rejected_solution" : False
-                                       }
-
-        return t
     
     def append_carrying_skus(self, skus : list) -> None:
         self.__carrying_skus.append(skus)
@@ -615,57 +566,6 @@ class Stats:
         print("===Sum of Costs===")
         print("Sum of Costs: " + str(np.sum(list(self.__actual_distance.values()))) + "s or " + str(np.sum(list(self.__actual_distance.values()))/60) + "min.")
         
-    def output_graphs(self, folder : str = "") -> None:
-        # actual_estimated_distance(list(self.__actual_distance.values()), list(self.__estimated_distance.values()))
-        # actual_estimated_to_pickup_distance(list(self.__actual_pickup_distance.values()), list(self.__estimated_pickup_distance.values()))
-        
-        # total_actual_distance = []
-        # total_estimate_distance = []
-        # actual_task_distance = list(self.__actual_distance.values())
-        # actual_to_picktup_distance = list(self.__actual_pickup_distance.values())
-        # estimate_task_distance = list(self.__estimated_distance.values())
-        # estimate_to_pickup_distance = list(self.__estimated_pickup_distance.values())
-        # for i in range(len(list(self.__actual_distance))):
-        #     total_actual_distance.append(actual_task_distance[i]+actual_to_picktup_distance[i])
-        #     total_estimate_distance.append(estimate_task_distance[i]+estimate_to_pickup_distance[i])
-            
-        # actual_estimated_total_distance(total_actual_distance, total_estimate_distance)
-        
-        # Duration Graphs
-        print(len(list(self.__actual_duration.values())))
-        print(len(list(self.__estimated_duration.values())))
-        actual_estimated_duration(list(self.__actual_duration.values()), list(self.__estimated_duration.values()), subfolder=folder)
-        actual_estimated_to_pickup_duration(list(self.__actual_pickup_duration.values()), list(self.__estimated_pickup_duration.values()), subfolder=folder)
-        
-        total_actual_duration = []
-        total_estimate_duration = []
-        actual_task_duration = list(self.__actual_duration.values())
-        actual_to_pickup_duration = list(self.__actual_pickup_duration.values())
-        estimate_task_duration = list(self.__estimated_duration.values())
-        estimate_to_pickup_duration = list(self.__estimated_pickup_duration.values())
-        for i in range(len(list(self.__actual_duration))):
-            total_actual_duration.append(actual_task_duration[i]+actual_to_pickup_duration[i])
-            total_estimate_duration.append(estimate_task_duration[i]+estimate_to_pickup_duration[i])
-        actual_estimated_total_duration(total_actual_duration, total_estimate_duration, subfolder=folder)
-        
-        # Runtime Graphs
-        runtime_over_time(self.__CRG_time, self.__TA_time, self.__PF_time, self.__SIM_time)
-        runtime_pie_chart(self.__CRG_time, self.__TA_time, self.__PF_time, self.__total_runtime)
-        
-        # Idle Time Graph
-        stationary_robots_over_timesteps(self.__paths, subfolder=folder)
-        
-        # Unallocated Agents Graph
-        unallocated_agents_over_timesteps(self.__unallocated_agents, subfolder=folder)
-        
-        #Aisle and Driveway Occupancy Graph
-        aisle_occupancy_over_timesteps(self.__aisle_occupancy, subfolder=folder)
-        driveway_occupancy_over_timesteps(self.__driveway_occupancy, subfolder=folder)
-        
-        # Task Reallocations Graph
-        plot_task_reallocations_histogram(self.__task_reallocations, folder, self.__completed_task_ids)
-        
-        
     def save_data(self, intermediate_output_file = None):
         velocity_timesteps = self.compute_velocity_timesteps()
         
@@ -695,11 +595,9 @@ class Stats:
             "path_planning_strategy": self.__path_planning_strategy,
             "map_name": self.__map_name,
             "time_limit": self.__time_limit,
-            "visualize_output": self.__visualize_output,
             "initial_inventory": self.__initial_inventory,
             "frequency": self.__frequency,
             "inbound_outbound_ratio": self.__inbound_outbound_ratio,
-            "output_graphs": self.__output_graphs,
             "num_skus": self.__num_skus,
             "weight_init_method": self.__weight_init_method,
             "cost_calculation_method": self.__cost_calculation_method,
@@ -710,14 +608,10 @@ class Stats:
             "alpha": self.__alpha,
             "deadline_generation_method": self.__deadline_generation_method,
             "deadline_offset": self.__deadline_offset,
-            "output_intermediate_data": self.__output_intermediate_data,
-            "intermediate_data_interval": self.__intermediate_data_interval,
             "base_cost_weight": self.__base_cost_weight,
             "deadline_weight": self.__deadline_weight,
             "sku_distribution_weight": self.__sku_distribution_weight,
             "agent_unallocated_penalty": self.__agent_unallocated_penalty,
-            "solution_repair_detection_function": self.__solution_repair_detection_function,
-            "solution_repair_function": self.__solution_repair_function,
             # Simulation results
             "timesteps_completed": self.__T,
             "total_completed_tasks": int(len(self.__completed_task_ids)),
@@ -771,10 +665,6 @@ class Stats:
             "overdue_task_completions": self.__overdue_task_completions,
             "sku_centroids_per_timestep": self.__sku_centroids_per_timestep,
             "sku_locations_per_timestep": self.__sku_locations_per_timestep,
-            "num_improved_assignments": self.__num_improved_assignments,
-            "num_worse_assignments": self.__num_worse_assignments,
-            "num_same_assignments": self.__num_same_assignments,
-            "solution_repair_data": self.reallocation_data
         }
         
         if intermediate_output_file is not None:

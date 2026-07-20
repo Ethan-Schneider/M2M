@@ -9,7 +9,7 @@ from ..graph import Graph
 
 from ..task_allocation_algorithms.external_algorithms.lns import lns
 
-def lns_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[int, Tuple], t : int) -> AgentLoader:
+def lns_pbs_call(S : Stats, G : Graph, map_name : str, Rs : AgentLoader, J : Dict[int, Tuple], t : int) -> AgentLoader:
     # map_name = "GT_grid_world/src/task_allocation_algorithms/external_algorithms/lns/maps/symbotic_small.map"
     
     stripped_map_name = map_name.split("/")[-1]

@@ -3,14 +3,14 @@ from .graph import Graph
 from .agent import *
 from .utils import *
 from typing import Dict, Tuple
-from .task_allocation_algorithms.c_lns import lns_call
+from .task_allocation_algorithms.LNS_PBS import lns_pbs_call
 from .task_allocation_algorithms.initial_solutions.max_regret_FC import max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.randomized_max_regret_FC import randomized_max_regret_FC_call
 from .task_allocation_algorithms.initial_solutions.FCF import FCF_call
 from .task_allocation_algorithms.initial_solutions.greedy_allocation import greedy_call
 from .task_allocation_algorithms.initial_solutions.randomized_greedy import randomized_greedy_call
 from .task_allocation_algorithms.initial_solutions.random_allocation import random_call  
-from .task_allocation_algorithms.py_lns_V2 import py_lns_call
+from .task_allocation_algorithms.M2M import M2M_call
 from .task_allocation_algorithms.initial_solutions.fast_FCF import fast_FCF_call
 from .task_allocation_algorithms.initial_solutions.fast_SCF import fast_SCF_call
 from .task_allocation_algorithms.initial_solutions.fast_greedy import fast_greedy_call
@@ -37,18 +37,18 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         cost_calculation_method (str): Method for calculating cost ("manhattan" or "shortest_path")
         removal_operator (str): Removal operator for LNS ("random" or "worst")
         repair_operator (str): Repair operator for LNS ("greedy")
-        acceptance_function (str): Acceptance function for py_lns
-        T_0 (float): Initial temperature for py_lns
-        alpha (float): Cooling rate for py_lns
+        acceptance_function (str): Acceptance function for M2M
+        T_0 (float): Initial temperature for M2M
+        alpha (float): Cooling rate for M2M
 
     Returns:
         AgentLoader: Returns updated AgentLoader object
     """
 
-    if improvement_task_assignment_strategy == "py_lns":
-        return py_lns_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
-    elif improvement_task_assignment_strategy == "c_lns":
-        return lns_call(S, G, map, Rs, J, t)
+    if improvement_task_assignment_strategy == "M2M":
+        return M2M_call(S, G, Rs, J, initial_task_assignment_strategy, time_limit=1.0, removal_size=2, cost_calculation_method=cost_calculation_method, removal_operator=removal_operator, repair_operator=repair_operator, t=t, acceptance_function=acceptance_function, T_0=T_0, alpha=alpha, base_cost_weight=base_cost_weight, deadline_weight=deadline_weight, sku_distribution_weight=sku_distribution_weight, agent_unallocated_penalty=agent_unallocated_penalty)
+    elif improvement_task_assignment_strategy == "LNS_PBS":
+        return lns_pbs_call(S, G, map, Rs, J, t)
     elif improvement_task_assignment_strategy == "none":
         pass
     else:
@@ -58,7 +58,7 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
     if initial_task_assignment_strategy == "random":
         return random_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "c_lns":
-        return lns_call(S, G, map, Rs, J, t)
+        return lns_pbs_call(S, G, map, Rs, J, t)
     elif initial_task_assignment_strategy == "greedy":
         return greedy_call(S, G, Rs, J, method=cost_calculation_method)
     elif initial_task_assignment_strategy == "randomized_greedy":

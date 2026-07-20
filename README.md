@@ -26,8 +26,9 @@ Python 3.11+ is required. Install all Python dependencies with:
 ```bash
 pip install -r requirements.txt
 ```
+or manually install the following packages:
 
-Key packages include `numpy`, `scipy`, `pandas`, `matplotlib`, `pybind11`, and `statsmodels`.
+Key packages include `numpy`, `scipy`, `pybind11`, `pybind["global"]`, and `munkres`
 
 ### C++ Requirements
 
@@ -45,7 +46,7 @@ sudo apt-get install cmake build-essential libeigen3-dev libboost-all-dev
 
 ### Git Submodules
 
-The four C++ solvers are included as git submodules. After cloning the repo, initialize them with:
+The three C++ solvers are included as git submodules. After cloning the repo, initialize them with:
 
 ```bash
 git submodule update --init --recursive
@@ -121,7 +122,7 @@ The script creates output directories (`data/raw_data`, `data/buffer_data`, `dat
 | `weight_init_method` | `uniform` | How SKU weights are initialized |
 | `task_gen_strategy` | `feedback_control` | Task generation strategy; uses inventory feedback to regulate task rate |
 | `initial_task_assign_strategy` | `fast_greedy` | Algorithm used for the initial task assignment |
-| `improvement_task_assign_strategy` | `c_lns` | Algorithm used for iterative improvement (C-LNS) |
+| `improvement_task_assign_strategy` | `LNS_PBS` | Algorithm used for iterative improvement (LNS-PBS) |
 | `cost_calculation_method` | `shortest_path` | How agent travel costs are estimated |
 | `path_planning_strategy` | `pbs` | Multi-agent path planner (Priority-Based Search) |
 | `map` | `data/maps/study_small_restricted` | Warehouse map file |
@@ -136,10 +137,8 @@ The script creates output directories (`data/raw_data`, `data/buffer_data`, `dat
 | `deadline_weight` | `0.0` | Weight on deadline violations in the objective |
 | `sku_distribution_weight` | `0.0` | Weight on SKU distribution balance in the objective |
 | `agent_unallocated_penalty` | `5.0` | Penalty applied per unallocated agent |
-| `solution_repair_detection_function` | `none` | Method for detecting when a solution needs repair |
-| `solution_repair_function` | `none` | Method used to repair a degraded solution |
 
-**Output** — results for each run are written to `data/raw_data/`. Intermediate snapshots can be enabled by setting `output_intermediate_data=True` and `intermediate_data_interval` to the desired timestep cadence.
+**Output** — results for each run are written to `data/raw_data/`.
 
 ---
 

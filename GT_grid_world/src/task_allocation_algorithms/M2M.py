@@ -2,8 +2,7 @@ import numpy as np
 import math
 import random
 import time
-from typing import Set, Tuple, List, Dict
-from ..utils import manhattan_distance
+from typing import Tuple, List, Dict
 from ..graph import Graph
 from ..agent import AgentLoader
 from ..analysis.statistics import Stats
@@ -427,7 +426,7 @@ class LNS:
                 total_cost -= G.get_distance(agent.task_sequence[i][2], agent.task_sequence[i+1][1])
         return total_cost
     
-def py_lns_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
+def M2M_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
                 initial_task_assignment_strategy: str, time_limit: float = 1.0,
                 removal_size: int = 3, cost_calculation_method: str = "manhattan",
                 removal_operator: str = "worst", repair_operator: str = "greedy", t: int = None,

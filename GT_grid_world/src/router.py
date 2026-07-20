@@ -7,7 +7,6 @@ from .analysis.statistics import *
 from typing import Dict, Tuple
 
 def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
-    states = [agent.state for agent in Rs.agents]
 
     goal_locations = []
     for agent in Rs.agents:
@@ -36,8 +35,6 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
                 goal_locations[i] = agent.home
 
     print(f"Goal locations: {goal_locations}")
-    # print(f"Number of goal locations: {len(goal_locations)}")
-    # print(f"Number of unique goal locations: {len(set(goal_locations))}")
     
     latch = False
     while not sequences:

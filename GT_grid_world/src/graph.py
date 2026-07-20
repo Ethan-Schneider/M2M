@@ -1,6 +1,5 @@
 import numpy as np
 import os
-import time
 from scipy.spatial import KDTree
 
 from .node import Node

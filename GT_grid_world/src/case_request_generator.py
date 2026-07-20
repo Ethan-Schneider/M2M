@@ -1,6 +1,6 @@
 import numpy as np
 import random
-from typing import Set, Tuple, Dict
+from typing import Tuple, Dict
 from .graph import Graph
 from .agent import AgentLoader
 from .inventory_manager.inventory import Inventory
