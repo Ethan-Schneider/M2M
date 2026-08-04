@@ -18,7 +18,7 @@ from gurobipy import GRB
 # Gurobi error out instead of falling back, so we only set it when it exists.
 _GUROBI_LICENSE_PATH = os.path.join("data", "licenses", "gurobi.lic")
 if os.path.isfile(_GUROBI_LICENSE_PATH):
-    os.environ["GRB_LICENSE_FILE"] = _GUROBI_LICENSE_PATH
+    os.environ["GRB_LICENSE_FILE"] = "data/licenses/gurobi.lic"
 
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2

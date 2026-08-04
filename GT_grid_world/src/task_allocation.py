@@ -13,7 +13,7 @@ from .task_allocation_algorithms.initial_solutions.construct_cost_elements impor
     CRM2M_DEFAULT_DETOUR_CUTOFF,
 )
 from .task_allocation_algorithms.hbh_mla_star import hbh_mla_star_call
-from .task_allocation_algorithms.ta_hybrid_driver import ta_hybrid_call
+# from .task_allocation_algorithms.ta_hybrid_driver import ta_hybrid_call
 
 def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], initial_task_assignment_strategy : str, 
                    improvement_task_assignment_strategy : str, map : str, t : int, cost_calculation_method : str, 
@@ -64,17 +64,17 @@ def TaskAllocation(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple],
         # full path into agent.path_sequence so the external ECBS/PBS routing
         # step is skipped in execute() when this strategy is selected.
         return hbh_mla_star_call(S, G, Rs, J, t)
-    elif improvement_task_assignment_strategy == "ta_hybrid":
-        # Offline TA-Hybrid (Liu, Ma, Li, Koenig, AAMAS 2019). The
-        # driver runs a special-TSP task assignment once at t=0 and
-        # then coordinates per-tick PlanPathsToDelivery (ICBS) and
-        # PlanPathsToPickup (time-extended min-cost max-flow) calls.
-        # Like HBH+MLA*, it's a coupled allocator + path planner: the
-        # driver writes the full path into agent.path_sequence so the
-        # external ECBS/PBS routing step is skipped in execute() when
-        # this strategy is selected. Requires --use-precomputed-schedule
-        # (the offline assumption).
-        return ta_hybrid_call(S, G, Rs, J, t, schedule=schedule)
+    # elif improvement_task_assignment_strategy == "ta_hybrid":
+    #     # Offline TA-Hybrid (Liu, Ma, Li, Koenig, AAMAS 2019). The
+    #     # driver runs a special-TSP task assignment once at t=0 and
+    #     # then coordinates per-tick PlanPathsToDelivery (ICBS) and
+    #     # PlanPathsToPickup (time-extended min-cost max-flow) calls.
+    #     # Like HBH+MLA*, it's a coupled allocator + path planner: the
+    #     # driver writes the full path into agent.path_sequence so the
+    #     # external ECBS/PBS routing step is skipped in execute() when
+    #     # this strategy is selected. Requires --use-precomputed-schedule
+    #     # (the offline assumption).
+    #     return ta_hybrid_call(S, G, Rs, J, t, schedule=schedule)
     elif improvement_task_assignment_strategy == "none":
         # Falls through to the initial-allocator dispatch below.
         pass

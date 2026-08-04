@@ -9,11 +9,14 @@ from .construct_cost_elements import (
     manhattan_distance,
     per_task_type_sku_distribution_term,
     compute_crm2m_terms,
-    rearrangement_cost_cube,
+    shuffle_location_indices,
+    precompute_shuffle_benefit_by_ref,
+    rearrangement_best_assignment,
     TASK_TYPE_SHUFFLE,
     CRM2M_DEFAULT_LAMBDA,
     CRM2M_DEFAULT_DETOUR_CUTOFF,
 )
+from ...reallocation_tasks.jr_consumer import shuffle_reference_location
 
 def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
                          agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None, task_deadline_costs=None, inbound_sku_distribution_costs=None, 
@@ -66,10 +69,21 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     has_shuffle = any(
         J[task_id][4] == TASK_TYPE_SHUFFLE for task_id in idx_to_task_id.values()
     )
+    # Benefit distances to each driveway ref are static for this batch: compute
+    # once (vectorized, shuffle-location subset only) and reuse every iteration.
+    benefit_by_ref = {}
     if has_shuffle:
+        shuffle_p, shuffle_q, shuffle_ns = shuffle_location_indices(
+            J, idx_to_task_id, task_start_mask, task_goal_mask
+        )
         (crm2m_home, crm2m_start_home, crm2m_goal_home,
          crm2m_agent_home, crm2m_coupling_mask) = compute_crm2m_terms(
-            Rs, G, start_locs, goal_locs, method
+            Rs, G, start_locs, goal_locs, method,
+            start_indices=shuffle_p, goal_indices=shuffle_q,
+        )
+        benefit_by_ref = precompute_shuffle_benefit_by_ref(
+            G, J, idx_to_task_id, start_locs, goal_locs,
+            shuffle_ns, shuffle_p, shuffle_q, method,
         )
     else:
         crm2m_home = crm2m_start_home = crm2m_goal_home = None
@@ -79,7 +93,9 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     total_cost = 0.0
     total_argmin_time = 0.0
     total_update_time = 0.0
-
+    total_rearrangement_time = 0.0
+    total_location_time = 0.0
+    total_location_2_time = 0.0
     # Copy masks so we can update them
     task_start_mask_ = task_start_mask.copy()
     task_goal_mask_ = task_goal_mask.copy()
@@ -123,20 +139,57 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
 
             task_type = J[idx_to_task_id[int(n)]][4]
 
+            rearrangement_tik = time.time()
             if task_type == TASK_TYPE_SHUFFLE:
                 # crM2M (concatenated rearrangement): the type=2 cost is the
                 # full rearrangement utility -U (gated), replacing the base +
                 # SKU assembly entirely (plan section 3.4). Beneficial shuffles
                 # get negative cost; non-beneficial / over-detour / cross-aisle
-                # candidates are gated to +inf and simply never win the argmin
+                # candidates are gated and simply never win the argmin
                 # (rearrangement is opportunistic and droppable).
-                total_costs = rearrangement_cost_cube(
+                # Delay is independent of goal, so we search (M, P) with each
+                # start's best coupled goal instead of materializing (M, P, Q).
+                task_entry = J[idx_to_task_id[int(n)]]
+                ref = shuffle_reference_location(task_entry)
+                if ref is not None:
+                    location_tik = time.time()
+                    benefit_start, benefit_goal = benefit_by_ref[ref]
+                    total_location_time += time.time() - location_tik
+                    # Inter-aisle moves are allowed when benefit is measured
+                    # against the outbound driveway reference (matches
+                    # generate_reallocation_tasks / fast_optimal_insertion).
+                    coupling = np.ones_like(crm2m_coupling_mask, dtype=bool)
+                else:
+                    benefit_start = benefit_goal = None
+                    coupling = crm2m_coupling_mask
+
+                agent_allowed = None
+                if agent_task_sequence_limit > 0:
+                    agent_allowed = np.array(
+                        [len(Rs.agents[m].task_sequence) < agent_task_sequence_limit
+                         for m in range(M)],
+                        dtype=bool,
+                    )
+
+                location_2_tik = time.time()
+                new_cost, choice = rearrangement_best_assignment(
                     agent_start_cost_tensor, crm2m_agent_home, crm2m_start_home,
-                    crm2m_goal_home, crm2m_coupling_mask, valid_p, valid_q,
+                    crm2m_goal_home, coupling, valid_p, valid_q,
                     crm2m_lambda, crm2m_detour_cutoff,
                     slack=crm2m_slack, c_pp=crm2m_cpp,
                     return_margin=crm2m_return_margin,
+                    benefit_start=benefit_start,
+                    benefit_goal=benefit_goal,
+                    agent_allowed=agent_allowed,
                 )
+                total_rearrangement_time += time.time() - rearrangement_tik
+                total_location_2_time += time.time() - location_2_tik
+
+                if choice is not None and new_cost < best_cost:
+                    m_idx, p_idx, q_idx = choice
+                    best_cost = new_cost
+                    best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+                continue
             else:
                 # Mask out all invalid start and goal locations
                 agent_costs = agent_start_cost_tensor[:, valid_p]
@@ -283,7 +336,10 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
         total_update_time += time.time() - update_tik
 
     print(f"Total argmin time: {total_argmin_time}")
+    print(f"Total rearrangement time: {total_rearrangement_time}")
+    print(f"Total location time: {total_location_time}")
     print(f"Total update time: {total_update_time}")
+    print(f"Total location 2 time: {total_location_2_time}")
     # exit()
     return Rs, allocations, total_cost
 

@@ -11,7 +11,7 @@ from src.task_allocation_algorithms.repair_detection.backtracking import detect_
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
-from src.reallocation_tasks.generate_reallocation_tasks import (
+from src.reallocation_tasks.generate_reallocation_tasks_V2 import (
     generate_reallocation_tasks,
     generate_crm2m_reallocation_tasks,
     merge_reallocation_tasks_into_J,
@@ -19,6 +19,7 @@ from src.reallocation_tasks.generate_reallocation_tasks import (
 from src.reallocation_tasks.jr_consumer import (
     add_reallocation_tasks_to_J_a,
     prune_uncommitted_rearrangements,
+    shuffle_reference_location,
     REARRANGEMENT_TASK_ID_BASE,
 )
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
@@ -32,6 +33,30 @@ from src.task_allocation_algorithms.initial_solutions.construct_cost_elements im
 )
 from src.output_buffer import OutputBuffer, QUEUE_DEADLINE, tasks_per_min_to_per_tick
 
+MAX_TASK_NUMBER_MODES = ("constant", "oscillating")
+
+def compute_max_task_number(t: int, mode: str, min_value: int, max_value: int, period: int) -> int:
+    """
+    Compute the max_task_number for timestep ``t``.
+
+    "constant" always returns ``max_value``. "oscillating" follows a raised-cosine
+    wave that starts at ``min_value`` at t=0 and reaches ``max_value`` after
+    ``period`` timesteps, then continues oscillating between the two with a
+    full cycle length of ``2 * period``.
+    """
+    if mode == "constant":
+        return max_value
+    elif mode == "oscillating":
+        if period <= 0:
+            return max_value
+        phase = (np.pi * t) / period
+        value = min_value + (max_value - min_value) * (1 - np.cos(phase)) / 2
+        return int(round(value))
+    else:
+        raise ValueError(
+            f"Unknown max_task_number_mode {mode!r}; expected one of {MAX_TASK_NUMBER_MODES}"
+        )
+
 # irM2M post-allocation insertion methods (Ethan's task_queue). crM2M runs
 # instead via ``enable_rearrangement`` (concatenated, buffer-aware) below.
 REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion", "fast_insertion")
@@ -39,6 +64,9 @@ REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion", "fast_insertio
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
+            max_tasks_mode: str = "constant",
+            max_tasks_min: int = 0,
+            max_tasks_period: int = 0,
             initial_task_assignment_strategy : str = "lns",
             improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 999999,
@@ -104,6 +132,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     J_a = {}
     J_a_objectives = {}
 
+    item_task_locks = {}
+    pending_task_targets = {}
+
     last_task_id = 0
     # crM2M: monotonically increasing id allocator for rearrangement tasks, kept
     # above REARRANGEMENT_TASK_ID_BASE so shuffle ids never collide with real ones.
@@ -151,21 +182,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             print(f"Number of tasks remaining in queue: {queue.shape[0]}")
             print(f"Number of deferred tasks: {len(deferred_queue)}")
 
-        # See the ``pulse_load_experiment`` note above -- only when this flag
-        # is set do we override the CLI ``max_task_number`` and gate
-        # reallocation-task generation on the 500-tick pulse. Under normal
-        # runs the CLI value drives the WIP cap and reallocation stays on.
-        if pulse_load_experiment:
-            if t == 300:
-                allow_reallocation_tasks = False
-
-            if t%500 == 0 and t > 0:
-                if max_task_number == 0:
-                    max_task_number = 20
-                    allow_reallocation_tasks = False
-                else:
-                    max_task_number = 0
-                    allow_reallocation_tasks = True
+        current_max_task_number = compute_max_task_number(
+            t, max_tasks_mode, max_tasks_min, max_task_number, max_tasks_period
+        )
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -188,7 +207,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
-                max_task_number=max_task_number,
+                max_task_number=current_max_task_number,
                 frequency=frequency,
                 deadline_generation_method=deadline_generation_method,
                 deadline_offset=deadline_offset,
@@ -219,7 +238,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
-            if len(J) < max_task_number:
+            if len(J) < current_max_task_number:
                 if frequency >= 1.: 
                     N = 1
                 elif frequency < 1.: 
@@ -230,7 +249,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 tik = time.time()
 
                 J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
-                                                                                                inbound_to_outbound_ratio, last_task_id, max_task_number,
+                                                                                                inbound_to_outbound_ratio, last_task_id, current_max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
                                                                                                   initial_inventory)
@@ -246,15 +265,26 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # regenerated each tick instead.
         if enable_rearrangement and use_precomputed_queue and queue is not None:
             print("=============================" + "Reallocation Tasks (crM2M)" + "=============================")
+            # tik = time.time()
+            # Ta = generate_crm2m_reallocation_tasks(queue, J, G, Rs, B, W, t)
+            # next_rearrangement_task_id = add_reallocation_tasks_to_J_a(
+            #     Ta, J_a, G, next_rearrangement_task_id
+            # )
+            # S.log_reallocation_tasks_generated(t, len(Ta))
+            # tok = time.time()
+            # S.log_reallocation_generation_time(t, tok - tik)
+            # print(f"Number of reallocation tasks generated: {len(Ta)} ({tok - tik:.4f}s)")
+
             tik = time.time()
-            Ta = generate_crm2m_reallocation_tasks(queue, J, G, Rs, B, W, t)
+            Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t, item_task_locks, pending_task_targets, use_item_task_locks=False)
             next_rearrangement_task_id = add_reallocation_tasks_to_J_a(
                 Ta, J_a, G, next_rearrangement_task_id
             )
+            generation_time = time.time() - tik
             S.log_reallocation_tasks_generated(t, len(Ta))
+            S.log_reallocation_generation_time(t, generation_time)
             tok = time.time()
-            S.log_reallocation_generation_time(t, tok - tik)
-            print(f"Number of reallocation tasks generated: {len(Ta)} ({tok - tik:.4f}s)")
+            print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
 
         tik = time.time()
 
@@ -274,7 +304,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # dict it is given -- it only reads it and writes agent.task_sequence).
         J_for_alloc = {**J, **J_a} if enable_rearrangement else J
 
-        if len(J_a) > 0 or total < max_task_number or improvement_task_assignment_strategy == "ta_hybrid":
+        if len(J_a) > 0 or total < current_max_task_number or improvement_task_assignment_strategy == "ta_hybrid":
             # TA-Hybrid must be called every tick (not gated on task
             # backlog) so the outer driver can detect group transitions
             # and replan even when no new tasks are unallocated. Other
@@ -363,6 +393,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                             if seq_i > 0
                             else crm2m_agent.state
                         )
+                        # Prefer the shuffle's driveway reference_location for
+                        # benefit (matches allocation scoring / irM2M); detour
+                        # still uses agent-0 home (h0).
                         benefit, detour, utility = committed_shuffle_terms(
                             G,
                             prev_cell=prev_cell,
@@ -374,6 +407,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                             lambda_=crm2m_lambda,
                             method=cost_calculation_method,
                             return_margin=crm2m_return_margin,
+                            benefit_reference=shuffle_reference_location(
+                                J_a[shuffle_id]
+                            ),
                         )
                         S.record_rearrangement_task_score(
                             shuffle_id, benefit, detour, utility
@@ -414,9 +450,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             and queue is not None
         ):
             print("=============================" + "Reallocation Tasks" + "=============================")
-            if allow_reallocation_tasks:
+            if allow_reallocation_tasks and reallocation_task_method != "simultaneous":
                 tik = time.time()
-                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
+                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t, item_task_locks, pending_task_targets, use_item_task_locks=False)
                 generation_time = time.time() - tik
                 S.log_reallocation_tasks_generated(t, len(Ta))
                 S.log_reallocation_generation_time(t, generation_time)
@@ -454,31 +490,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         f"(construct: {construct_time:.4f}s, solve: {solve_time:.4f}s, "
                         f"{num_binary_vars} binary vars, {num_chosen} tasks chosen)"
                     )
-                elif reallocation_task_method == "simultaneous":
-                    tik = time.time()
-                    last_task_id = merge_reallocation_tasks_into_J(Ta, J, G, last_task_id)
-                    Rs, _, _ = task_allocation.TaskAllocation(
-                        S,
-                        G,
-                        Rs,
-                        J,
-                        initial_task_assignment_strategy,
-                        improvement_task_assignment_strategy,
-                        map,
-                        t,
-                        cost_calculation_method,
-                        removal_operator,
-                        repair_operator,
-                        acceptance_function,
-                        T_0,
-                        alpha,
-                        base_cost_weight,
-                        deadline_weight,
-                        sku_distribution_weight,
-                        agent_unallocated_penalty,
-                    )
-                    tok = time.time()
-                    print(f"Simultaneous reallocation allocation time: {tok - tik}")
 
         S.record_buffer_prediction(t, G, Rs, J, J_a, output_buffer)
 
@@ -771,7 +782,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
     return t
 
-def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
+def main(seed: int, num_robots: int, T: int, max_tasks_mode: str, max_tasks_min: int, max_tasks_period: int, max_number_tasks: int, 
          task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
          path_planning_strategy: str, map_name: str, time_limit: int = 999999,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
@@ -936,6 +947,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         cost_calculation_method=cost_calculation_method,
         seed=seed,
         max_tasks=max_number_tasks,
+        max_tasks_mode=max_tasks_mode,
+        max_tasks_min=max_tasks_min,
+        max_tasks_period=max_tasks_period,
         task_generation_strategy=effective_task_generation_strategy,
         initial_task_assignment_strategy=initial_task_assignment_strategy,
         improvement_task_assignment_strategy=improvement_task_assignment_strategy,
@@ -1011,6 +1025,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     simulated_timesteps = execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
             case_request_strategy=task_generation_strategy, 
             max_task_number=max_number_tasks, 
+            max_tasks_mode=max_tasks_mode,
+            max_tasks_min=max_tasks_min,
+            max_tasks_period=max_tasks_period,
             initial_task_assignment_strategy=initial_task_assignment_strategy, 
             improvement_task_assignment_strategy=improvement_task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
@@ -1085,6 +1102,9 @@ if __name__=="__main__":
     parser.add_argument('--seed', type=int, required=True, help='Random seed for reproducibility')
     parser.add_argument('--num-robots', type=int, required=True, help='Number of robots')
     parser.add_argument('--time-horizon', type=int, required=True, help='Time horizon T')
+    parser.add_argument('--max-tasks-mode', type=str, required=True, help='Maximum number of tasks mode')
+    parser.add_argument('--max-tasks-min', type=int, required=True, help='Minimum number of tasks')
+    parser.add_argument('--max-tasks-period', type=int, required=True, help='Maximum number of tasks period')
     parser.add_argument('--max-tasks', type=int, required=True, help='Maximum number of tasks')
     parser.add_argument('--task-gen-strategy', type=str, required=True, 
                        choices=['informed_uniform', 'uninformed_uniform', 'feedback_control'],
@@ -1245,6 +1265,9 @@ if __name__=="__main__":
         seed=args.seed,
         num_robots=args.num_robots,
         T=args.time_horizon,
+        max_tasks_mode=args.max_tasks_mode,
+        max_tasks_min=args.max_tasks_min,
+        max_tasks_period=args.max_tasks_period,
         max_number_tasks=args.max_tasks,
         task_generation_strategy=args.task_gen_strategy,
         initial_task_assignment_strategy=args.initial_task_assign_strategy,

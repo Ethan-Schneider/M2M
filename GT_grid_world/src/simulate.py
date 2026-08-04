@@ -81,7 +81,10 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
         if other_task_id == changed_task_id:
             continue
 
-        start_locations, goal_locations, deadline, task_sku_id, task_type = J[other_task_id]
+        entry = J[other_task_id]
+        start_locations, goal_locations, deadline, task_sku_id, task_type = entry[:5]
+        # Optional 6th field: driveway reference_location on crM2M J_a shuffles.
+        extra = entry[5:]
 
         new_start_locs = start_locations
         new_goal_locs = goal_locations
@@ -97,7 +100,14 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             )
 
         if new_start_locs is not start_locations or new_goal_locs is not goal_locations:
-            J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
+            J[other_task_id] = (
+                new_start_locs,
+                new_goal_locs,
+                deadline,
+                task_sku_id,
+                task_type,
+                *extra,
+            )
 
 
 def _attempt_pickup(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, Tuple], S: Stats) -> str:

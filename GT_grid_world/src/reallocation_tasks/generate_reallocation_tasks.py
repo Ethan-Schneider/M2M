@@ -37,7 +37,12 @@ def merge_reallocation_tasks_into_J(
     last_task_id: int,
 ) -> int:
     """Add candidate rearrangement tasks to ``J`` for simultaneous (crM2M) allocation."""
-    for _task_key, (C_i, _release, deadline, task_type, _aisle_reference) in tasks_a.items():
+    for _task_key, task_data in tasks_a.items():
+        if len(task_data) >= 5:
+            C_i, _release, deadline, task_type, reference_location = task_data[:5]
+        else:
+            C_i, _release, deadline, task_type = task_data[:4]
+            reference_location = None
         if not C_i:
             continue
         starts = frozenset(start for start, _goal in C_i)
@@ -46,7 +51,17 @@ def merge_reallocation_tasks_into_J(
         sku = G.warehouse.get_sku_at_location(sample_start)
         sku_id = int(sku.sku_id) if sku is not None else 0
         last_task_id += 1
-        J[last_task_id] = (starts, goals, int(deadline), sku_id, int(task_type))
+        if reference_location is not None:
+            J[last_task_id] = (
+                starts,
+                goals,
+                int(deadline),
+                sku_id,
+                int(task_type),
+                reference_location,
+            )
+        else:
+            J[last_task_id] = (starts, goals, int(deadline), sku_id, int(task_type))
     return last_task_id
 
 

@@ -176,7 +176,7 @@ def solve_insertion_fast(
             # U = benefits[np.newaxis, :] - lambda_ * np.maximum(
             #     0.0, dfull - slot_slack[:, np.newaxis]
             # )
-            U = benefits[np.newaxis, :]
+            U = benefits[np.newaxis, :] - lambda_ * dfull
             slot_rows, cand_cols = np.nonzero(U > 0)
 
             new_obj: Dict[InsertionKey, float] = {}

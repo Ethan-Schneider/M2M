@@ -10,21 +10,24 @@ mkdir -p "$repo_root/data/buffer_data"
 mkdir -p "$repo_root/data/videos"
 
 # Define arrays of parameters to test
-seeds=(120)
-num_robots=(10)
-time_horizons=(1000)
+seeds=(1452)
+num_robots=(40)
+time_horizons=(3600)
 max_tasks=(120)
+max_tasks_mode="oscillating"
+max_tasks_min=0
+max_tasks_period=1800
 frequencies=(0.25)
 inbound_outbound_ratio=(1.0)
-num_skus=(10)
-initial_inventory=(25.0)
+num_skus=(60)
+initial_inventory=(40.0)
 weight_init_method="uniform"
 task_gen_strategy="feedback_control"
 initial_task_assign_strategy="fast_greedy"
 improvement_task_assign_strategy="M2M"
 cost_calculation_method="shortest_path"
 path_planning_strategy="pbs"
-map="$repo_root/data/maps/study_small_skinny"
+map="$repo_root/data/maps/study_small_restricted_longer"
 removal_operator="shaw"
 repair_operator="greedy"
 acceptance_function="simulated_annealing"
@@ -35,27 +38,33 @@ deadline_offset=180
 output_intermediate_data=False
 intermediate_data_interval=4000
 base_cost_weight=1.0
-deadline_weight=0.25
+deadline_weight=0.0
 sku_distribution_weight=0.0
 agent_unallocated_penalty=5.0
 solution_repair_detection_function="none"
 solution_repair_function="none"
-W=50
-B=0
+W=300
+B=60
 queue_release_window=60
 lambda_=1.0
-# One of: none, simultaneous, insertion, fast_insertion (numpy-vectorized MILP
-# construction -- same result as insertion, faster to build)
-reallocation_task_method="none"
+# crM2M (concatenated rearrangement): use --enable-rearrangement, not
+# reallocation_task_method=simultaneous (that is the old unbounded-in-J path).
+enable_rearrangement=true
+crm2m_lambda=1.0
+crm2m_detour_cutoff=10
+crm2m_return_margin=0
+# One of: none, simultaneous, insertion, fast_insertion. Keep "none" when
+# enable_rearrangement=true so only the pruned J_a crM2M path runs.
+reallocation_task_method="simultaneous"
 pick_place_time=true
-buffer_capacity_k=20
-buffer_consumption_rate=120
-log_buffer_predictions=true
+buffer_capacity_k=100
+buffer_consumption_rate=100
+log_buffer_predictions=false
 
 # Precomputed queue/inventory (set use_precomputed_queue=true to enable)
 use_precomputed_queue=true
-queue_file="$repo_root/data/queues/small_skinny_adversarial_2.txt"
-initial_inventory_file="$repo_root/data/initial_inventories/small_skinny_adversarial_2_init_inventory.txt"
+queue_file="$repo_root/data/queues/small_restricted_longer_adversarial_60.txt"
+initial_inventory_file="$repo_root/data/initial_inventories/small_restricted_longer_adversarial_60_init_inventory.txt"
 run_until_queue_complete=false
 
 precomputed_args=()
@@ -76,6 +85,14 @@ fi
 buffer_prediction_args=()
 if [ "$log_buffer_predictions" = true ]; then
     buffer_prediction_args+=(--log-buffer-predictions)
+fi
+
+rearrangement_args=()
+if [ "$enable_rearrangement" = true ]; then
+    rearrangement_args+=(--enable-rearrangement)
+    rearrangement_args+=(--crm2m-lambda "$crm2m_lambda")
+    rearrangement_args+=(--crm2m-detour-cutoff "$crm2m_detour_cutoff")
+    rearrangement_args+=(--crm2m-return-margin "$crm2m_return_margin")
 fi
 
 # Loop through all combinations
@@ -115,6 +132,10 @@ for seed in "${seeds[@]}"; do
                         echo "  Lookahead Beginning (B): $B"
                         echo "  Queue Release Window: $queue_release_window"
                         echo "  Detour Penalty (lambda_): $lambda_"
+                        echo "  Enable Rearrangement (crM2M): $enable_rearrangement"
+                        echo "  crM2M lambda: $crm2m_lambda"
+                        echo "  crM2M detour cutoff: $crm2m_detour_cutoff"
+                        echo "  crM2M return margin: $crm2m_return_margin"
                         echo "  Reallocation Task Method: $reallocation_task_method"
                         echo "  Pick/Place Time: $pick_place_time"
                         echo "  Buffer Capacity (K): $buffer_capacity_k"
@@ -131,6 +152,9 @@ for seed in "${seeds[@]}"; do
                             --seed "$seed" \
                             --num-robots "$robots" \
                             --time-horizon "$T" \
+                            --max-tasks-mode "$max_tasks_mode" \
+                            --max-tasks-min "$max_tasks_min" \
+                            --max-tasks-period "$max_tasks_period" \
                             --max-tasks "$max_task" \
                             --task-gen-strategy "$task_gen_strategy" \
                             --initial-task-assign-strategy "$initial_task_assign_strategy" \
@@ -168,7 +192,8 @@ for seed in "${seeds[@]}"; do
                             --buffer-consumption-rate "$buffer_consumption_rate" \
                             "${precomputed_args[@]}" \
                             "${pick_place_args[@]}" \
-                            "${buffer_prediction_args[@]}"
+                            "${buffer_prediction_args[@]}" \
+                            "${rearrangement_args[@]}"
 
                         # Optional: Add a small delay between runs
                         sleep 1

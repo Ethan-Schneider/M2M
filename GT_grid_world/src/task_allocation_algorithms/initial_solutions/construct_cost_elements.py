@@ -1,8 +1,10 @@
 import numpy as np
+import time
 
 from typing import Set, Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
+from ...reallocation_tasks.jr_consumer import shuffle_reference_location
 
 # Task type codes mirror those in case_request_generator.py / simulate.py:
 #   0 = outbound (warehouse -> driveway)
@@ -202,17 +204,68 @@ def _crm2m_distance(G: Graph, a: Tuple[int, int], b: Tuple[int, int], method: st
     raise ValueError(f"Invalid cost calculation method: {method}")
 
 
+def _crm2m_distances_to_point(
+    G: Graph,
+    locs: List[Tuple[int, int]],
+    point: Tuple[int, int],
+    method: str = "manhattan",
+    indices: np.ndarray = None,
+    locs_arr: np.ndarray = None,
+) -> np.ndarray:
+    """Distances from ``point`` to locations, vectorized for Manhattan.
+
+    Returns a full-length ``(len(locs),)`` float array. When ``indices`` is
+    given, only those entries are filled (others stay 0); callers must only
+    read filled indices (e.g. a shuffle task's ``valid_p`` / ``valid_q``).
+
+    Optional ``locs_arr`` is a prebuilt ``(N, 2)`` int array of ``locs`` so
+    callers that hit many references avoid re-converting the tuple list.
+    """
+    n = len(locs)
+    out = np.zeros(n, dtype=float)
+    if n == 0:
+        return out
+    if indices is None:
+        idx = np.arange(n, dtype=np.intp)
+    else:
+        idx = np.asarray(indices, dtype=np.intp)
+        if idx.size == 0:
+            return out
+
+    if method == "manhattan":
+        if locs_arr is None:
+            locs_arr = np.asarray(locs, dtype=np.int32)
+        pts = locs_arr[idx]
+        dists = (
+            np.abs(pts[:, 0] - point[0]) + np.abs(pts[:, 1] - point[1])
+        ).astype(float)
+    elif method == "shortest_path":
+        dists = np.array(
+            [float(G.get_distance(locs[i], point)) for i in idx], dtype=float
+        )
+    else:
+        raise ValueError(f"Invalid cost calculation method: {method}")
+
+    if indices is None:
+        return dists
+    out[idx] = dists
+    return out
+
+
 def compute_crm2m_terms(
     Rs: AgentLoader,
     G: Graph,
     start_locs: List[Tuple[int, int]],
     goal_locs: List[Tuple[int, int]],
     method: str = "manhattan",
+    start_indices: np.ndarray = None,
+    goal_indices: np.ndarray = None,
 ) -> Tuple[Tuple[int, int], np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Static terms for the crM2M rearrangement utility (plan section 3.4).
 
     The rearrangement utility is ``U(a_m, s_p, d_q) = b(s_p, d_q) - lambda * Delta(a_m, s_p)``
-    where (all distances reference a single fixed dummy ``h_0 = Rs.agents[0].home``):
+    where (all distances reference a single fixed dummy ``h_0 = Rs.agents[0].home``
+    unless a per-task driveway ``reference_location`` overrides the benefit term):
 
     - ``Delta(a_m, s_p) = dist(g^m_{i-1}, s_p) + dist(s_p, h_0) - dist(a_m, h_0)`` --
       the marginal detour of inserting a pickup at ``s_p`` on the agent's way
@@ -220,18 +273,25 @@ def compute_crm2m_terms(
       by the allocator's ``agent_start_cost_tensor`` (it already equals the
       distance from the agent's previous-task goal / current anchor to ``s_p``,
       and is updated in place as the agent picks up more tasks in a batch).
-    - ``b(s_p, d_q) = dist(s_p, h_0) - dist(d_q, h_0)`` -- how much closer to the
-      aisle exit the item moved (agent-independent placement quality).
+    - ``b(s_p, d_q) = dist(s_p, h_0) - dist(d_q, h_0)`` by default -- how much
+      closer to the aisle exit the item moved. When a shuffle carries a
+      driveway ``reference_location`` (from ``generate_reallocation_tasks``),
+      allocators instead use ``b = dist(s_p, ref) - dist(d_q, ref)`` matching
+      irM2M / ``fast_optimal_insertion.benefit``.
 
     This function returns only the agent-independent / anchor-dependent pieces
     so the allocator never densifies the full ``(M, N, P, Q, K)`` tensor: the
     ``(M, P)`` detour and ``(P, Q)`` benefit are assembled on demand per task
     from these vectors, and the ``K`` coupling is the ``(P, Q)`` same-aisle mask.
 
+    Optional ``start_indices`` / ``goal_indices`` restrict distance fills to a
+    subset (e.g. locations that appear on any shuffle task). Unfilled entries
+    stay 0 and must not be read.
+
     Returns:
         - ``home``: the dummy reference cell ``h_0``.
-        - ``start_home``: ``(P,)`` distances ``dist(s_p, h_0)``.
-        - ``goal_home``: ``(Q,)`` distances ``dist(d_q, h_0)``.
+        - ``start_home``: ``(P,)`` distances ``dist(s_p, h_0)`` (detour + default benefit).
+        - ``goal_home``: ``(Q,)`` distances ``dist(d_q, h_0)`` (default benefit).
         - ``agent_home``: ``(M,)`` distances ``dist(a_m, h_0)`` from each agent's
           current anchor (last task goal, else live state). Kept as its own
           vector -- deliberately NOT aliased to ``g^m_{i-1}`` -- so downstream
@@ -240,14 +300,18 @@ def compute_crm2m_terms(
           share an aisle (column). This reproduces the generator's per-aisle
           ``C_i`` coupling (``s_p in S^k_n`` and ``d_q in D^k_n``) as a single
           global mask, since coupling is "same column" for every shuffle task.
+          Allocators that score a shuffle with a driveway ``reference_location``
+          may replace this with an all-True mask (inter-aisle moves allowed).
     """
     home = Rs.agents[0].home
 
-    start_home = np.array(
-        [_crm2m_distance(G, s, home, method) for s in start_locs], dtype=float
+    start_arr = np.asarray(start_locs, dtype=np.int32) if start_locs else None
+    goal_arr = np.asarray(goal_locs, dtype=np.int32) if goal_locs else None
+    start_home = _crm2m_distances_to_point(
+        G, start_locs, home, method, indices=start_indices, locs_arr=start_arr
     )
-    goal_home = np.array(
-        [_crm2m_distance(G, g, home, method) for g in goal_locs], dtype=float
+    goal_home = _crm2m_distances_to_point(
+        G, goal_locs, home, method, indices=goal_indices, locs_arr=goal_arr
     )
 
     M = len(Rs.agents)
@@ -259,14 +323,102 @@ def compute_crm2m_terms(
             anchor = agent.task_sequence[-1][2]
         agent_home[m] = _crm2m_distance(G, anchor, home, method)
 
-    start_cols = np.array([s[1] for s in start_locs])
-    goal_cols = np.array([g[1] for g in goal_locs])
+    if start_arr is None or start_arr.size == 0:
+        start_cols = np.empty(0, dtype=np.int32)
+    else:
+        start_cols = start_arr[:, 1]
+    if goal_arr is None or goal_arr.size == 0:
+        goal_cols = np.empty(0, dtype=np.int32)
+    else:
+        goal_cols = goal_arr[:, 1]
     if len(start_cols) == 0 or len(goal_cols) == 0:
         coupling_mask = np.zeros((len(start_locs), len(goal_locs)), dtype=bool)
     else:
         coupling_mask = start_cols[:, None] == goal_cols[None, :]
 
     return home, start_home, goal_home, agent_home, coupling_mask
+
+
+def benefit_distances_to_reference(
+    G: Graph,
+    start_locs: List[Tuple[int, int]],
+    goal_locs: List[Tuple[int, int]],
+    reference_location: Tuple[int, int],
+    method: str = "manhattan",
+    start_indices: np.ndarray = None,
+    goal_indices: np.ndarray = None,
+    start_arr: np.ndarray = None,
+    goal_arr: np.ndarray = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """``(P,)`` / ``(Q,)`` distances from each start/goal to a driveway reference.
+
+    Used as the benefit term ``b(s, g) = dist(s, ref) - dist(g, ref)`` so crM2M
+    matches ``optimal_insertion_gurobi.benefit`` / ``fast_optimal_insertion``.
+
+    Optional ``start_indices`` / ``goal_indices`` fill only a subset (typically
+    locations allowed by shuffle tasks); other entries stay 0. Optional
+    ``start_arr`` / ``goal_arr`` avoid re-converting location lists.
+    """
+    start_ref = _crm2m_distances_to_point(
+        G, start_locs, reference_location, method,
+        indices=start_indices, locs_arr=start_arr,
+    )
+    goal_ref = _crm2m_distances_to_point(
+        G, goal_locs, reference_location, method,
+        indices=goal_indices, locs_arr=goal_arr,
+    )
+    return start_ref, goal_ref
+
+
+def shuffle_location_indices(
+    J: Dict,
+    idx_to_task_id: Dict[int, int],
+    task_start_mask: np.ndarray,
+    task_goal_mask: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray, List[int]]:
+    """Union of start/goal indices allowed by any shuffle task, plus shuffle ``n``s."""
+    shuffle_ns = [
+        n for n, task_id in idx_to_task_id.items()
+        if J[task_id][4] == TASK_TYPE_SHUFFLE
+    ]
+    if not shuffle_ns:
+        empty = np.empty(0, dtype=np.intp)
+        return empty, empty, shuffle_ns
+    shuffle_rows = np.asarray(shuffle_ns, dtype=np.intp)
+    start_indices = np.flatnonzero(task_start_mask[shuffle_rows].any(axis=0))
+    goal_indices = np.flatnonzero(task_goal_mask[shuffle_rows].any(axis=0))
+    return start_indices, goal_indices, shuffle_ns
+
+
+def precompute_shuffle_benefit_by_ref(
+    G: Graph,
+    J: Dict,
+    idx_to_task_id: Dict[int, int],
+    start_locs: List[Tuple[int, int]],
+    goal_locs: List[Tuple[int, int]],
+    shuffle_ns: List[int],
+    start_indices: np.ndarray,
+    goal_indices: np.ndarray,
+    method: str = "manhattan",
+) -> Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray]]:
+    """One vectorized benefit distance pair per unique shuffle ``reference_location``.
+
+    Restricts fills to ``start_indices`` / ``goal_indices`` (shuffle-allowed
+    locations only), so M2M-only cells are skipped.
+    """
+    start_arr = np.asarray(start_locs, dtype=np.int32) if start_locs else None
+    goal_arr = np.asarray(goal_locs, dtype=np.int32) if goal_locs else None
+    benefit_by_ref: Dict[Tuple[int, int], Tuple[np.ndarray, np.ndarray]] = {}
+    for n in shuffle_ns:
+        ref = shuffle_reference_location(J[idx_to_task_id[n]])
+        if ref is None or ref in benefit_by_ref:
+            continue
+        benefit_by_ref[ref] = benefit_distances_to_reference(
+            G, start_locs, goal_locs, ref, method,
+            start_indices=start_indices, goal_indices=goal_indices,
+            start_arr=start_arr, goal_arr=goal_arr,
+        )
+    return benefit_by_ref
 
 
 def committed_shuffle_terms(
@@ -280,6 +432,7 @@ def committed_shuffle_terms(
     lambda_: float = CRM2M_DEFAULT_LAMBDA,
     method: str = "manhattan",
     return_margin: float = 0.0,
+    benefit_reference: Tuple[int, int] = None,
 ) -> Tuple[float, float, float]:
     """Reproduce the rearrangement objective's ``(benefit, detour, utility)`` for a
     single *committed* shuffle, evaluated from live post-allocation state.
@@ -294,24 +447,133 @@ def committed_shuffle_terms(
     ``agent_start_cost_tensor`` / ``agent_home`` encode:
 
         Delta   = dist(prev_cell, s_p) + dist(s_p, h0) - dist(prev_cell, h0)
-        benefit = dist(s_p, h0) - dist(d_q, h0)
+        benefit = dist(s_p, ref) - dist(d_q, ref)
         U       = benefit - lambda_ * max(0, (Delta + c_pp + return_margin) - slack)
+
+    ``ref`` defaults to ``home`` (``h_0``). Pass ``benefit_reference`` (the
+    shuffle's driveway ``reference_location``) so benefit matches irM2M /
+    ``fast_optimal_insertion`` while detour still uses ``home``.
 
     ``return_margin`` (>= 0) raises the free-move bar so the shuffle must finish
     with that many ticks of spare buffer-time; ``0.0`` reproduces the original.
 
     Returns ``(benefit, detour, utility)``.
     """
+    ref = home if benefit_reference is None else benefit_reference
     d_prev_sp = _crm2m_distance(G, prev_cell, s_p, method)
     d_sp_h0 = _crm2m_distance(G, s_p, home, method)
-    d_dq_h0 = _crm2m_distance(G, d_q, home, method)
     d_prev_h0 = _crm2m_distance(G, prev_cell, home, method)
+    d_sp_ref = _crm2m_distance(G, s_p, ref, method)
+    d_dq_ref = _crm2m_distance(G, d_q, ref, method)
 
     detour = d_prev_sp + d_sp_h0 - d_prev_h0
-    benefit = d_sp_h0 - d_dq_h0
+    benefit = d_sp_ref - d_dq_ref
     discounted_delay = max(0.0, (detour + c_pp + return_margin) - slack)
     utility = benefit - lambda_ * discounted_delay
     return float(benefit), float(detour), float(utility)
+
+
+def rearrangement_U_by_start(
+    agent_start_cost_tensor: np.ndarray,
+    agent_home: np.ndarray,
+    start_home: np.ndarray,
+    goal_home: np.ndarray,
+    coupling_mask: np.ndarray,
+    valid_p: np.ndarray,
+    valid_q: np.ndarray,
+    lambda_: float,
+    detour_cutoff: float,
+    slack: float = 0.0,
+    c_pp: float = 0.0,
+    return_margin: float = 0.0,
+    benefit_start: np.ndarray = None,
+    benefit_goal: np.ndarray = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Gated per-(agent, start) utility using each start's best coupled goal.
+
+    Detour / delay do not depend on the goal, so for fixed ``(m, p)`` the ``q``
+    that maximizes ``U = b(p,q) - lambda * delay(m,p)`` is simply the coupled
+    ``q`` with largest benefit. This collapses the ``(M, P, Q)`` search to an
+    ``(M, P)`` matrix plus a ``(|valid_p|,)`` best-goal index vector.
+
+    Returns:
+        - ``U_mp``: ``(M, |valid_p|)`` utilities; invalid / gated entries are
+          ``-inf``.
+        - ``best_q_local``: ``(|valid_p|,)`` local goal indices into ``valid_q``.
+    """
+    vp = np.asarray(valid_p, dtype=np.intp)
+    vq = np.asarray(valid_q, dtype=np.intp)
+    n_p = int(vp.size)
+    n_q = int(vq.size)
+    M = int(agent_start_cost_tensor.shape[0])
+    if n_p == 0 or n_q == 0:
+        return np.full((M, n_p), -np.inf), np.zeros(n_p, dtype=np.intp)
+
+    detour = (
+        agent_start_cost_tensor[:, vp]
+        + start_home[vp][None, :]
+        - agent_home[:, None]
+    )
+    discounted_delay = np.maximum(0.0, detour + c_pp + return_margin - slack)
+    ok_detour = (lambda_ * detour) < detour_cutoff
+
+    b_start = start_home if benefit_start is None else benefit_start
+    b_goal = goal_home if benefit_goal is None else benefit_goal
+    benefit = b_start[vp][:, None] - b_goal[vq][None, :]
+    coupling = coupling_mask[np.ix_(vp, vq)]
+    if not np.all(coupling):
+        benefit = np.where(coupling, benefit, -np.inf)
+
+    best_q_local = np.argmax(benefit, axis=1)
+    best_b = benefit[np.arange(n_p), best_q_local]
+
+    U_mp = best_b[None, :] - lambda_ * discounted_delay
+    U_mp = np.where(ok_detour & (best_b[None, :] > -np.inf) & (U_mp > 0), U_mp, -np.inf)
+    return U_mp, best_q_local
+
+
+def rearrangement_best_assignment(
+    agent_start_cost_tensor: np.ndarray,
+    agent_home: np.ndarray,
+    start_home: np.ndarray,
+    goal_home: np.ndarray,
+    coupling_mask: np.ndarray,
+    valid_p: np.ndarray,
+    valid_q: np.ndarray,
+    lambda_: float,
+    detour_cutoff: float,
+    slack: float = 0.0,
+    c_pp: float = 0.0,
+    return_margin: float = 0.0,
+    benefit_start: np.ndarray = None,
+    benefit_goal: np.ndarray = None,
+    agent_allowed: np.ndarray = None,
+) -> Tuple[float, Tuple[int, int, int] | None]:
+    """Argmin of gated ``-U`` without materializing an ``(M, P, Q)`` cube.
+
+    Returns ``(cost, (m, p_local, q_local))`` or ``(inf, None)`` when every
+    candidate is gated. Optional ``agent_allowed`` (length ``M`` bool) forces
+    disallowed agents to ``-inf`` utility (task-sequence limits).
+    """
+    U_mp, best_q_local = rearrangement_U_by_start(
+        agent_start_cost_tensor, agent_home, start_home, goal_home,
+        coupling_mask, valid_p, valid_q, lambda_, detour_cutoff,
+        slack=slack, c_pp=c_pp, return_margin=return_margin,
+        benefit_start=benefit_start, benefit_goal=benefit_goal,
+    )
+    if agent_allowed is not None:
+        U_mp = np.where(np.asarray(agent_allowed, dtype=bool)[:, None], U_mp, -np.inf)
+
+    max_u = float(np.max(U_mp)) if U_mp.size else -np.inf
+    if not np.isfinite(max_u) or max_u == -np.inf:
+        return float("inf"), None
+
+    ms, ps = np.where(U_mp == max_u)
+    pick = int(np.random.randint(ms.size)) if ms.size > 1 else 0
+    m = int(ms[pick])
+    p_local = int(ps[pick])
+    q_local = int(best_q_local[p_local])
+    return -max_u, (m, p_local, q_local)
 
 
 def rearrangement_cost_cube(
@@ -327,6 +589,8 @@ def rearrangement_cost_cube(
     slack: float = 0.0,
     c_pp: float = 0.0,
     return_margin: float = 0.0,
+    benefit_start: np.ndarray = None,
+    benefit_goal: np.ndarray = None,
 ) -> np.ndarray:
     """Per-task crM2M cost cube ``-U`` over ``(M, |valid_p|, |valid_q|)``.
 
@@ -374,37 +638,52 @@ def rearrangement_cost_cube(
     already enforced upstream (allocated locations are removed from
     ``valid_p`` / ``valid_q`` via the task masks, and allocated tasks are
     excluded from the unallocated-task set), so they need no handling here.
+
+    Optional ``benefit_start`` / ``benefit_goal`` override the benefit distances
+    (default: ``start_home`` / ``goal_home``, i.e. distances to ``h_0``). Pass
+    distances to a shuffle's driveway ``reference_location`` so benefit matches
+    irM2M / ``fast_optimal_insertion``. Detour still uses ``start_home`` (``h_0``).
+
+    Prefer :func:`rearrangement_best_assignment` / :func:`rearrangement_U_by_start`
+    in hot allocator loops -- they avoid materializing this cube.
     """
-    # Delta: (M, |valid_p|). dist(g^m_{i-1}, s_p) is the live agent_start cost.
+    vp = np.asarray(valid_p, dtype=np.intp)
+    vq = np.asarray(valid_q, dtype=np.intp)
+    n_p = int(vp.size)
+    n_q = int(vq.size)
+    M = int(agent_start_cost_tensor.shape[0])
+    cost = np.full((M, n_p, n_q), np.inf, dtype=float)
+    if n_p == 0 or n_q == 0:
+        return cost
+
+    # Delta / delay: (M, |valid_p|) -- independent of goal.
     detour = (
-        agent_start_cost_tensor[:, valid_p]
-        + start_home[valid_p][None, :]
+        agent_start_cost_tensor[:, vp]
+        + start_home[vp][None, :]
         - agent_home[:, None]
     )
-    # effective_delay = Delta + c_pp + return_margin (travel detour + pick+place
-    # service time + the safety headroom that forces the shuffle to finish before
-    # a freed buffer slot is re-consumed by competing outbound arrivals).
-    effective_delay = detour + c_pp + return_margin  # (M, |valid_p|)
-    # Slack hides part of the delay; only the overflow beyond slack is penalized.
-    discounted_delay = np.maximum(0.0, effective_delay - slack)  # (M, |valid_p|)
-    # b: (|valid_p|, |valid_q|).
-    benefit = start_home[valid_p][:, None] - goal_home[valid_q][None, :]
-    # U: (M, |valid_p|, |valid_q|).
-    U = benefit[None, :, :] - lambda_ * discounted_delay[:, :, None]
-    cost = -U
+    discounted_delay = np.maximum(0.0, detour + c_pp + return_margin - slack)
+    ok_detour = (lambda_ * detour) < detour_cutoff  # (M, P)
+    if not ok_detour.any():
+        return cost
 
-    # Hard cutoff acts on the *raw travel detour* only (ignores c_pp AND slack):
-    # never make a physically long move. c_pp is a fixed pick+place service cost,
-    # not a travel distance, so it belongs in the utility penalty term -- not in
-    # the physical-length gate. Folding c_pp into the gate is self-defeating
-    # (lambda_ * c_pp alone can exceed the cutoff and reject every shuffle);
-    # gating on Delta alone matches Ethan's insertion model, which caps the raw
-    # detour before adding the pick+place adjustment.
-    weighted_travel = lambda_ * detour  # (M, |valid_p|)
-    cost = np.where(weighted_travel[:, :, None] >= detour_cutoff, np.inf, cost)
-    cost = np.where(U <= 0, np.inf, cost)
-    coupling = coupling_mask[np.ix_(valid_p, valid_q)]  # (|valid_p|, |valid_q|)
-    cost = np.where(coupling[None, :, :], cost, np.inf)
+    b_start = start_home if benefit_start is None else benefit_start
+    b_goal = goal_home if benefit_goal is None else benefit_goal
+    benefit = b_start[vp][:, None] - b_goal[vq][None, :]  # (P, Q)
+    coupling = coupling_mask[np.ix_(vp, vq)]
+    if not coupling.any():
+        return cost
+
+    # Preprune starts with no coupled positive-benefit goal (U <= b always).
+    ok_p = (coupling & (benefit > 0)).any(axis=1)  # (P,)
+    ok_mp = ok_detour & ok_p[None, :]  # (M, P)
+    if not ok_mp.any():
+        return cost
+
+    # Single broadcast of U; write -U only into surviving entries (no np.where copies).
+    U = benefit[None, :, :] - (lambda_ * discounted_delay)[:, :, None]
+    valid = ok_mp[:, :, None] & coupling[None, :, :] & (U > 0)
+    cost[valid] = -U[valid]
     return cost
 
 

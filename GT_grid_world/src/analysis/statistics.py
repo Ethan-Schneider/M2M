@@ -151,12 +151,18 @@ class Stats:
                  queue_file: str = None,
                  initial_inventory_file: str = None,
                  run_until_queue_complete: bool = None,
-                 log_buffer_predictions: bool = False) -> None:
+                 log_buffer_predictions: bool = False,
+                 max_tasks_mode: str = None,
+                 max_tasks_min: int = None,
+                 max_tasks_period: int = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         self.__max_tasks = max_tasks
+        self.__max_tasks_mode = max_tasks_mode
+        self.__max_tasks_min = max_tasks_min
+        self.__max_tasks_period = max_tasks_period
         self.__task_generation_strategy = task_generation_strategy
         self.__initial_task_assignment_strategy = initial_task_assignment_strategy
         self.__improvement_task_assignment_strategy = improvement_task_assignment_strategy
@@ -1169,6 +1175,9 @@ class Stats:
             "seed": self.__seed,
             "num_robots": self.__num_of_robots,
             "time_horizon": self.__T,
+            "max_tasks_mode": self.__max_tasks_mode,
+            "max_tasks_min": self.__max_tasks_min,
+            "max_tasks_period": self.__max_tasks_period,
             "max_tasks": self.__max_tasks,
             "task_generation_strategy": self.__task_generation_strategy,
             "initial_task_assignment_strategy": self.__initial_task_assignment_strategy,

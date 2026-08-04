@@ -1,8 +1,9 @@
 """Bridge generator reallocation candidates into the separate ``J_a`` pool.
 
-``generate_reallocation_tasks`` emits, per flagged future demand, a 4-tuple
-``tau = (C_i, r_i, d_i, sigma_i)`` where ``C_i`` is a set of coupled
-``(start, goal)`` pairs (each pair is same-aisle by construction).
+``generate_reallocation_tasks`` emits, per flagged future demand, a 5-tuple
+``tau = (C_i, r_i, d_i, sigma_i, reference_location)`` where ``C_i`` is a set of
+``(start, goal)`` pairs and ``reference_location`` is the driveway cell used as
+the benefit reference point (matching irM2M / ``fast_optimal_insertion``).
 
 For crM2M (concatenated rearrangement) the shuffles are scored *alongside* real
 tasks by the allocator, but they are kept in their own dictionary ``J_a`` rather
@@ -12,15 +13,15 @@ stats, and prevents proactive moves from polluting ``J``. Each tick the loop
 hands the allocator a transient union ``{**J, **J_a}`` so the cost cube can score
 both; ``J`` and ``J_a`` themselves stay the canonical stores.
 
-This module converts each 4-tuple into a single 5-tuple ``J_a`` entry whose
+This module converts each generator tuple into a ``J_a`` entry whose
 ``start_frozenset`` is every candidate SKU-instance cell and whose
-``goal_frozenset`` is every candidate empty cell. The per-aisle coupling
-(``s_p in S^k_n`` / ``d_q in D^k_n``) is enforced at scoring time by the
-same-column mask in ``construct_cost_elements.compute_crm2m_terms`` rather than
-by exploding ``C_i`` into one task per pair (which would blow up ``N``).
+``goal_frozenset`` is every candidate empty cell. When a ``reference_location``
+is present the allocator scores benefit against that cell (and does not force
+same-aisle coupling). Legacy 4-tuple candidates (no reference) still use the
+same-column coupling mask in ``compute_crm2m_terms``.
 """
 
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from ..agent import AgentLoader
 from ..graph import Graph
@@ -30,6 +31,15 @@ TASK_TYPE_SHUFFLE = 2
 # Rearrangement task ids live above this base so they never collide with real
 # task ids.
 REARRANGEMENT_TASK_ID_BASE = 100000
+
+Location = Tuple[int, int]
+
+
+def shuffle_reference_location(task: Tuple) -> Optional[Location]:
+    """Return the optional driveway benefit reference stored on a ``J_a`` entry."""
+    if len(task) > 5 and task[5] is not None:
+        return task[5]
+    return None
 
 
 def _active_rearrangement_skus(J_a: Dict[int, Tuple]) -> set:
@@ -49,13 +59,15 @@ def add_reallocation_tasks_to_J_a(
 ) -> int:
     """Add generator reallocation candidates to ``J_a`` as crM2M entries.
 
-    Each candidate becomes one 5-tuple entry
-    ``(start_frozenset, goal_frozenset, deadline, sku_id, TASK_TYPE_SHUFFLE)``.
+    Each candidate becomes one entry
+    ``(start_frozenset, goal_frozenset, deadline, sku_id, TASK_TYPE_SHUFFLE[, reference_location])``.
     Candidates whose SKU already has a live rearrangement task in ``J_a`` are
     skipped (one rearrangement per SKU in flight at a time).
 
     Args:
-        Ta: ``{n: (C_i, r_i, d_i, sigma_i)}`` from ``generate_reallocation_tasks``.
+        Ta: ``{n: (C_i, r_i, d_i, sigma_i[, reference_location])}`` from
+            ``generate_reallocation_tasks`` (5-tuple) or the legacy CRM2M
+            generator (4-tuple).
         J_a: Separate rearrangement dictionary; mutated in place with new entries.
         G: Warehouse graph (used to read the SKU id at a start cell).
         next_rearrangement_task_id: First id to assign; ids increase from here.
@@ -70,7 +82,11 @@ def add_reallocation_tasks_to_J_a(
     current_id = max(next_rearrangement_task_id, REARRANGEMENT_TASK_ID_BASE)
 
     for _n, task_data in Ta.items():
-        C_i, _release, deadline, sigma = task_data
+        if len(task_data) >= 5:
+            C_i, _release, deadline, sigma, reference_location = task_data[:5]
+        else:
+            C_i, _release, deadline, sigma = task_data[:4]
+            reference_location = None
         if sigma != TASK_TYPE_SHUFFLE or not C_i:
             continue
 
@@ -89,7 +105,23 @@ def add_reallocation_tasks_to_J_a(
         if sku_id in active_skus:
             continue
 
-        J_a[current_id] = (start_locs, goal_locs, int(deadline), sku_id, TASK_TYPE_SHUFFLE)
+        if reference_location is not None:
+            J_a[current_id] = (
+                start_locs,
+                goal_locs,
+                int(deadline),
+                sku_id,
+                TASK_TYPE_SHUFFLE,
+                reference_location,
+            )
+        else:
+            J_a[current_id] = (
+                start_locs,
+                goal_locs,
+                int(deadline),
+                sku_id,
+                TASK_TYPE_SHUFFLE,
+            )
         active_skus.add(sku_id)
         current_id += 1
 
