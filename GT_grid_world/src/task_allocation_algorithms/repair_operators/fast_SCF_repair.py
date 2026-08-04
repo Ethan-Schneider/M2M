@@ -5,15 +5,27 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
 from ...utils import manhattan_distance
+from ..initial_solutions.construct_cost_elements import (
+    per_task_type_sku_distribution_term,
+    compute_crm2m_terms,
+    rearrangement_cost_cube,
+    TASK_TYPE_SHUFFLE,
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+)
 
 def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start_goal_dist: np.ndarray, task_start_mask: np.ndarray, task_goal_mask: np.ndarray, Rs: AgentLoader,
                  start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]],
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
                  method: str = "manhattan", cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  J: Dict[int, Tuple] = None, inbound_sku_distribution_costs: np.ndarray = None, 
-                 outbound_sku_distribution_costs: np.ndarray = None, base_cost_weight: float = 1.0, 
+                 outbound_sku_distribution_costs: np.ndarray = None,
+                 rearrangement_sku_distribution_costs: np.ndarray = None,
+                 base_cost_weight: float = 1.0, 
                  deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
-                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0,
+                 crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+                 crm2m_slack: float = 0.0, crm2m_cpp: float = 0.0, crm2m_return_margin: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Repair a solution using Second Coordinate Fixing (SCF) algorithm.
     Iterates over tasks and assigns each task to the best available agent.
@@ -50,6 +62,22 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
     task_start_mask_ = task_start_mask.copy()
     task_goal_mask_ = task_goal_mask.copy()
 
+    # crM2M static terms (see fast_greedy_allocation). This operator scores by
+    # *argmax* (higher == better), so type=2 uses +U with gated entries set to
+    # -inf, the mirror of fast_greedy's -U / +inf convention. Gated on a type=2
+    # task being present so plain-M2M ticks skip the dead computation.
+    has_shuffle = any(
+        J[task_id][4] == TASK_TYPE_SHUFFLE for task_id in idx_to_task_id.values()
+    )
+    if has_shuffle:
+        (crm2m_home, crm2m_start_home, crm2m_goal_home,
+         crm2m_agent_home, crm2m_coupling_mask) = compute_crm2m_terms(
+            Rs, G, start_locs, goal_locs, method
+        )
+    else:
+        crm2m_home = crm2m_start_home = crm2m_goal_home = None
+        crm2m_agent_home = crm2m_coupling_mask = None
+
     # Iterate over all tasks (SCF approach)
     for n in range(N):
         # Skip if task is already assigned
@@ -61,34 +89,61 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
         if len(valid_p) == 0 or len(valid_q) == 0:
             continue
 
+        task_type = J[idx_to_task_id[int(n)]][4]
+
+        # crM2M: +U cube over (M, |valid_p|, |valid_q|), computed once per task.
+        # ``agent_start_cost_tensor`` here holds NEGATED distances (this operator's
+        # convention), so abs() recovers the dist(g^m_{i-1}, s_p) the detour needs.
+        u_cube = None
+        if task_type == TASK_TYPE_SHUFFLE:
+            u_cube = -rearrangement_cost_cube(
+                np.abs(agent_start_cost_tensor), crm2m_agent_home, crm2m_start_home,
+                crm2m_goal_home, crm2m_coupling_mask, valid_p, valid_q,
+                crm2m_lambda, crm2m_detour_cutoff,
+                slack=crm2m_slack, c_pp=crm2m_cpp,
+                return_margin=crm2m_return_margin,
+            )
+
         # Find the best agent for this task (SCF: iterate over agents for each task)
         best_cost = -np.inf
         best = None
         
         for m in range(M):
-            # Vectorized cost computation for all valid (p, q) pairs
-            agent_costs = agent_start_cost_tensor[m, valid_p][:, None]
-            sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
-            
-            # Calculate base costs with deadline and agent_task_sequence_time considerations
-            deadline = J[idx_to_task_id[int(n)]][2]
-            if deadline_weight > 0.0:
-                # If deadline has not passed
-                if deadline - current_time > 0:
-                    base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs + sg_costs) + agent_task_sequence_time[m])
-                # If deadline has passed
-                else:
-                    base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs + sg_costs) + agent_task_sequence_time[m])
+            if task_type == TASK_TYPE_SHUFFLE:
+                total_costs = u_cube[m]
             else:
-                base_costs = base_cost_weight*(agent_costs + sg_costs)
+                # Vectorized cost computation for all valid (p, q) pairs
+                agent_costs = agent_start_cost_tensor[m, valid_p][:, None]
+                sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
 
-            # Add sku distribution costs
-            if J[idx_to_task_id[int(n)]][4] == 1:
-                inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, :]
-            else:
-                outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[:, None]
+                # Calculate base costs with deadline and agent_task_sequence_time considerations
+                deadline = J[idx_to_task_id[int(n)]][2]
+                if deadline_weight > 0.0:
+                    # If deadline has not passed
+                    if deadline - current_time > 0:
+                        base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs + sg_costs) + agent_task_sequence_time[m])
+                    # If deadline has passed
+                    else:
+                        base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs + sg_costs) + agent_task_sequence_time[m])
+                else:
+                    base_costs = base_cost_weight*(agent_costs + sg_costs)
+
+                # 1.6: per-task-type SKU-distribution placement quality (three-way dispatch).
+                # NOTE: this allocator uses a negated-cost / argmax convention different
+                # from fast_greedy's argmin convention, and its `deadline_weight` branch
+                # above is on a different scale than `task_deadline_costs`. Unifying the
+                # two is a follow-up cleanup; 1.6 only updates the SKU-distribution side
+                # so the per-task-type matrices are routed consistently.
+                sku_term, axis = per_task_type_sku_distribution_term(
+                    task_type, n, valid_p, valid_q,
+                    inbound_sku_distribution_costs=inbound_sku_distribution_costs,
+                    outbound_sku_distribution_costs=outbound_sku_distribution_costs,
+                    rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
+                )
+                if axis == "goals":
+                    total_costs = base_costs + sku_distribution_weight * sku_term[None, :]
+                else:
+                    total_costs = base_costs + sku_distribution_weight * sku_term[:, None]
 
             max_idx = np.argmax(total_costs)
             max_cost_m = total_costs.flat[max_idx]
@@ -137,6 +192,15 @@ def fast_SCF_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, sta
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
+
+        # crM2M: refresh agent m's distance to h_0 after its anchor moved to
+        # goal_locs[q] (stored positive, matching compute_crm2m_terms). Skipped
+        # when no shuffle is present (terms were never computed).
+        if has_shuffle:
+            if method == "manhattan":
+                crm2m_agent_home[m] = manhattan_distance(goal_locs[q], crm2m_home)
+            else:
+                crm2m_agent_home[m] = G.get_distance(goal_locs[q], crm2m_home)
 
         # Update agent task sequence time
         if len(Rs.agents[m].task_sequence) > 1:

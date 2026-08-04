@@ -19,6 +19,7 @@ from __future__ import annotations
 import pytest
 
 from GT_grid_world.src.simulate import (
+    STATUS_PICKING,
     TASK_TYPE_INBOUND,
     TASK_TYPE_OUTBOUND,
     TASK_TYPE_SHUFFLE,
@@ -126,25 +127,39 @@ def test_refresh_updates_other_sku_shuffle_goal_locs(populated_graph):
 
 
 def test_refresh_outbound_task_goal_locs_track_driveway_empty(populated_graph):
-    """Outbound (type=0) tasks dropoff at the driveway, so their goal_locs
-    are driveway-empty cells. The refresh must leave them tracking driveway
-    state, not warehouse state.
+    """Outbound (type=0) tasks dropoff at the driveway, so their goal_locs are
+    driveway-empty cells. The refresh keeps them tracking driveway state within
+    the driveway column the task was already committed to -- it never re-expands
+    an outbound task's goals back out across every driveway column.
     """
     sku = next(iter(populated_graph.warehouse.get_all_skus()))
     instances = list(populated_graph.warehouse.get_sku_instances(sku))
     if not instances:
         pytest.skip("populated_graph has no SKU instances for this test")
 
+    driveway_empty = frozenset(populated_graph.driveway.get_empty_locations())
+    if not driveway_empty:
+        pytest.skip("populated_graph has no empty driveway cells for this test")
+
+    # Commit the outbound task to a single real driveway column.
+    committed_column = next(iter(driveway_empty))[1]
+    committed_goals = frozenset(
+        loc for loc in driveway_empty if loc[1] == committed_column
+    )
     stale_starts = frozenset(instances)
-    stale_goals = frozenset({(0, 0)})  # deliberately wrong, refresh should fix
     J = {
-        5: (stale_starts, stale_goals, 100, sku, TASK_TYPE_OUTBOUND),
+        5: (stale_starts, committed_goals, 100, sku, TASK_TYPE_OUTBOUND),
     }
 
     _refresh_tasks_after_warehouse_change(J, populated_graph, changed_task_id=999, sku_id=sku)
 
+    # A warehouse change leaves driveway occupancy untouched, so the refreshed
+    # goals stay the empty cells of the committed column (never the warehouse).
     _, new_goals, _, _, _ = J[5]
-    expected_goals = frozenset(populated_graph.driveway.get_empty_locations())
+    expected_goals = frozenset(
+        loc for loc in populated_graph.driveway.get_empty_locations()
+        if loc[1] == committed_column
+    )
     assert new_goals == expected_goals
 
 
@@ -162,6 +177,87 @@ def test_refresh_inbound_task_goal_locs_track_warehouse_empty(populated_graph):
     new_starts, new_goals, _, _, _ = J[9]
     assert new_starts == stale_starts, "IB start_locs (driveway side) are not refreshed by warehouse changes"
     assert new_goals == frozenset(populated_graph.warehouse.get_empty_locations())
+
+
+# ---------------------------------------------------------------------------
+# Reactive move guard: don't step into a provably-stationary agent's cell
+# ---------------------------------------------------------------------------
+def test_agent_waits_when_next_cell_held_by_picking_agent(
+    populated_graph, minimal_stats
+):
+    """A moving agent must NOT step into a cell occupied by another agent (here
+    one mid pick/place service, which never vacates). The collision-free planner
+    does not model the stall, so without the guard the follower walks straight
+    into the frozen agent. The blocked agent waits and increments blocked_ticks.
+    """
+    from GT_grid_world.src.agent import Agent, AgentLoader
+
+    open_cells = populated_graph.get_all_unoccupied()
+    front_cell = open_cells[0]
+    mover_cell = open_cells[1]
+    assert front_cell != mover_cell
+
+    # Front agent is servicing a pick (status 3) at front_cell and cannot vacate.
+    front = Agent(agent_id=0, state=front_cell)
+    front.status = STATUS_PICKING
+    front.pick_place_counter = 3  # > 1 so the service just ticks down, no pickup
+    front.task_sequence = [(1, front_cell, (0, 0), 100)]
+    front.path_sequence = []
+    minimal_stats.add_actual_pickup_duration(1)
+
+    # Mover's next planned step is exactly the frozen agent's cell.
+    mover = Agent(agent_id=1, state=mover_cell)
+    mover.status = 0  # idle mover: no task/stats bookkeeping needed
+    mover.path_sequence = [front_cell]
+
+    Rs = AgentLoader([front, mover])
+    populated_graph.set_occupied(front_cell, True)
+    populated_graph.set_occupied(mover_cell, True)
+
+    simulate(
+        minimal_stats, populated_graph, Rs, {}, {}, "small_test", t=0,
+        pick_place_time=True, pick_place_duration=4,
+    )
+
+    assert mover.state == mover_cell, "mover should wait, not enter the occupied cell"
+    assert mover.path_sequence == [front_cell], "unconsumed step should remain queued"
+    assert mover.blocked_ticks == 1, "a blocked move should increment blocked_ticks"
+
+
+def test_follower_advances_once_leader_vacates_within_the_tick(
+    populated_graph, minimal_stats
+):
+    """When the agent ahead is itself moving this tick, the follower may advance
+    into the cell it vacates: agents are stepped in order, so once the leader
+    (processed first) updates its state, the follower correctly sees the cell
+    free. blocked_ticks stays 0 for both since neither is actually blocked.
+    """
+    from GT_grid_world.src.agent import Agent, AgentLoader
+
+    open_cells = populated_graph.get_all_unoccupied()
+    front_cell = open_cells[0]
+    front_next = open_cells[1]
+    mover_cell = open_cells[2]
+
+    # Leader (processed first) moves out of front_cell into front_next.
+    front = Agent(agent_id=0, state=front_cell)
+    front.status = 0
+    front.path_sequence = [front_next]
+
+    # Follower steps into the cell the leader is vacating this same tick.
+    mover = Agent(agent_id=1, state=mover_cell)
+    mover.status = 0
+    mover.path_sequence = [front_cell]
+
+    Rs = AgentLoader([front, mover])
+    for c in (front_cell, front_next, mover_cell):
+        populated_graph.set_occupied(c, True)
+
+    simulate(minimal_stats, populated_graph, Rs, {}, {}, "small_test", t=0)
+
+    assert front.state == front_next, "leader should advance"
+    assert mover.state == front_cell, "follower should advance into the vacated cell"
+    assert front.blocked_ticks == 0 and mover.blocked_ticks == 0
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +309,7 @@ def test_simulate_completes_shuffle_pickup_and_dropoff_end_to_end(
 
     populated_graph.set_occupied(pickup_loc, True)
 
-    Rs, J = simulate(minimal_stats, populated_graph, Rs, J, "small_test", t=0)
+    Rs, J, J_a = simulate(minimal_stats, populated_graph, Rs, J, {}, "small_test", t=0)
 
     assert agent.status == 2, "agent should transition to delivery phase after pickup"
     assert agent.get_sku_id_carrying() == sku, "agent should be carrying the picked SKU"
@@ -224,7 +320,7 @@ def test_simulate_completes_shuffle_pickup_and_dropoff_end_to_end(
     agent.state = goal_loc
     agent.path_sequence = []
 
-    Rs, J = simulate(minimal_stats, populated_graph, Rs, J, "small_test", t=1)
+    Rs, J, J_a = simulate(minimal_stats, populated_graph, Rs, J, {}, "small_test", t=1)
 
     assert agent.status == 0, "agent should be idle after dropoff (no remaining tasks)"
     assert agent.get_sku_id_carrying() is None, "agent should not be carrying anything after dropoff"

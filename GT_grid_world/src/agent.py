@@ -11,11 +11,17 @@ class Agent:
         # 0 == Free Agent
         # 1 == To_Pickup
         # 2 == To_Delivery
-        # 3 == Picking (waiting at pickup location)
-        # 4 == Placing (waiting at delivery location)
+        # 3 == Picking (waiting at pickup location for pick/place delay)
+        # 4 == Placing (waiting at delivery location for pick/place delay)
         self.status = 0
         self.sku_id_carrying = None
+        # Countdown (ticks) remaining in a pick (status 3) or place (status 4)
+        # service action; only used when pick/place time is enabled.
         self.pick_place_counter = 0
+        # Consecutive ticks this agent has been unable to advance because its
+        # next planned cell was occupied by another agent. Reset to 0 whenever
+        # it moves, holds a pick/place service, or is replanned. A sustained
+        # block escalates to a global replan via ``router.needs_path_plan``.
         self.blocked_ticks = 0
         # True while the agent is waiting at the buffer after being rejected
         # from placing an item there; cleared once it begins placing.

@@ -20,12 +20,15 @@ TASK_TYPE_OUTBOUND = 0
 TASK_TYPE_INBOUND = 1
 TASK_TYPE_SHUFFLE = 2
 
+# Agent status codes (mirror agent.py).
 STATUS_FREE = 0
 STATUS_TO_PICKUP = 1
 STATUS_TO_DELIVERY = 2
-STATUS_PICKING = 3
-STATUS_PLACING = 4
+STATUS_PICKING = 3   # waiting at pickup cell during pick/place delay
+STATUS_PLACING = 4   # waiting at delivery cell during pick/place delay
 
+# Default ticks an agent spends picking and (separately) placing when
+# pick/place time is enabled. Matches Ethan's task_queue default.
 DEFAULT_PICK_PLACE_DURATION = 4
 
 # Task types whose pickup happens in the warehouse (so SKU removal there
@@ -37,135 +40,15 @@ WAREHOUSE_PICKUP_TASK_TYPES = frozenset({TASK_TYPE_OUTBOUND, TASK_TYPE_SHUFFLE})
 WAREHOUSE_DROPOFF_TASK_TYPES = frozenset({TASK_TYPE_INBOUND, TASK_TYPE_SHUFFLE})
 
 
-def _is_cell_occupied_by_other_agent(
-    agents,
-    cell: Tuple[int, int],
-    moving_agent,
-) -> bool:
-    """Return True when another agent is currently at ``cell``."""
-    return any(
-        other.state == cell
-        for other in agents
-        if other.id != moving_agent.id
-    )
+def _is_cell_occupied_by_other_agent(agents, cell: Tuple[int, int], moving_agent) -> bool:
+    """Return True when another agent currently stands on ``cell``.
 
-
-def _collect_global_allocation_snapshot(Rs):
-    """Return ``(allocated_task_ids, allocated_locs)`` across every agent's
-    task_sequence. Used by the dual-cycle helpers to avoid stealing a task
-    that the regular allocator already gave to another agent.
+    Matches Ethan's ``task_queue`` reactive collision guard: movement is only
+    permitted into a cell no other agent occupies *right now*. Agents processed
+    earlier in the tick have already updated ``state`` in place, so a follower
+    correctly sees a leader's cell free once the leader has advanced.
     """
-    allocated_task_ids = set()
-    allocated_locs = set()
-    for ag in Rs.agents:
-        for task_tuple in ag.task_sequence:
-            allocated_task_ids.add(task_tuple[0])
-            allocated_locs.add(task_tuple[1])
-            allocated_locs.add(task_tuple[2])
-    return allocated_task_ids, allocated_locs
-
-
-def _find_aisle_dual_cycle_chain(
-    agent, completed_goal: Tuple[int, int], J: Dict[int, Tuple], Rs, G: Graph
-) -> Optional[Tuple]:
-    """Aisle dual cycling (IB -> OB).
-
-    The agent just dropped an inbound box at ``completed_goal`` (a warehouse
-    aisle cell). Look for an unallocated outbound (type=0) task whose pickup
-    is in the SAME aisle (same column) as ``completed_goal``. If one exists
-    and has a valid driveway dropoff cell, return a concrete
-    ``(task_id, chosen_start, chosen_goal, deadline)`` tuple ready to append
-    to ``agent.task_sequence``. Otherwise return ``None``.
-
-    The chosen ``(start, goal)`` minimises agent.state -> start + start ->
-    goal travel as a tiebreaker among eligible OB tasks. The proper
-    rearrangement objective for chaining decisions lives in roadmap 1.6 / 3.4;
-    this is the 1.5-skeleton heuristic.
-    """
-    if not G.is_warehouse_aisle_location(completed_goal):
-        return None
-    same_aisle_cells = set(G.get_same_aisle_locations(completed_goal))
-
-    allocated_task_ids, allocated_locs = _collect_global_allocation_snapshot(Rs)
-    driveway_empty = set(G.driveway.get_empty_locations())
-    warehouse_full = set(G.warehouse.get_full_locations())
-
-    best = None
-    best_cost = float("inf")
-    for task_id, (start_locs, goal_locs, deadline, _sku, type_) in J.items():
-        if task_id in allocated_task_ids:
-            continue
-        if type_ != TASK_TYPE_OUTBOUND:
-            continue
-        eligible_starts = [
-            s for s in start_locs
-            if s in same_aisle_cells and s in warehouse_full and s not in allocated_locs
-        ]
-        if not eligible_starts:
-            continue
-        eligible_goals = [
-            g for g in goal_locs if g in driveway_empty and g not in allocated_locs
-        ]
-        if not eligible_goals:
-            continue
-        chosen_start = min(eligible_starts, key=lambda s: G.get_distance(agent.state, s))
-        chosen_goal = min(eligible_goals, key=lambda g: G.get_distance(chosen_start, g))
-        cost = G.get_distance(agent.state, chosen_start) + G.get_distance(chosen_start, chosen_goal)
-        if cost < best_cost:
-            best_cost = cost
-            best = (task_id, chosen_start, chosen_goal, deadline)
-    return best
-
-
-def _find_driveway_dual_cycle_chain(
-    agent, completed_goal: Tuple[int, int], J: Dict[int, Tuple], Rs, G: Graph
-) -> Optional[Tuple]:
-    """Driveway dual cycling (OB -> IB at driveways).
-
-    The agent just dropped an outbound box at ``completed_goal`` (a driveway
-    cell). Look for an unallocated inbound (type=1) task whose pickup is at
-    any driveway cell that currently holds a pre-placed SKU. If one exists
-    and has a valid warehouse-empty dropoff cell, return a concrete
-    ``(task_id, chosen_start, chosen_goal, deadline)`` tuple. Otherwise return
-    ``None``.
-
-    On the current ``symbotic_2026`` branch the driveway is a single physical
-    region, so "same driveway" is trivially "any driveway cell". When the
-    per-cell I/O direction typing from ``local_task_reallocation`` lands
-    (DPS-style mixed layout), this helper will tighten the eligibility
-    filter to the matching subregion.
-    """
-    if not G.is_driveway_location(completed_goal):
-        return None
-
-    allocated_task_ids, allocated_locs = _collect_global_allocation_snapshot(Rs)
-    driveway_full = set(G.driveway.get_full_locations())
-    warehouse_empty = set(G.warehouse.get_empty_locations())
-
-    best = None
-    best_cost = float("inf")
-    for task_id, (start_locs, goal_locs, deadline, _sku, type_) in J.items():
-        if task_id in allocated_task_ids:
-            continue
-        if type_ != TASK_TYPE_INBOUND:
-            continue
-        eligible_starts = [
-            s for s in start_locs if s in driveway_full and s not in allocated_locs
-        ]
-        if not eligible_starts:
-            continue
-        eligible_goals = [
-            g for g in goal_locs if g in warehouse_empty and g not in allocated_locs
-        ]
-        if not eligible_goals:
-            continue
-        chosen_start = min(eligible_starts, key=lambda s: G.get_distance(agent.state, s))
-        chosen_goal = min(eligible_goals, key=lambda g: G.get_distance(chosen_start, g))
-        cost = G.get_distance(agent.state, chosen_start) + G.get_distance(chosen_start, chosen_goal)
-        if cost < best_cost:
-            best_cost = cost
-            best = (task_id, chosen_start, chosen_goal, deadline)
-    return best
+    return any(other.state == cell for other in agents if other.id != moving_agent.id)
 
 
 def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : int, sku_id : int) -> None:
@@ -198,7 +81,10 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
         if other_task_id == changed_task_id:
             continue
 
-        start_locations, goal_locations, deadline, task_sku_id, task_type = J[other_task_id]
+        entry = J[other_task_id]
+        start_locations, goal_locations, deadline, task_sku_id, task_type = entry[:5]
+        # Optional 6th field: driveway reference_location on crM2M J_a shuffles.
+        extra = entry[5:]
 
         new_start_locs = start_locations
         new_goal_locs = goal_locations
@@ -214,88 +100,155 @@ def _refresh_tasks_after_warehouse_change(J : set, G : Graph, changed_task_id : 
             )
 
         if new_start_locs is not start_locations or new_goal_locs is not goal_locations:
-            J[other_task_id] = (new_start_locs, new_goal_locs, deadline, task_sku_id, task_type)
+            J[other_task_id] = (
+                new_start_locs,
+                new_goal_locs,
+                deadline,
+                task_sku_id,
+                task_type,
+                *extra,
+            )
 
 
-def _execute_pickup(
-    agent,
-    task_id: int,
-    start_location: Tuple[int, int],
-    G: Graph,
-    J: Dict[int, Tuple],
-    S: Stats = None,
-) -> None:
+def _attempt_pickup(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, Tuple], S: Stats) -> str:
+    """Try to execute the pickup for ``agent``'s head ``task`` at its current cell.
+
+    Returns one of:
+      ``"not_released"``  task not yet in ``J``/``J_a`` (TA-Hybrid pre-allocation)
+                          -- leave the agent waiting in status 1.
+      ``"stale_shuffle"`` a committed shuffle's source cell no longer holds its
+                          SKU (warehouse churn) -- caller aborts and frees agent.
+      ``"succeeded"``     SKU picked up; caller should advance to delivery.
+      ``"failed"``        SKU not present yet (e.g. inbound not arrived) -- retry.
+
+    This shares the (unchanged) status-1 pickup logic between the immediate and
+    the pick/place-delayed (status 3) execution paths, preserving our J_a admit /
+    stale-shuffle abort / inventory-refresh behaviour.
+    """
+    task_id = task[0]
+    start_location = task[1]
+
+    # Task hasn't been released yet (TA-Hybrid pre-allocation). Don't touch any
+    # SKU at this cell. Shuffles live in J_a rather than J, so admit them too.
+    if task_id not in J and task_id not in J_a:
+        return "not_released"
+
+    # Stale shuffle: the committed source cell no longer holds the SKU this
+    # shuffle was generated for (an outbound emptied it, maybe an inbound
+    # refilled it with a different SKU). Moving the wrong item would crash at
+    # the delivery-side SKU-match check, so abort -- shuffles are optional.
+    if task_id in J_a and (
+        start_location not in G.warehouse.get_full_locations()
+        or G.warehouse.get_sku_at_location(start_location).sku_id != J_a[task_id][3]
+    ):
+        return "stale_shuffle"
+
+    # Outbound or shuffle: pickup from the warehouse shelf.
     if start_location in G.warehouse.get_full_locations():
-        sku_id = G.warehouse.get_sku_at_location(start_location).sku_id
-        if sku_id is None:
-            raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
-        agent.set_sku_id_carrying(sku_id)
-        G.warehouse.remove_sku_instance(start_location)
-        G.update_sku_KD_trees(agent.get_sku_id_carrying())
-        _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
-        if agent.get_sku_id_carrying() is None:
-            raise ValueError("Agent should be holding item after pickup ... Exiting")
-    elif start_location in G.driveway.get_full_locations():
-        print(f"Agent {agent.id} picking up task {task_id} with sku {G.driveway.get_sku_at_location(start_location)}")
-        sku_id = G.driveway.get_sku_at_location(start_location).sku_id
-        if sku_id is None:
-            raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
-        agent.set_sku_id_carrying(sku_id)
-        G.driveway.remove_sku_instance(start_location)
-        _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
-        if agent.get_sku_id_carrying() is None:
-            raise ValueError("Agent should be holding item after pickup ... Exiting")
+        try:
+            sku_id = G.warehouse.get_sku_at_location(start_location).sku_id
+            if sku_id is None:
+                raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
+            agent.set_sku_id_carrying(sku_id)
+            G.warehouse.remove_sku_instance(start_location)
+            G.update_sku_KD_trees(agent.get_sku_id_carrying())
 
-    if S is not None:
-        S.record_aisle_pick_place_activity(start_location, G)
+            _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
+            _refresh_tasks_after_warehouse_change(J_a, G, task_id, sku_id)
+
+            if agent.get_sku_id_carrying() is None:
+                raise ValueError(f"Agent should be holding item after pickup ... Exiting")
+            S.record_aisle_pick_place_activity(start_location, G)
+            return "succeeded"
+        except Exception as e:
+            print(f"[WARN] Could not remove SKU from warehouse at {start_location}: {e}")
+            exit()
+
+    # Inbound: pickup from the driveway (now empty).
+    if start_location in G.driveway.get_full_locations():
+        try:
+            print(f"Agent {agent.id} picking up task {task_id} with sku {G.driveway.get_sku_at_location(start_location)}")
+            sku_id = G.driveway.get_sku_at_location(start_location).sku_id
+            if sku_id is None:
+                raise ValueError(f"No item for agent {agent.id} at {start_location} found ... Exiting")
+            agent.set_sku_id_carrying(sku_id)
+            G.driveway.remove_sku_instance(start_location)
+
+            _refresh_tasks_after_warehouse_change(J, G, task_id, sku_id)
+
+            if agent.get_sku_id_carrying() is None:
+                raise ValueError(f"Agent should be holding item after pickup ... Exiting")
+            S.record_aisle_pick_place_activity(start_location, G)
+            return "succeeded"
+        except Exception as e:
+            print(f"[WARN] Could not remove SKU from driveway at {start_location}: {e}")
+
+    # SKU not at the start cell yet (e.g. inbound release time not elapsed).
+    return "failed"
 
 
-def _complete_delivery(
-    agent,
-    task_id: int,
-    start_location: Tuple[int, int],
-    goal_location: Tuple[int, int],
-    deadline: int,
-    sku_id: int,
-    inbound_task: int,
-    J: Dict[int, Tuple],
-    J_a: Dict[int, Tuple],
-    J_a_objectives: Dict[int, Dict[str, float]],
-    G: Graph,
-    S: Stats,
-    Rs: AgentLoader,
-    t: int,
-    aisle_dual_cycle: bool,
-    driveway_dual_cycle: bool,
-    output_buffer: Optional["OutputBuffer"] = None,
-) -> bool:
+def _complete_delivery(agent, task, G: Graph, J: Dict[int, Tuple], J_a: Dict[int, Tuple],
+                       S: Stats, Rs: AgentLoader, t: int,
+                       J_a_objectives: Dict[int, Dict[str, float]] = None,
+                       output_buffer: Optional["OutputBuffer"] = None) -> bool:
+    """Execute the delivery for ``agent``'s head ``task`` at its goal cell.
+
+    Returns ``True`` on completion. Returns ``False`` *without* mutating state
+    when the task is outbound and the shared output buffer is full -- the caller
+    keeps the agent waiting (backpressure). Shared between the immediate and the
+    pick/place-delayed (status 4) execution paths.
+
+    ``J_a_objectives`` (irM2M insertion) carries the per-shuffle benefit/utility/
+    detour terms recorded on completion; ``None`` for crM2M / plain shuffles.
+    """
+    task_id = task[0]
+    start_location = task[1]
+    goal_location = task[2]
+
+    # Shuffles live in the separate J_a pool; real tasks in J.
+    if task_id in J_a:
+        deadline = J_a[task_id][2]
+        sku_id = J_a[task_id][3]
+        inbound_task = J_a[task_id][4]
+    else:
+        deadline = J[task_id][2]
+        sku_id = J[task_id][3]
+        inbound_task = J[task_id][4]
+
+    # Outbound deliveries enter the shared output buffer; if it is full the
+    # delivery is blocked and the agent must keep waiting at the driveway cell.
     if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
-        if S is not None:
-            S.record_outbound_buffer_placement_blocked()
+        S.record_outbound_buffer_placement_blocked(agent.id, t)
         return False
 
     if sku_id != agent.get_sku_id_carrying():
-        raise ValueError(
-            f"Agent {agent.id} carrying sku {agent.get_sku_id_carrying()} "
-            f"but task {task_id} requires sku {sku_id} ... Exiting"
-        )
+        raise ValueError(f"Agent {agent.id} carrying sku {agent.get_sku_id_carrying()} but task {task_id} requires sku {sku_id} ... Exiting")
 
+    # Inbound / shuffle: dropping off to a warehouse cell.
     if goal_location in G.warehouse.get_empty_locations():
         print(f"Agent {agent.id} dropping off task {task_id} with sku {agent.get_sku_id_carrying()}")
         carried_sku = agent.get_sku_id_carrying()
         G.warehouse.add_sku_instance(carried_sku, goal_location)
         G.update_sku_KD_trees(agent.get_sku_id_carrying())
         _refresh_tasks_after_warehouse_change(J, G, task_id, carried_sku)
+        _refresh_tasks_after_warehouse_change(J_a, G, task_id, carried_sku)
+    # Outbound: dropping off to a driveway cell -> record into the output buffer.
     elif goal_location in G.driveway.get_empty_locations():
         if inbound_task == TASK_TYPE_OUTBOUND and output_buffer is not None:
             output_buffer.record_outbound_delivery(1.0)
+            # A successful place closes any open blocking event for this agent.
+            S.record_outbound_buffer_unblocked(agent.id, t)
 
     S.record_aisle_pick_place_activity(goal_location, G)
 
     agent.set_sku_id_carrying(None)
 
     if inbound_task == TASK_TYPE_SHUFFLE:
-        objectives = J_a_objectives.pop(task_id, None)
+        # crM2M (concatenated rearrangement): a completed shuffle is reported on
+        # the separate rearrangement track. Service time / tardiness are skipped
+        # -- those are deadline-graded metrics for real tasks, whereas a
+        # shuffle's "deadline" is just its look-ahead window edge.
+        objectives = J_a_objectives.pop(task_id, None) if J_a_objectives else None
         S.add_completed_rearrangement_task_id(
             task_id,
             t,
@@ -309,15 +262,7 @@ def _complete_delivery(
             detour_cost=objectives.get("detour_cost") if objectives else None,
         )
     else:
-        S.add_completed_task_id(
-            task_id,
-            t,
-            start_location,
-            goal_location,
-            int(deadline),
-            int(sku_id),
-            int(inbound_task),
-        )
+        S.add_completed_task_id(task_id, t, start_location, goal_location, int(deadline), int(sku_id), int(inbound_task))
         S.update_service_time(task_id, t)
 
     if task_id in J_a:
@@ -328,31 +273,14 @@ def _complete_delivery(
     agent.task_sequence.pop(0)
 
     if agent.task_sequence == []:
-        chained_tuple: Optional[Tuple] = None
-        if aisle_dual_cycle and inbound_task == TASK_TYPE_INBOUND:
-            chained_tuple = _find_aisle_dual_cycle_chain(agent, goal_location, J, Rs, G)
-            if chained_tuple is not None:
-                _log.debug(
-                    "Aisle dual cycle (IB->OB) at t=%s: agent %s chained task %s after task %s",
-                    t, agent.id, chained_tuple[0], task_id,
-                )
-        elif driveway_dual_cycle and inbound_task == TASK_TYPE_OUTBOUND:
-            chained_tuple = _find_driveway_dual_cycle_chain(agent, goal_location, J, Rs, G)
-            if chained_tuple is not None:
-                _log.debug(
-                    "Driveway dual cycle (OB->IB) at t=%s: agent %s chained task %s after task %s",
-                    t, agent.id, chained_tuple[0], task_id,
-                )
-        if chained_tuple is not None:
-            agent.task_sequence.append(chained_tuple)
-
-    if agent.task_sequence == []:
         agent.status = STATUS_FREE
     else:
         agent.status = STATUS_TO_PICKUP
         new_task_id = agent.task_sequence[0][0]
         S.add_actual_distance(new_task_id)
         S.add_actual_pickup_distance(new_task_id)
+
+        # Initialize durations for new task
         S.add_actual_duration(new_task_id)
         S.add_actual_pickup_duration(new_task_id)
 
@@ -361,6 +289,7 @@ def _complete_delivery(
 
         S.add_estimated_pickup_duration(new_task_id, estimated_to_pickup_path)
         S.add_estimated_pickup_distance(new_task_id, estimated_to_pickup_path)
+
         S.add_estimated_distance(new_task_id, estimated_task_path)
         S.add_estimated_duration(new_task_id, estimated_task_path)
 
@@ -371,13 +300,16 @@ def _complete_delivery(
 
 
 def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a : Dict[int, Tuple], map_name : str, t : int,
-             aisle_dual_cycle: bool = False, driveway_dual_cycle: bool = False,
              J_a_objectives: Dict[int, Dict[str, float]] = None,
              pick_place_time: bool = False,
              pick_place_duration: int = DEFAULT_PICK_PLACE_DURATION,
-             output_buffer: Optional["OutputBuffer"] = None) -> Tuple[AgentLoader, Dict[int, Tuple]]:
+             output_buffer: Optional["OutputBuffer"] = None) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Tuple]]:
     """
     Simulate the system for one timestep.
+
+    The simulator is a pure executor of the plan it receives: it steps agents
+    along their planned paths and executes pickups/deliveries for whatever is
+    in ``agent.task_sequence`` (real tasks in ``J``, shuffles in ``J_a``).
 
     Args:
         S (Stats): Statistics object
@@ -386,22 +318,22 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
         J (Dict[int, Tuple]): Dictionary of tasks
         map_name (str): Name of the map
         t (int): Current timestep
-        aisle_dual_cycle: When True, after an agent completes an inbound task
-            in the warehouse and would otherwise idle, search J for an
-            unallocated same-aisle outbound task and chain it onto
-            ``agent.task_sequence`` (1.5-skeleton dual cycling, IB -> OB).
-        driveway_dual_cycle: When True, after an agent completes an outbound
-            task at a driveway cell and would otherwise idle, search J for an
-            unallocated inbound task whose pickup is at any driveway cell and
-            chain it (1.5-skeleton dual cycling, OB -> IB).
-        pick_place_time: When True, agents wait ``pick_place_duration`` timesteps
-            at pickup (status 3) and delivery (status 4) before updating inventory.
-        pick_place_duration: Timesteps to wait at each pick/place (default 5).
-        output_buffer: Optional shared outbound output buffer; when set, one
-            consumption tick is applied each call.
+        J_a_objectives: irM2M insertion per-shuffle benefit/utility/detour terms,
+            popped and recorded on shuffle completion. Empty/``None`` for crM2M.
+        pick_place_time: When True, agents wait ``pick_place_duration`` ticks at
+            pickup (status 3 = Picking) and at delivery (status 4 = Placing)
+            before inventory is mutated -- a per-task service-time penalty
+            applied uniformly to every method (no allocator logic changes).
+        pick_place_duration: Ticks to wait at each pick and each place.
+        output_buffer: Optional shared outbound output buffer. When set, one
+            consumption tick is applied each call, outbound deliveries are
+            recorded into it, and an outbound delivery is blocked (the agent
+            waits) whenever the buffer is at capacity. Inbound/shuffle tasks
+            are never affected.
 
     Returns:
-        Tuple[AgentLoader, Dict[int, Tuple]]: Updated AgentLoader object and updated dictionary of tasks and rearrangement tasks
+        Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Tuple]]: Updated
+        AgentLoader and the (possibly mutated) J and J_a dictionaries.
     """
 
     if J_a_objectives is None:
@@ -415,6 +347,8 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
 
     # Update state of robots
     for agent in Rs.agents:
+        # Agents mid pick/place service wait in place (no movement) until their
+        # service counter expires.
         if agent.status in (STATUS_PICKING, STATUS_PLACING):
             agent.blocked_ticks = 0
             continue
@@ -423,177 +357,138 @@ def simulate(S : Stats, G : Graph, Rs : AgentLoader, J : Dict[int, Tuple], J_a :
             agent.blocked_ticks = 0
             continue
 
+        # Reactive collision avoidance (Ethan's task_queue approach): never step
+        # into a cell another agent currently occupies. The collision-free
+        # planner does not model the multi-tick pick/place stall, and on a PBS
+        # failure agents fall back to a stale, uncoordinated plan -- either way a
+        # follower would otherwise walk straight into a neighbour. Blocked agents
+        # wait and count ticks; a sustained block escalates to a replan via
+        # ``router.needs_path_plan``.
         next_state = agent.path_sequence[0]
         if _is_cell_occupied_by_other_agent(Rs.agents, next_state, agent):
             agent.blocked_ticks += 1
             continue
-
         agent.blocked_ticks = 0
-        # If robot does have a sequence of actions, pop next state and update
+
+        # Update Agent State and Graph Occupied States
         G.set_occupied(agent.state, False)
         old_state = agent.state
         agent.state = agent.path_sequence.pop(0)
         G.set_occupied(agent.state, True)
-            
+
         if agent.status == STATUS_TO_PICKUP:
             if old_state != agent.state:
                 S.update_actual_pickup_distance(agent.task_sequence[0][0], 1)
             S.update_actual_pickup_duration(agent.task_sequence[0][0], S.get_actual_pickup_duration(agent.task_sequence[0][0]) + 1)
-            
+
         elif agent.status == STATUS_TO_DELIVERY:
             if agent.get_sku_id_carrying() is None:
                 raise ValueError(f"Agent {agent.id} is not carrying any item when it is in the delivery phase for task {agent.task_sequence[0][0]}: agent status {agent.status}")
             if old_state != agent.state:
                 S.update_actual_distance(agent.task_sequence[0][0], 1)
             S.update_actual_duration(agent.task_sequence[0][0], S.get_actual_duration(agent.task_sequence[0][0]) + 1)
-    
+        else:
+            pass
+
     S.append_number_of_collisions(Rs.detect_collisions())
-    
+
     # Update Statistics for the total paths taken
     S.add_paths(Rs.get_agent_states())
-    
+
     # Update Statistics for Asile and Driveway Occupancy
     S.add_aisle_occupancy(G.get_aisle_occupancy())
     S.add_driveway_occupancy(G.get_driveway_occupancy())
-    
+
     S.append_carrying_skus(Rs.get_all_agent_carrying_skus())
-    
+
     for agent in Rs.agents:
+        # --- Pick service in progress (pick/place delay enabled) ---
         if pick_place_time and agent.status == STATUS_PICKING:
-            task_id = agent.task_sequence[0][0]
-            S.update_actual_pickup_duration(
-                task_id,
-                S.get_actual_pickup_duration(task_id) + 1,
-            )
+            task = agent.task_sequence[0]
+            task_id = task[0]
+            S.update_actual_pickup_duration(task_id, S.get_actual_pickup_duration(task_id) + 1)
             agent.pick_place_counter -= 1
             if agent.pick_place_counter > 0:
                 continue
-            task = agent.task_sequence[0]
-            start_location = task[1]
-            try:
-                _execute_pickup(agent, task_id, start_location, G, J, S)
-            except Exception as e:
-                print(f"[WARN] Could not complete pickup for agent {agent.id} at {start_location}: {e}")
-                exit()
-            S.add_completed_to_pickup_task_id(task_id)
-            agent.status = STATUS_TO_DELIVERY
+            outcome = _attempt_pickup(agent, task, G, J, J_a, S)
+            if outcome == "stale_shuffle":
+                J_a.pop(task_id, None)
+                agent.task_sequence.pop(0)
+                agent.path_sequence = []
+                agent.status = STATUS_TO_PICKUP if agent.task_sequence else STATUS_FREE
+            elif outcome == "succeeded":
+                S.add_completed_to_pickup_task_id(task_id)
+                agent.status = STATUS_TO_DELIVERY
+            else:
+                # not_released / failed: revert to pickup and retry next tick.
+                agent.status = STATUS_TO_PICKUP
             continue
 
+        # --- Place service in progress (pick/place delay enabled) ---
         if pick_place_time and agent.status == STATUS_PLACING:
             task = agent.task_sequence[0]
             task_id = task[0]
-            S.update_actual_duration(
-                task_id,
-                S.get_actual_duration(task_id) + 1,
-            )
+            S.update_actual_duration(task_id, S.get_actual_duration(task_id) + 1)
             agent.pick_place_counter -= 1
             if agent.pick_place_counter > 0:
                 continue
-            start_location = task[1]
-            goal_location = task[2]
-            if task_id in J_a:
-                deadline = J_a[task_id][2]
-                sku_id = J_a[task_id][3]
-                inbound_task = J_a[task_id][4]
-            else:
-                deadline = J[task_id][2]
-                sku_id = J[task_id][3]
-                inbound_task = J[task_id][4]
-            if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
-                print(f"============Output Delivery Blocked due to buffer level: {output_buffer.level}")
-                S.record_outbound_buffer_placement_blocked(agent.id, t)
+            if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, J_a_objectives=J_a_objectives, output_buffer=output_buffer):
+                # Output buffer full (or transient race): revert to delivery and
+                # retry later (re-entering the place wait next time). Flag the
+                # agent as buffer-waiting for the waiting-at-buffer diagnostic.
                 agent.waiting_at_buffer = True
                 agent.status = STATUS_TO_DELIVERY
-                continue
-            if inbound_task == TASK_TYPE_OUTBOUND:
-                S.record_outbound_buffer_unblocked(agent.id, t)
+            else:
                 agent.waiting_at_buffer = False
-            if not _complete_delivery(
-                agent,
-                task_id,
-                start_location,
-                goal_location,
-                deadline,
-                sku_id,
-                inbound_task,
-                J,
-                J_a,
-                J_a_objectives,
-                G,
-                S,
-                Rs,
-                t,
-                aisle_dual_cycle,
-                driveway_dual_cycle,
-                output_buffer=output_buffer,
-            ):
-                agent.status = STATUS_TO_DELIVERY
             continue
 
         if agent.status == STATUS_TO_PICKUP:
             if agent.state == agent.task_sequence[0][1]:
                 task = agent.task_sequence[0]
                 task_id = task[0]
-                start_location = task[1]
                 if pick_place_time:
+                    # Begin the pick service wait; SKU is removed when it ends.
                     agent.status = STATUS_PICKING
                     agent.pick_place_counter = pick_place_duration
                     continue
-                try:
-                    _execute_pickup(agent, task_id, start_location, G, J, S)
-                except Exception as e:
-                    print(f"[WARN] Could not remove SKU at {start_location}: {e}")
-                    exit()
-                S.add_completed_to_pickup_task_id(task_id)
-                agent.status = STATUS_TO_DELIVERY
+                outcome = _attempt_pickup(agent, task, G, J, J_a, S)
+                if outcome == "stale_shuffle":
+                    J_a.pop(task_id, None)
+                    agent.task_sequence.pop(0)
+                    agent.path_sequence = []
+                    agent.status = STATUS_TO_PICKUP if agent.task_sequence else STATUS_FREE
+                    continue
+                if outcome == "succeeded":
+                    S.add_completed_to_pickup_task_id(task_id)
+                    agent.status = STATUS_TO_DELIVERY
+                # else: task not yet released OR SKU not yet at start_location;
+                # keep status=1 and retry the pickup on the next tick.
         elif agent.status == STATUS_TO_DELIVERY:
             if agent.state == agent.task_sequence[0][2]:
                 task = agent.task_sequence[0]
                 task_id = task[0]
-                start_location = task[1]
-                goal_location = task[2]
-                if task_id in J_a:
-                    deadline = J_a[task_id][2]
-                    sku_id = J_a[task_id][3]
-                    inbound_task = J_a[task_id][4]
-                else:
-                    deadline = J[task_id][2]
-                    sku_id = J[task_id][3]
-                    inbound_task = J[task_id][4]
+                inbound_task = J_a[task_id][4] if task_id in J_a else J[task_id][4]
+
+                # Outbound + full buffer: wait at the driveway cell (backpressure)
+                # rather than starting a place that can't complete. Flag the agent
+                # as buffer-waiting for the waiting-at-buffer diagnostic.
                 if inbound_task == TASK_TYPE_OUTBOUND and outbound_delivery_blocked(output_buffer):
                     S.record_outbound_buffer_placement_blocked(agent.id, t)
                     agent.waiting_at_buffer = True
                     continue
                 if inbound_task == TASK_TYPE_OUTBOUND:
-                    S.record_outbound_buffer_unblocked(agent.id, t)
                     agent.waiting_at_buffer = False
                 if pick_place_time:
+                    # Begin the place service wait; delivery completes when it ends.
                     agent.status = STATUS_PLACING
                     agent.pick_place_counter = pick_place_duration
                     continue
-                if not _complete_delivery(
-                    agent,
-                    task_id,
-                    start_location,
-                    goal_location,
-                    deadline,
-                    sku_id,
-                    inbound_task,
-                    J,
-                    J_a,
-                    J_a_objectives,
-                    G,
-                    S,
-                    Rs,
-                    t,
-                    aisle_dual_cycle,
-                    driveway_dual_cycle,
-                    output_buffer=output_buffer,
-                ):
+                if not _complete_delivery(agent, task, G, J, J_a, S, Rs, t, J_a_objectives=J_a_objectives, output_buffer=output_buffer):
                     continue
 
     S.append_agents_waiting_at_buffer(sum(1 for agent in Rs.agents if agent.waiting_at_buffer))
 
+    # Drain the shared output buffer by one tick and log its level.
     consumption_tick(output_buffer)
     if output_buffer is not None:
         S.log_output_buffer_level(t, output_buffer.level)

@@ -4,12 +4,27 @@ from typing import Tuple, List, Dict
 from ...graph import Graph
 from ...agent import AgentLoader
 from ...analysis.statistics import Stats
-from .construct_cost_elements import construct_cost_elements, manhattan_distance
+from .construct_cost_elements import (
+    construct_cost_elements,
+    manhattan_distance,
+    per_task_type_sku_distribution_term,
+    compute_crm2m_terms,
+    shuffle_location_indices,
+    precompute_shuffle_benefit_by_ref,
+    rearrangement_best_assignment,
+    TASK_TYPE_SHUFFLE,
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+)
+from ...reallocation_tasks.jr_consumer import shuffle_reference_location
 
 def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: List[Tuple[int, int]], goal_locs: List[Tuple[int, int]], idx_to_task_id: Dict[int, int], J, method : str = "manhattan",
                          agent_start_cost_tensor=None, start_goal_dist=None, task_start_mask=None, task_goal_mask=None, cost_lookup=None, task_deadline_costs=None, inbound_sku_distribution_costs=None, 
-                         outbound_sku_distribution_costs=None, base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
-                         agent_task_sequence_limit=-1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
+                         outbound_sku_distribution_costs=None, rearrangement_sku_distribution_costs=None,
+                         base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_time=None, current_time=0,
+                         agent_task_sequence_limit=-1,
+                         crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF,
+                         crm2m_slack=0.0, crm2m_cpp=0.0, crm2m_return_margin=0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float, Dict[Tuple[int, int, int, int], int]]:
     """
     Perform first coordinate fixing (FCF) greedy allocation of tasks to agents based on minimum cost elements, without constructing the full (M, N, P, Q) tensor.
     This is a batched greedy algorithm that allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -41,11 +56,46 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
     N = len(idx_to_task_id)
     P = len(start_locs)
     Q = len(goal_locs)
+
+    # crM2M static terms for the rearrangement utility. Computed here from the
+    # live agent anchors so the (M,P) detour / (P,Q) benefit / (P,Q) same-aisle
+    # coupling are assembled on demand per type=2 task -- the dense 5-D tensor is
+    # never materialized. ``crm2m_agent_home`` is updated in place as agents pick
+    # up tasks within this batch (their anchor, hence distance to h_0, moves).
+    # Gated on the presence of a type=2 (shuffle) task: when no rearrangement
+    # candidate is in this batch (every plain-M2M tick, and crM2M ticks with no
+    # candidate) the whole computation is dead overhead -- ~0.1-0.2 ms/call x
+    # hundreds of LNS repair calls/tick -- so skip it entirely.
+    has_shuffle = any(
+        J[task_id][4] == TASK_TYPE_SHUFFLE for task_id in idx_to_task_id.values()
+    )
+    # Benefit distances to each driveway ref are static for this batch: compute
+    # once (vectorized, shuffle-location subset only) and reuse every iteration.
+    benefit_by_ref = {}
+    if has_shuffle:
+        shuffle_p, shuffle_q, shuffle_ns = shuffle_location_indices(
+            J, idx_to_task_id, task_start_mask, task_goal_mask
+        )
+        (crm2m_home, crm2m_start_home, crm2m_goal_home,
+         crm2m_agent_home, crm2m_coupling_mask) = compute_crm2m_terms(
+            Rs, G, start_locs, goal_locs, method,
+            start_indices=shuffle_p, goal_indices=shuffle_q,
+        )
+        benefit_by_ref = precompute_shuffle_benefit_by_ref(
+            G, J, idx_to_task_id, start_locs, goal_locs,
+            shuffle_ns, shuffle_p, shuffle_q, method,
+        )
+    else:
+        crm2m_home = crm2m_start_home = crm2m_goal_home = None
+        crm2m_agent_home = crm2m_coupling_mask = None
+
     allocations = []
     total_cost = 0.0
     total_argmin_time = 0.0
     total_update_time = 0.0
-
+    total_rearrangement_time = 0.0
+    total_location_time = 0.0
+    total_location_2_time = 0.0
     # Copy masks so we can update them
     task_start_mask_ = task_start_mask.copy()
     task_goal_mask_ = task_goal_mask.copy()
@@ -87,39 +137,98 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
                 # print(f"Skipping because no valid start or goal locations")
                 continue
 
-            # Mask out all invalid start and goal locations
-            agent_costs = agent_start_cost_tensor[:, valid_p]
-            sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
+            task_type = J[idx_to_task_id[int(n)]][4]
 
-            # Calculate base costs
-            # deadline = J[idx_to_task_id[int(n)]][2]
-            # if deadline_weight > 0.0:
-            #     # If deadline has not passed
-            #     if deadline - current_time > 0:
-            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            #         # base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :]) - deadline_weight*(deadline - (current_time - ((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])))
-            #     # If deadline has passed
-            #     else:
-            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            # else:
-            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
-
-            # print(f"inbound_sku_distribution_costs: {inbound_sku_distribution_costs}")
-            # print(f"outbound sku distribution costs: {outbound_sku_distribution_costs}")
-
-            if sku_distribution_weight > 0:
-                # If inbound task, add inbound sku distribution costs
-                if J[idx_to_task_id[int(n)]][4] == 1:
-                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                    # print(f"inbound sku costs: {inbound_sku_distribution_costs_n}")
-                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
-                # If outbound task, add outbound sku distribution costs
+            rearrangement_tik = time.time()
+            if task_type == TASK_TYPE_SHUFFLE:
+                # crM2M (concatenated rearrangement): the type=2 cost is the
+                # full rearrangement utility -U (gated), replacing the base +
+                # SKU assembly entirely (plan section 3.4). Beneficial shuffles
+                # get negative cost; non-beneficial / over-detour / cross-aisle
+                # candidates are gated and simply never win the argmin
+                # (rearrangement is opportunistic and droppable).
+                # Delay is independent of goal, so we search (M, P) with each
+                # start's best coupled goal instead of materializing (M, P, Q).
+                task_entry = J[idx_to_task_id[int(n)]]
+                ref = shuffle_reference_location(task_entry)
+                if ref is not None:
+                    location_tik = time.time()
+                    benefit_start, benefit_goal = benefit_by_ref[ref]
+                    total_location_time += time.time() - location_tik
+                    # Inter-aisle moves are allowed when benefit is measured
+                    # against the outbound driveway reference (matches
+                    # generate_reallocation_tasks / fast_optimal_insertion).
+                    coupling = np.ones_like(crm2m_coupling_mask, dtype=bool)
                 else:
-                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                    # print(f"outbound sku costs: {outbound_sku_distribution_costs_n}")
-                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+                    benefit_start = benefit_goal = None
+                    coupling = crm2m_coupling_mask
+
+                agent_allowed = None
+                if agent_task_sequence_limit > 0:
+                    agent_allowed = np.array(
+                        [len(Rs.agents[m].task_sequence) < agent_task_sequence_limit
+                         for m in range(M)],
+                        dtype=bool,
+                    )
+
+                location_2_tik = time.time()
+                new_cost, choice = rearrangement_best_assignment(
+                    agent_start_cost_tensor, crm2m_agent_home, crm2m_start_home,
+                    crm2m_goal_home, coupling, valid_p, valid_q,
+                    crm2m_lambda, crm2m_detour_cutoff,
+                    slack=crm2m_slack, c_pp=crm2m_cpp,
+                    return_margin=crm2m_return_margin,
+                    benefit_start=benefit_start,
+                    benefit_goal=benefit_goal,
+                    agent_allowed=agent_allowed,
+                )
+                total_rearrangement_time += time.time() - rearrangement_tik
+                total_location_2_time += time.time() - location_2_tik
+
+                if choice is not None and new_cost < best_cost:
+                    m_idx, p_idx, q_idx = choice
+                    best_cost = new_cost
+                    best = (m_idx, n, valid_p[p_idx], valid_q[q_idx])
+                continue
             else:
-                total_costs = base_costs
+                # Mask out all invalid start and goal locations
+                agent_costs = agent_start_cost_tensor[:, valid_p]
+                sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]
+
+                # Base execution-time cost: travel from each agent to a candidate start
+                # Base execution-time cost: travel from each agent to a candidate
+                # start plus the start-to-goal distance. NOTE: the agent's
+                # already-queued sequence time (agent_task_sequence_time) is
+                # deliberately NOT added here -- folding it in over-penalised busy
+                # agents and steered work toward idle-but-distant agents, lowering
+                # M2M throughput (~126 -> ~115/min). Matches Ethan's reallocation-
+                # branch revert (commit 691f1b6, "Reverted changes to M2M").
+                base_costs = base_cost_weight * (
+                    agent_costs[:, :, None]
+                    + sg_costs[None, :, :]
+                )
+
+                # Tardiness term (1.6): per-task scalar that broadcasts over (M, P, Q).
+                # Uses the precomputed `task_deadline_costs[n]` from
+                # `calculate_deadline_cost`, so changing the deadline shape only requires
+                # editing one helper rather than every allocator.
+                if deadline_weight > 0.0:
+                    base_costs = base_costs + deadline_weight * task_deadline_costs[n]
+
+                # Per-task-type SKU-distribution placement quality (1.6 dispatch helper).
+                if sku_distribution_weight > 0.0:
+                    sku_term, axis = per_task_type_sku_distribution_term(
+                        task_type, n, valid_p, valid_q,
+                        inbound_sku_distribution_costs=inbound_sku_distribution_costs,
+                        outbound_sku_distribution_costs=outbound_sku_distribution_costs,
+                        rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
+                    )
+                    if axis == "goals":
+                        total_costs = base_costs + sku_distribution_weight * sku_term[None, None, :]
+                    else:  # axis == "starts"
+                        total_costs = base_costs + sku_distribution_weight * sku_term[None, :, None]
+                else:
+                    total_costs = base_costs
                 
             # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
             if agent_task_sequence_limit > 0:
@@ -201,7 +310,17 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
-            
+
+        # crM2M: the agent's anchor moved to goal_locs[q], so its distance to the
+        # dummy home h_0 (used by the rearrangement detour) must be refreshed for
+        # any subsequent shuffle this agent picks up in the same batch. Skipped
+        # when no shuffle is in this batch (terms were never computed).
+        if has_shuffle:
+            if method == "manhattan":
+                crm2m_agent_home[m] = manhattan_distance(goal_locs[q], crm2m_home)
+            else:
+                crm2m_agent_home[m] = G.get_distance(goal_locs[q], crm2m_home)
+
         # If agent task sequence limit is reached, set agent_start_cost_temsor[m, :] to inf
         # if agent_task_sequence_limit > 0 and len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
         #     agent_start_cost_tensor[m, :] = -1 * np.inf
@@ -217,13 +336,18 @@ def fast_greedy_allocation(S : Stats, G : Graph, Rs : AgentLoader, start_locs: L
         total_update_time += time.time() - update_tik
 
     print(f"Total argmin time: {total_argmin_time}")
+    print(f"Total rearrangement time: {total_rearrangement_time}")
+    print(f"Total location time: {total_location_time}")
     print(f"Total update time: {total_update_time}")
+    print(f"Total location 2 time: {total_location_2_time}")
     # exit()
     return Rs, allocations, total_cost
 
 
 def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple], 
-                     current_time: int, method : str = "manhattan", base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_limit=-1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                     current_time: int, method : str = "manhattan", base_cost_weight=1.0, deadline_weight=0.0, sku_distribution_weight=0.0, agent_task_sequence_limit=-1,
+                     crm2m_lambda=CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff=CRM2M_DEFAULT_DETOUR_CUTOFF,
+                     crm2m_slack=0.0, crm2m_cpp=0.0, crm2m_return_margin=0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Multi-Agent to Multi-Task Large Neighborhood Search algorithm (batched greedy version).
     Allocates one task per agent per batch, repeating until all tasks are allocated.
@@ -259,7 +383,11 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
     total_allocation_time = 0.0
 
     construct_tik = time.time()
-    agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask, start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs, inbound_sku_distribution_costs, outbound_sku_distribution_costs, agent_task_sequence_time = construct_cost_elements(J, Rs, G, current_time, method)
+    (agent_start_cost_tensor, start_goal_dist, task_start_mask, task_goal_mask,
+     start_locs, goal_locs, idx_to_task_id, task_id_to_idx, task_deadline_costs,
+     inbound_sku_distribution_costs, outbound_sku_distribution_costs,
+     rearrangement_sku_distribution_costs, agent_task_sequence_time
+     ) = construct_cost_elements(J, Rs, G, current_time, method)
     total_construct_time += time.time() - construct_tik
 
     # print(f"Min cost agent-start cost: {np.min(agent_start_cost_tensor)}")
@@ -283,12 +411,18 @@ def fast_greedy_call(S: Stats, G: Graph, Rs: AgentLoader, J: Dict[int, Tuple],
         task_deadline_costs=task_deadline_costs,
         inbound_sku_distribution_costs=inbound_sku_distribution_costs,
         outbound_sku_distribution_costs=outbound_sku_distribution_costs,
+        rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
         base_cost_weight=base_cost_weight,
         deadline_weight=deadline_weight,
         sku_distribution_weight=sku_distribution_weight,
         agent_task_sequence_time=agent_task_sequence_time,
         current_time=current_time,
-        agent_task_sequence_limit=agent_task_sequence_limit
+        agent_task_sequence_limit=agent_task_sequence_limit,
+        crm2m_lambda=crm2m_lambda,
+        crm2m_detour_cutoff=crm2m_detour_cutoff,
+        crm2m_slack=crm2m_slack,
+        crm2m_cpp=crm2m_cpp,
+        crm2m_return_margin=crm2m_return_margin,
     )
     total_allocation_time += time.time() - allocation_tik
         

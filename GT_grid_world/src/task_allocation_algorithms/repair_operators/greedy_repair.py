@@ -4,6 +4,14 @@ from ...agent import AgentLoader
 from ...analysis.statistics import Stats
 from ...graph import Graph
 from ...utils import manhattan_distance
+from ..initial_solutions.construct_cost_elements import (
+    per_task_type_sku_distribution_term,
+    compute_crm2m_terms,
+    rearrangement_cost_cube,
+    TASK_TYPE_SHUFFLE,
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+)
 
 import time
 
@@ -12,8 +20,12 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
                  idx_to_task_id: Dict[int, int], temp_allocations: List[Tuple[int, int, int, int]],
                  method: str = "manhattan", J: Dict[int, Tuple] = None, cost_lookup: Dict[Tuple[int, int, int, int], int] = None,
                  inbound_sku_distribution_costs: np.ndarray = None, outbound_sku_distribution_costs: np.ndarray = None,
+                 rearrangement_sku_distribution_costs: np.ndarray = None,
+                 task_deadline_costs: np.ndarray = None,
                  base_cost_weight: float = 1.0, deadline_weight: float = 0.0, sku_distribution_weight: float = 0.0,
-                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0, agent_task_sequence_limit: int = -1) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
+                 agent_task_sequence_time: np.ndarray = None, current_time: int = 0, agent_task_sequence_limit: int = -1,
+                 crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA, crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+                 crm2m_slack: float = 0.0, crm2m_cpp: float = 0.0, crm2m_return_margin: float = 0.0) -> Tuple[AgentLoader, List[Tuple[int, int, int, int]], float]:
     """
     Greedily repair a solution by iteratively assigning the minimum cost allocation using cost elements.
     Args:
@@ -40,6 +52,23 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
     M = len(Rs.agents)
     N = len(idx_to_task_id.keys())
     P = len(start_locs)
+
+    # crM2M static terms (see fast_greedy_allocation). Recomputed at repair entry
+    # from the post-removal agent anchors; crm2m_agent_home is updated in place as
+    # the repair re-assigns tasks. Gated on a type=2 task being present -- this
+    # repair runs once per LNS iteration (hundreds/tick), so skipping the dead
+    # computation on plain-M2M ticks recovers ~10-14% of the LNS time budget.
+    has_shuffle = any(
+        J[task_id][4] == TASK_TYPE_SHUFFLE for task_id in idx_to_task_id.values()
+    )
+    if has_shuffle:
+        (crm2m_home, crm2m_start_home, crm2m_goal_home,
+         crm2m_agent_home, crm2m_coupling_mask) = compute_crm2m_terms(
+            Rs, G, start_locs, goal_locs, method
+        )
+    else:
+        crm2m_home = crm2m_start_home = crm2m_goal_home = None
+        crm2m_agent_home = crm2m_coupling_mask = None
 
     total_update_time = 0.0
     total_find_best_task_time = 0.0
@@ -84,40 +113,63 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             if len(valid_p) == 0 or len(valid_q) == 0:
                 continue
 
-            # Compute the total cost for all valid (p, q) pairs for the task
-            agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
-            sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
+            task_type = J[idx_to_task_id[int(n)]][4]
 
-            # Calculate base costs with deadline and agent_task_sequence_time considerations
-            # deadline = J[idx_to_task_id[int(n)]][2]
-            # if deadline_weight > 0.0:
-            #     # If deadline has not passed
-            #     if deadline - current_time > 0:
-            #         base_costs = -1*deadline_weight*(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            #     # If deadline has passed
-            #     else:
-            #         base_costs = deadline_weight*np.abs(deadline - current_time) + base_cost_weight*((agent_costs[:, :, None] + sg_costs[None, :, :]) + agent_task_sequence_time[:, None, None])
-            # else:
-            base_costs = base_cost_weight*(agent_costs[:, :, None] + sg_costs[None, :, :])
-
-            if sku_distribution_weight > 0:
-                # Add sku distribution costs
-                if J[idx_to_task_id[int(n)]][4] == 1:
-                    inbound_sku_distribution_costs_n = inbound_sku_distribution_costs[n, valid_q]
-                    total_costs = base_costs + sku_distribution_weight*inbound_sku_distribution_costs_n[None, None, :]
-                else:
-                    outbound_sku_distribution_costs_n = outbound_sku_distribution_costs[n, valid_p]
-                    total_costs = base_costs + sku_distribution_weight*outbound_sku_distribution_costs_n[None, :, None]
+            if task_type == TASK_TYPE_SHUFFLE:
+                # crM2M: type=2 cost is the gated rearrangement utility -U,
+                # replacing base+SKU entirely (matches fast_greedy_allocation).
+                total_costs = rearrangement_cost_cube(
+                    agent_start_cost_tensor, crm2m_agent_home, crm2m_start_home,
+                    crm2m_goal_home, crm2m_coupling_mask, valid_p, valid_q,
+                    crm2m_lambda, crm2m_detour_cutoff,
+                    slack=crm2m_slack, c_pp=crm2m_cpp,
+                    return_margin=crm2m_return_margin,
+                )
             else:
-                total_costs = base_costs
+                # Compute the total cost for all valid (p, q) pairs for the task
+                agent_costs = agent_start_cost_tensor[:, valid_p]  # (M, len(valid_p))
+                sg_costs = start_goal_dist[np.ix_(valid_p, valid_q)]  # (len(valid_p), len(valid_q))
+
+                # Base cost: agent-to-start travel plus start-to-goal distance. The
+                # agent's already-queued sequence time is deliberately NOT added (see
+                # fast_greedy.py) -- it over-penalised busy agents and hurt M2M
+                # throughput. Matches Ethan's revert (commit 691f1b6).
+                base_costs = base_cost_weight * (
+                    agent_costs[:, :, None]
+                    + sg_costs[None, :, :]
+                )
+
+                # 1.6: tardiness term as a per-task scalar broadcast across (M, P, Q).
+                if deadline_weight > 0.0 and task_deadline_costs is not None:
+                    base_costs = base_costs + deadline_weight * task_deadline_costs[n]
+
+                # 1.6: per-task-type SKU-distribution placement quality (three-way dispatch).
+                if sku_distribution_weight > 0.0:
+                    sku_term, axis = per_task_type_sku_distribution_term(
+                        task_type, n, valid_p, valid_q,
+                        inbound_sku_distribution_costs=inbound_sku_distribution_costs,
+                        outbound_sku_distribution_costs=outbound_sku_distribution_costs,
+                        rearrangement_sku_distribution_costs=rearrangement_sku_distribution_costs,
+                    )
+                    if axis == "goals":
+                        total_costs = base_costs + sku_distribution_weight * sku_term[None, None, :]
+                    else:
+                        total_costs = base_costs + sku_distribution_weight * sku_term[None, :, None]
+                else:
+                    total_costs = base_costs
             
             # Iterate over each agent, if task sequence limit is reached, set total_costs[m, :, :] to -inf
             if agent_task_sequence_limit > -1:
                 for m in range(M):
                     if len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
                         total_costs[m, :, :] = np.inf
-            # If all total_costs are -inf, break
+            # If all total_costs are inf, this task can't be placed right now.
+            # For a droppable crM2M shuffle that just means "no beneficial move",
+            # so skip it and keep considering the other (mandatory) tasks rather
+            # than aborting the whole repair pass.
             if np.all(total_costs == np.inf):
+                if task_type == TASK_TYPE_SHUFFLE:
+                    continue
                 break
 
             # Find the index of the maximum cost (since costs are negative, this minimizes distance)
@@ -181,7 +233,16 @@ def greedy_repair(S: Stats, G: Graph, agent_start_cost_tensor: np.ndarray, start
             else:
                 raise ValueError(f"Invalid cost calculation method: {method}")
             agent_start_cost_tensor[m, p_] = cost
-            
+
+        # crM2M: refresh this agent's distance to h_0 after its anchor moved to
+        # goal_locs[q] (mirrors fast_greedy_allocation). Skipped when no shuffle is
+        # present (terms were never computed).
+        if has_shuffle:
+            if method == "manhattan":
+                crm2m_agent_home[m] = manhattan_distance(goal_locs[q], crm2m_home)
+            else:
+                crm2m_agent_home[m] = G.get_distance(goal_locs[q], crm2m_home)
+
         # If agent task sequence limit is reached, set agent_start_cost_temsor[m, :] to inf
         # if agent_task_sequence_limit > 0 and len(Rs.agents[m].task_sequence) >= agent_task_sequence_limit:
         #     agent_start_cost_tensor[m, :] = -1 * np.inf

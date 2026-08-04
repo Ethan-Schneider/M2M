@@ -11,20 +11,62 @@ from src.task_allocation_algorithms.repair_detection.backtracking import detect_
 from src.task_allocation_algorithms.repair_detection.duration_difference import duration_difference
 from src.task_allocation_algorithms.repair_detection.sliding_window_progress import sliding_window_progress
 from src.analysis import visualize, statistics
-from src.reallocation_tasks.generate_reallocation_tasks import (
+from src.reallocation_tasks.generate_reallocation_tasks_V2 import (
     generate_reallocation_tasks,
+    generate_crm2m_reallocation_tasks,
     merge_reallocation_tasks_into_J,
 )
-# from src.task_allocation_algorithms.hbh_mla_star import resolve_open_task_locations
+from src.reallocation_tasks.jr_consumer import (
+    add_reallocation_tasks_to_J_a,
+    prune_uncommitted_rearrangements,
+    shuffle_reference_location,
+    REARRANGEMENT_TASK_ID_BASE,
+)
 from src.reallocation_tasks.optimal_insertion_gurobi import solve_insertion
 from src.reallocation_tasks.fast_optimal_insertion import solve_insertion_fast
-from src.output_buffer import OutputBuffer
+from src.task_allocation_algorithms.initial_solutions.construct_cost_elements import (
+    CRM2M_DEFAULT_LAMBDA,
+    CRM2M_DEFAULT_DETOUR_CUTOFF,
+    CRM2M_DEFAULT_RETURN_MARGIN,
+    compute_ambient_slack,
+    committed_shuffle_terms,
+)
+from src.output_buffer import OutputBuffer, QUEUE_DEADLINE, tasks_per_min_to_per_tick
 
+MAX_TASK_NUMBER_MODES = ("constant", "oscillating")
+
+def compute_max_task_number(t: int, mode: str, min_value: int, max_value: int, period: int) -> int:
+    """
+    Compute the max_task_number for timestep ``t``.
+
+    "constant" always returns ``max_value``. "oscillating" follows a raised-cosine
+    wave that starts at ``min_value`` at t=0 and reaches ``max_value`` after
+    ``period`` timesteps, then continues oscillating between the two with a
+    full cycle length of ``2 * period``.
+    """
+    if mode == "constant":
+        return max_value
+    elif mode == "oscillating":
+        if period <= 0:
+            return max_value
+        phase = (np.pi * t) / period
+        value = min_value + (max_value - min_value) * (1 - np.cos(phase)) / 2
+        return int(round(value))
+    else:
+        raise ValueError(
+            f"Unknown max_task_number_mode {mode!r}; expected one of {MAX_TASK_NUMBER_MODES}"
+        )
+
+# irM2M post-allocation insertion methods (Ethan's task_queue). crM2M runs
+# instead via ``enable_rearrangement`` (concatenated, buffer-aware) below.
 REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion", "fast_insertion")
 
 def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
             T: int, case_request_strategy: str = "uninformed_uniform", 
             max_task_number : int = 20,
+            max_tasks_mode: str = "constant",
+            max_tasks_min: int = 0,
+            max_tasks_period: int = 0,
             initial_task_assignment_strategy : str = "lns",
             improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 999999,
@@ -42,21 +84,27 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             solution_repair_detection_function: str = "none",
             solution_repair_function: str = "none",
             initial_inventory : float = 25.0,
-            shuffle_percentage: float = 0.0,
-            aisle_dual_cycle: bool = False,
-            driveway_dual_cycle: bool = False,
+            use_precomputed_schedule: bool = False,
+            schedule: np.ndarray = None,
+            run_until_schedule_complete: bool = False,
             use_precomputed_queue: bool = False,
             queue: np.ndarray = None,
             run_until_queue_complete: bool = False,
             W: int = 300,
             B: int = 60,
+            enable_rearrangement: bool = False,
+            crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
+            crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+            crm2m_return_margin: float = CRM2M_DEFAULT_RETURN_MARGIN,
             lambda_: float = 1.5,
             reallocation_task_method: str = "none",
             pick_place_time: bool = False,
+            pick_place_duration: int = simulate.DEFAULT_PICK_PLACE_DURATION,
             buffer_capacity_k: int = 0,
             buffer_consumption_rate: float = 70.0,
             queue_release_window: int = 60,
-            log_buffer_predictions: bool = False) -> int:
+            log_buffer_predictions: bool = False,
+            pulse_load_experiment: bool = False) -> int:
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
@@ -64,48 +112,79 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         )
     # Initilize empty dict of tasks, task is defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
     J = {}
+    # Shared outbound output buffer (capacity model). Disabled when K <= 0 so
+    # default behaviour is unchanged. When enabled it throttles *outbound*
+    # throughput at the consumption rate; inbound/shuffle are unaffected.
+    output_buffer = None
+    if buffer_capacity_k > 0:
+        output_buffer = OutputBuffer(
+            capacity=buffer_capacity_k,
+            consumption_rate_per_min=buffer_consumption_rate,
+        )
+    # crM2M: rearrangement (shuffle) tasks live in their own pool, kept separate
+    # from the persistent real-task pool ``J``. They are scored alongside real
+    # tasks via a transient union ``{**J, **J_a}`` handed to the allocator, but
+    # have their own lifecycle (expiry / pruning) and completion track.
+    J_a = {}
 
     # Initilize empty dict of rearrangement tasks defined as (id: (start_loc, goal_loc, deadline, sku_id, type))
     # Rearrangement tasks only added when committed to an agent's task sequence
     J_a = {}
     J_a_objectives = {}
 
+    item_task_locks = {}
+    pending_task_targets = {}
+
     last_task_id = 0
+    # crM2M: monotonically increasing id allocator for rearrangement tasks, kept
+    # above REARRANGEMENT_TASK_ID_BASE so shuffle ids never collide with real ones.
+    next_rearrangement_task_id = REARRANGEMENT_TASK_ID_BASE
+    # irM2M (insertion): separate id counter for MILP-inserted reallocation tasks.
     last_rearrangement_task_id = 100000
+    # crM2M reads the upcoming queue to flag future demand; warn once if
+    # rearrangement was requested without a queue to look ahead into.
+    if enable_rearrangement and not use_precomputed_queue:
+        print("[WARN] enable_rearrangement requires --use-precomputed-queue; "
+              "no rearrangement tasks will be generated.")
+    total_schedule_tasks = schedule.shape[0] if use_precomputed_schedule and schedule is not None else 0
     total_queue_tasks = queue.shape[0] if use_precomputed_queue and queue is not None else 0
     deferred_queue: List[List[int]] = []
-
-    output_buffer: Optional[OutputBuffer] = None
-    if buffer_capacity_k > 0:
-        output_buffer = OutputBuffer(
-            capacity=buffer_capacity_k,
-            consumption_rate_per_min=buffer_consumption_rate,
-        )
+    # TA-Hybrid materialises the FULL task pool once at t=0 to run TSP
+    # (paper Section 3 + materialize_schedule). ``schedule`` itself is
+    # mutated by ``add_tasks_from_schedule`` -- released rows are removed
+    # in place -- so we hold an immutable snapshot of the original
+    # schedule and pass *that* to TaskAllocation for the ta_hybrid
+    # branch. Other allocators keep using the live (shrinking) schedule.
+    original_schedule = (
+        schedule.copy() if use_precomputed_schedule and schedule is not None else None
+    )
     
     global_tik = time.time()
     t = 0
     allow_reallocation_tasks = True
 
-    max_task_number = 0
+    # ``pulse_load_experiment`` is Ethan's irM2M microbenchmark scaffolding
+    # (task_queue commit ba05069): shadow the CLI ``--max-tasks`` value with a
+    # 500-tick 0/20 pulse and shut off reallocation-task generation after
+    # t=300, to stress-test optimal-insertion behaviour under choppy demand.
+    # Disabled by default so the CLI ``--max-tasks`` value controls the WIP
+    # cap normally. Set ``--pulse-load-experiment`` to reproduce Ethan's runs.
+    if pulse_load_experiment:
+        max_task_number = 0
     while True:
-        if not run_until_queue_complete and t >= T:
+        if not run_until_schedule_complete and not run_until_queue_complete and t >= T:
             break
 
         print(f"Number of tasks in system: {len(J)}")
+        if use_precomputed_schedule:
+            print(f"Number of tasks remaining in schedule: {schedule.shape[0]}")
         if use_precomputed_queue:
             print(f"Number of tasks remaining in queue: {queue.shape[0]}")
             print(f"Number of deferred tasks: {len(deferred_queue)}")
 
-        if t == 300:
-            allow_reallocation_tasks = False
-
-        if t%500 == 0 and t > 0:
-            if max_task_number == 0:
-                max_task_number = 20
-                allow_reallocation_tasks = False
-            else:
-                max_task_number = 0
-                allow_reallocation_tasks = True
+        current_max_task_number = compute_max_task_number(
+            t, max_tasks_mode, max_tasks_min, max_task_number, max_tasks_period
+        )
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -115,6 +194,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         print("=============================" + "Task Generation"+ "=============================")
         if use_precomputed_queue:
             tik = time.time()
+            # Demand-driven release (Ethan's task_queue): pull at most a
+            # frequency-sized batch from the queue, gated by
+            # ``len(J) < max_task_number``, parking un-placeable rows in
+            # ``deferred_queue`` for retry. This is the backpressure that
+            # makes arrival "on a needed basis" rather than a fixed burst.
             J, __, __, queue, deferred_queue, last_task_id = import_schedule.add_tasks_from_queue(
                 t,
                 queue,
@@ -123,16 +207,38 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
-                max_task_number=max_task_number,
+                max_task_number=current_max_task_number,
                 frequency=frequency,
                 deadline_generation_method=deadline_generation_method,
                 deadline_offset=deadline_offset,
             )
-
+            tok = time.time()
+            S.add_total_CRG_time(tok - tik)
+        elif use_precomputed_schedule:
+            tik = time.time()
+            # TA-Hybrid pre-commits to deterministic (lowest-(row, col))
+            # inbound driveway pickup cells in its task-assignment stage
+            # via ``materialize_schedule``. Force the schedule loader to
+            # use the same rule so the cells in ``agent.task_sequence``
+            # actually match the cells the simulator populates with the
+            # SKU at release time. Other allocators keep the legacy
+            # random selection (default ``deterministic=False``).
+            _deterministic_release = (
+                improvement_task_assignment_strategy == "ta_hybrid"
+            )
+            J, __, __, schedule, last_task_id = import_schedule.add_tasks_from_schedule(
+                t,
+                schedule,
+                J,
+                S,
+                G,
+                last_task_id,
+                deterministic=_deterministic_release,
+            )
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
-            if len(J) < max_task_number:
+            if len(J) < current_max_task_number:
                 if frequency >= 1.: 
                     N = 1
                 elif frequency < 1.: 
@@ -143,14 +249,43 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 tik = time.time()
 
                 J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
-                                                                                                inbound_to_outbound_ratio, last_task_id, max_task_number,
+                                                                                                inbound_to_outbound_ratio, last_task_id, current_max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
-                                                                                                  initial_inventory,
-                                                                                                  shuffle_percentage=shuffle_percentage)
+                                                                                                  initial_inventory)
                 tok = time.time()
                 S.add_total_CRG_time(tok-tik)
-            
+
+        # crM2M (roadmap 4.2): look-ahead-driven proactive rearrangement.
+        # Generate fresh candidates from the queue look-ahead and stage them in the
+        # separate ``J_a`` pool. They are scored alongside real tasks by the union
+        # dict passed to TaskAllocation below (the concatenated approach), not
+        # merged into ``J``. Shuffles carry no time deadline in the queue model, so
+        # there is no clock-based expiry -- uncommitted candidates are pruned and
+        # regenerated each tick instead.
+        if enable_rearrangement and use_precomputed_queue and queue is not None:
+            print("=============================" + "Reallocation Tasks (crM2M)" + "=============================")
+            # tik = time.time()
+            # Ta = generate_crm2m_reallocation_tasks(queue, J, G, Rs, B, W, t)
+            # next_rearrangement_task_id = add_reallocation_tasks_to_J_a(
+            #     Ta, J_a, G, next_rearrangement_task_id
+            # )
+            # S.log_reallocation_tasks_generated(t, len(Ta))
+            # tok = time.time()
+            # S.log_reallocation_generation_time(t, tok - tik)
+            # print(f"Number of reallocation tasks generated: {len(Ta)} ({tok - tik:.4f}s)")
+
+            tik = time.time()
+            Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t, item_task_locks, pending_task_targets, use_item_task_locks=False)
+            next_rearrangement_task_id = add_reallocation_tasks_to_J_a(
+                Ta, J_a, G, next_rearrangement_task_id
+            )
+            generation_time = time.time() - tik
+            S.log_reallocation_tasks_generated(t, len(Ta))
+            S.log_reallocation_generation_time(t, generation_time)
+            tok = time.time()
+            print(f"Generate reallocation tasks time: {generation_time:.4f}s for {len(Ta)}")
+
         tik = time.time()
 
         print("=============================" + "Task Allocation"+ "=============================")
@@ -162,13 +297,123 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         total = 0
         for agent in Rs.agents:
             total += len(agent.task_sequence)
-            
-        # if total < max_task_number:
-        #     print(f"Attempting to allocate tasks")
-        Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty)
+
+        # crM2M: hand the allocator a transient union of real tasks and staged
+        # shuffles so the cost cube scores both in one concatenated pass. ``J``
+        # and ``J_a`` stay the canonical stores (TaskAllocation never mutates the
+        # dict it is given -- it only reads it and writes agent.task_sequence).
+        J_for_alloc = {**J, **J_a} if enable_rearrangement else J
+
+        if len(J_a) > 0 or total < current_max_task_number or improvement_task_assignment_strategy == "ta_hybrid":
+            # TA-Hybrid must be called every tick (not gated on task
+            # backlog) so the outer driver can detect group transitions
+            # and replan even when no new tasks are unallocated. Other
+            # allocators keep the legacy "skip when everything is
+            # already assigned" optimisation.
+            # For ta_hybrid we pass the ORIGINAL (un-consumed) schedule
+            # so the driver's TSP sees the full task pool and produces
+            # schedule_row_index values that line up with the task ids
+            # ``add_tasks_from_schedule`` assigns over time.
+            schedule_for_alloc = (
+                original_schedule
+                if improvement_task_assignment_strategy == "ta_hybrid"
+                else schedule
+            )
+            print(f"Attempting to allocate tasks")
+
+            # Buffer-aware crM2M: sample the ambient slack scalar from the live
+            # output buffer and derive the shuffle pick+place service time. A
+            # shuffle incurs one pick (at s_p) plus one place (at d_q), hence
+            # 2 x pick_place_duration. Both default to 0.0 when the buffer /
+            # pick-place timing are disabled, so the rearrangement utility
+            # reduces exactly to the original ``b - lambda * Delta``.
+            crm2m_slack = 0.0
+            crm2m_cpp = 2.0 * pick_place_duration if pick_place_time else 0.0
+            if output_buffer is not None:
+                # alpha := outbound arrival rate into the buffer (items/tick).
+                # Preferred: read it from the arrival/deadline timestamp column of
+                # the look-ahead window (Ethan's task_queue format) via
+                # ``estimate_arrival_rate``, which decouples alpha from the drain
+                # rate mu. Fall back to the outbound-share x mu heuristic only for
+                # the timeless 2-column queue format (no timestamp column).
+                arrival_per_tick = 0.0
+                if use_precomputed_queue and queue is not None and queue.size > 0:
+                    if np.atleast_2d(queue).shape[1] > QUEUE_DEADLINE:
+                        rate_per_min = OutputBuffer.estimate_arrival_rate(queue, W)
+                        arrival_per_tick = tasks_per_min_to_per_tick(rate_per_min)
+                    else:
+                        outbound_fraction = OutputBuffer.estimate_outbound_fraction(queue, W)
+                        arrival_per_tick = (
+                            outbound_fraction * output_buffer.consumption_rate_per_tick
+                        )
+                crm2m_slack = compute_ambient_slack(
+                    buffer_level=output_buffer.level,
+                    capacity=output_buffer.capacity,
+                    drain_per_tick=output_buffer.consumption_rate_per_tick,
+                    arrival_per_tick=arrival_per_tick,
+                    lambda_=crm2m_lambda,
+                    detour_cutoff=crm2m_detour_cutoff,
+                    c_pp=crm2m_cpp,
+                )
+
+            Rs, _, _ = task_allocation.TaskAllocation(S, G, Rs, J_for_alloc, initial_task_assignment_strategy, improvement_task_assignment_strategy, map, t, cost_calculation_method, removal_operator, repair_operator, acceptance_function, T_0, alpha, base_cost_weight, deadline_weight, sku_distribution_weight, agent_unallocated_penalty, schedule=schedule_for_alloc, crm2m_lambda=crm2m_lambda, crm2m_detour_cutoff=crm2m_detour_cutoff, crm2m_slack=crm2m_slack, crm2m_cpp=crm2m_cpp, crm2m_return_margin=crm2m_return_margin)
 
         tok = time.time()
         S.add_total_TA_time(tok-tik)
+
+        # crM2M: drop staged shuffles no agent committed to this tick. M2M
+        # re-decides trailing tasks every tick, so uncommitted shuffles are
+        # regenerated fresh next tick from the look-ahead window rather than
+        # lingering in J_a. Shuffles an agent is executing stay in a task
+        # sequence and are kept so the simulator can complete them.
+        if enable_rearrangement:
+            prune_uncommitted_rearrangements(J_a, Rs)
+            S.log_reallocation_tasks_committed(t, len(J_a))
+
+            # Record the objective terms (benefit, actual detour, utility) for
+            # every committed shuffle from the freshly-decided task sequences, so
+            # each completed rearrangement can be charted with the exact numbers
+            # the allocator scored it with. FIRST-write-wins: the utility that
+            # justified the shuffle is the one at its *commit* tick (where it
+            # cleared the U>0 gate at that tick's ambient slack). A shuffle stays
+            # committed while in-flight, so overwriting each tick would instead
+            # log a later tick's slack -- after the buffer has drained, slack -> 0
+            # and the recomputed U goes spuriously negative. Recording only on the
+            # first commit pins U to the decision that actually drove execution.
+            if len(J_a) > 0:
+                crm2m_home = Rs.agents[0].home
+                already_scored = S.get_rearrangement_task_scores()
+                for crm2m_agent in Rs.agents:
+                    for seq_i, seq_task in enumerate(crm2m_agent.task_sequence):
+                        shuffle_id = seq_task[0]
+                        if shuffle_id not in J_a or shuffle_id in already_scored:
+                            continue
+                        prev_cell = (
+                            crm2m_agent.task_sequence[seq_i - 1][2]
+                            if seq_i > 0
+                            else crm2m_agent.state
+                        )
+                        # Prefer the shuffle's driveway reference_location for
+                        # benefit (matches allocation scoring / irM2M); detour
+                        # still uses agent-0 home (h0).
+                        benefit, detour, utility = committed_shuffle_terms(
+                            G,
+                            prev_cell=prev_cell,
+                            s_p=seq_task[1],
+                            d_q=seq_task[2],
+                            home=crm2m_home,
+                            slack=crm2m_slack,
+                            c_pp=crm2m_cpp,
+                            lambda_=crm2m_lambda,
+                            method=cost_calculation_method,
+                            return_margin=crm2m_return_margin,
+                            benefit_reference=shuffle_reference_location(
+                                J_a[shuffle_id]
+                            ),
+                        )
+                        S.record_rearrangement_task_score(
+                            shuffle_id, benefit, detour, utility
+                        )
 
         # Check if any agent is allocated the same tasks
         for agent in Rs.agents:
@@ -205,9 +450,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             and queue is not None
         ):
             print("=============================" + "Reallocation Tasks" + "=============================")
-            if allow_reallocation_tasks:
+            if allow_reallocation_tasks and reallocation_task_method != "simultaneous":
                 tik = time.time()
-                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
+                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t, item_task_locks, pending_task_targets, use_item_task_locks=False)
                 generation_time = time.time() - tik
                 S.log_reallocation_tasks_generated(t, len(Ta))
                 S.log_reallocation_generation_time(t, generation_time)
@@ -245,31 +490,6 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         f"(construct: {construct_time:.4f}s, solve: {solve_time:.4f}s, "
                         f"{num_binary_vars} binary vars, {num_chosen} tasks chosen)"
                     )
-                elif reallocation_task_method == "simultaneous":
-                    tik = time.time()
-                    last_task_id = merge_reallocation_tasks_into_J(Ta, J, G, last_task_id)
-                    Rs, _, _ = task_allocation.TaskAllocation(
-                        S,
-                        G,
-                        Rs,
-                        J,
-                        initial_task_assignment_strategy,
-                        improvement_task_assignment_strategy,
-                        map,
-                        t,
-                        cost_calculation_method,
-                        removal_operator,
-                        repair_operator,
-                        acceptance_function,
-                        T_0,
-                        alpha,
-                        base_cost_weight,
-                        deadline_weight,
-                        sku_distribution_weight,
-                        agent_unallocated_penalty,
-                    )
-                    tok = time.time()
-                    print(f"Simultaneous reallocation allocation time: {tok - tik}")
 
         S.record_buffer_prediction(t, G, Rs, J, J_a, output_buffer)
 
@@ -296,14 +516,22 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         #             Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
         #             break            
         
-        # HBH+MLA* (Grenouilleau et al., ICAPS 2019) is a coupled
-        # allocator + path planner: hbh_mla_star_call already populates
-        # ``agent.path_sequence`` for every agent it assigned, so calling
-        # the external ECBS/PBS router here would clobber those plans with
-        # a different (unreservation-aware) routing solution. Skip the
-        # external router for that strategy and let the MLA*-produced
-        # paths drive the simulator.
-        if improvement_task_assignment_strategy != "hbh_mla_star":
+        # HBH+MLA* (Grenouilleau et al., ICAPS 2019) and TA-Hybrid
+        # (Liu et al., AAMAS 2019) are both coupled allocator + path
+        # planner methods: their TaskAllocation hooks already populate
+        # ``agent.path_sequence`` for every agent they replanned, so
+        # calling the external ECBS/PBS router here would clobber those
+        # plans with a different (unreservation-aware) routing solution.
+        # Skip the external router for these strategies and let the
+        # native MAPF-aware paths drive the simulator.
+        if improvement_task_assignment_strategy not in ("hbh_mla_star", "ta_hybrid"):
+            # Replan when some agent needs its next route (empty plan) or has
+            # been blocked in place too long (see router.needs_path_plan). On a
+            # PBS failure the router now clears all plans so agents hold instead
+            # of running stale, uncoordinated paths -- together with the reactive
+            # move-guard in simulate this removes the aisle in/out oscillation
+            # and drives collisions to ~0. pathPlan replans all agents in one
+            # call, so a single trigger suffices.
             if router.needs_path_plan(Rs):
                 Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
 
@@ -469,10 +697,9 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         tik = time.time()
         Rs, J, J_a = simulate.simulate(
             S, G, Rs, J, J_a, map, t,
-            aisle_dual_cycle=aisle_dual_cycle,
-            driveway_dual_cycle=driveway_dual_cycle,
             J_a_objectives=J_a_objectives,
             pick_place_time=pick_place_time,
+            pick_place_duration=pick_place_duration,
             output_buffer=output_buffer,
         )
         tok = time.time()
@@ -540,11 +767,22 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             t += 1
             break
 
+        if (
+            run_until_queue_complete
+            and use_precomputed_queue
+            and import_schedule.queue_tasks_finished(
+                queue, deferred_queue, J, S, total_queue_tasks
+            )
+        ):
+            print(f"All {total_queue_tasks} queue tasks completed at t={t}")
+            t += 1
+            break
+
         t += 1
 
     return t
 
-def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
+def main(seed: int, num_robots: int, T: int, max_tasks_mode: str, max_tasks_min: int, max_tasks_period: int, max_number_tasks: int, 
          task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
          path_planning_strategy: str, map_name: str, time_limit: int = 999999,
          visualize_output: bool = False, initial_inventory: float = 25.0, 
@@ -564,22 +802,29 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          agent_unallocated_penalty: float = 0.0,
          solution_repair_detection_function: str = "none",
          solution_repair_function: str = "none",
-         shuffle_percentage: float = 0.0,
-         aisle_dual_cycle: bool = False,
-         driveway_dual_cycle: bool = False,
+         use_precomputed_schedule: bool = False,
+         schedule_file: str = None,
+         initial_inventory_file: str = None,
+         run_until_schedule_complete: bool = False,
          use_precomputed_queue: bool = False,
          queue_file: str = None,
-         initial_inventory_file: str = None,
          run_until_queue_complete: bool = False,
          W: int = 300,
          B: int = 60,
+         enable_rearrangement: bool = False,
+         crm2m_lambda: float = CRM2M_DEFAULT_LAMBDA,
+         crm2m_detour_cutoff: float = CRM2M_DEFAULT_DETOUR_CUTOFF,
+         crm2m_return_margin: float = CRM2M_DEFAULT_RETURN_MARGIN,
          lambda_: float = 1.5,
          reallocation_task_method: str = "none",
          pick_place_time: bool = False,
+         pick_place_duration: int = simulate.DEFAULT_PICK_PLACE_DURATION,
          buffer_capacity_k: int = 0,
          buffer_consumption_rate: float = 70.0,
          queue_release_window: int = 60,
-         log_buffer_predictions: bool = False) -> None:
+         log_buffer_predictions: bool = False,
+         pulse_load_experiment: bool = False,
+         output_file_override: str = None) -> None:
     """
     Run a single instance of the simulation with specified parameters.
     
@@ -636,6 +881,36 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         raise ValueError(
             "--run-until-queue-complete requires --use-precomputed-queue"
         )
+
+    if use_precomputed_schedule and use_precomputed_queue:
+        raise ValueError(
+            "--use-precomputed-schedule and --use-precomputed-queue are mutually "
+            "exclusive (a run is driven by either a schedule or a queue)."
+        )
+
+    if use_precomputed_queue:
+        if not queue_file or not initial_inventory_file:
+            raise ValueError(
+                "--use-precomputed-queue requires both --queue-file and --initial-inventory-file"
+            )
+
+    if run_until_queue_complete and not use_precomputed_queue:
+        raise ValueError(
+            "--run-until-queue-complete requires --use-precomputed-queue"
+        )
+
+    if enable_rearrangement and not use_precomputed_queue:
+        raise ValueError(
+            "--enable-rearrangement requires --use-precomputed-queue (the queue "
+            "look-ahead is the source of future demand for shuffle candidates)."
+        )
+
+    if improvement_task_assignment_strategy == "ta_hybrid":
+        if not use_precomputed_schedule:
+            raise ValueError(
+                "--improvement-task-assign-strategy ta_hybrid is an "
+                "offline algorithm and requires --use-precomputed-schedule."
+            )
     
     stripped_map_name = map_name.split("/")[-1].replace(".json", "")
     effective_task_generation_strategy = (
@@ -656,6 +931,11 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         f"{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_"
         f"{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
     )
+    # An explicit override lets otherwise-identical configs (e.g. M2M vs crM2M,
+    # which share the py_lns strategy and thus the auto-name) run concurrently
+    # without clobbering each other's output / intermediate files.
+    if output_file_override:
+        output_file = output_file_override
     buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
@@ -667,6 +947,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         cost_calculation_method=cost_calculation_method,
         seed=seed,
         max_tasks=max_number_tasks,
+        max_tasks_mode=max_tasks_mode,
+        max_tasks_min=max_tasks_min,
+        max_tasks_period=max_tasks_period,
         task_generation_strategy=effective_task_generation_strategy,
         initial_task_assignment_strategy=initial_task_assignment_strategy,
         improvement_task_assignment_strategy=improvement_task_assignment_strategy,
@@ -707,12 +990,16 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         queue_file=queue_file,
         initial_inventory_file=initial_inventory_file,
         run_until_queue_complete=run_until_queue_complete,
-        aisle_dual_cycle=aisle_dual_cycle,
-        driveway_dual_cycle=driveway_dual_cycle,
         log_buffer_predictions=log_buffer_predictions,
     )
+    schedule = None
     queue = None
-    if use_precomputed_queue:
+    if use_precomputed_schedule:
+        schedule = import_schedule.import_schedule(schedule_file)
+        G = graph.Graph(num_robots, map_name, 0.0, num_skus, weight_init_method)
+        import_schedule.load_initial_inventory(initial_inventory_file, G)
+        print(f"Loaded precomputed schedule ({schedule.shape[0]} tasks) and initial inventory from file")
+    elif use_precomputed_queue:
         queue = import_schedule.import_queue(queue_file)
         G = graph.Graph(num_robots, map_name, 0.0, num_skus, weight_init_method)
         import_schedule.load_initial_inventory(initial_inventory_file, G)
@@ -738,6 +1025,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     simulated_timesteps = execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
             case_request_strategy=task_generation_strategy, 
             max_task_number=max_number_tasks, 
+            max_tasks_mode=max_tasks_mode,
+            max_tasks_min=max_tasks_min,
+            max_tasks_period=max_tasks_period,
             initial_task_assignment_strategy=initial_task_assignment_strategy, 
             improvement_task_assignment_strategy=improvement_task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
@@ -759,24 +1049,30 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             solution_repair_detection_function=solution_repair_detection_function,
             solution_repair_function=solution_repair_function,
             initial_inventory=initial_inventory,
-            shuffle_percentage=shuffle_percentage,
-            aisle_dual_cycle=aisle_dual_cycle,
-            driveway_dual_cycle=driveway_dual_cycle,
+            use_precomputed_schedule=use_precomputed_schedule,
+            schedule=schedule,
+            run_until_schedule_complete=run_until_schedule_complete,
             use_precomputed_queue=use_precomputed_queue,
             queue=queue,
             run_until_queue_complete=run_until_queue_complete,
             W=W,
             B=B,
+            enable_rearrangement=enable_rearrangement,
+            crm2m_lambda=crm2m_lambda,
+            crm2m_detour_cutoff=crm2m_detour_cutoff,
+            crm2m_return_margin=crm2m_return_margin,
             lambda_=lambda_,
             reallocation_task_method=reallocation_task_method,
             pick_place_time=pick_place_time,
+            pick_place_duration=pick_place_duration,
             buffer_capacity_k=buffer_capacity_k,
             buffer_consumption_rate=buffer_consumption_rate,
             queue_release_window=queue_release_window,
+            pulse_load_experiment=pulse_load_experiment,
     )
-    if run_until_queue_complete:
+    if run_until_schedule_complete or run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
-        print(f"Simulated {simulated_timesteps} timesteps (run until queue complete)")
+        print(f"Simulated {simulated_timesteps} timesteps (run until task source complete)")
     tok = time.time()
     S.set_total_runtime(tok-tik)
 
@@ -806,6 +1102,9 @@ if __name__=="__main__":
     parser.add_argument('--seed', type=int, required=True, help='Random seed for reproducibility')
     parser.add_argument('--num-robots', type=int, required=True, help='Number of robots')
     parser.add_argument('--time-horizon', type=int, required=True, help='Time horizon T')
+    parser.add_argument('--max-tasks-mode', type=str, required=True, help='Maximum number of tasks mode')
+    parser.add_argument('--max-tasks-min', type=int, required=True, help='Minimum number of tasks')
+    parser.add_argument('--max-tasks-period', type=int, required=True, help='Maximum number of tasks period')
     parser.add_argument('--max-tasks', type=int, required=True, help='Maximum number of tasks')
     parser.add_argument('--task-gen-strategy', type=str, required=True, 
                        choices=['informed_uniform', 'uninformed_uniform', 'feedback_control'],
@@ -814,11 +1113,15 @@ if __name__=="__main__":
                        choices=['cost_matrix', 'random', 'fast_greedy', 'fast_FCF', 'fast_SCF'],
                        help='Task assignment strategy')
     parser.add_argument('--improvement-task-assign-strategy', type=str, required=True,
-                       choices=['M2M', 'c_lns', 'c_rmca', 'hbh_mla_star', 'none'],
+                       choices=['M2M', 'py_lns', 'c_lns', 'c_p_lns', 'c_rmca', 'hbh_mla_star', 'ta_hybrid', 'none'],
                        help='Task assignment strategy for improvement. '
                             '"hbh_mla_star" implements Grenouilleau et al. (ICAPS 2019) '
                             'HBH+MLA*: a coupled allocator + path planner that bypasses '
-                            'the external ECBS/PBS routing call.')
+                            'the external ECBS/PBS routing call. '
+                            '"ta_hybrid" implements Liu, Ma, Li, Koenig (AAMAS 2019) '
+                            'TA-Hybrid: offline TSP-based task assignment paired with '
+                            'ICBS (Group 1) + time-extended min-cost max-flow (Group 2) '
+                            'path planning. Requires --use-precomputed-schedule.')
     parser.add_argument('--path-planning-strategy', type=str, required=True,
                        choices=['ecbs', 'pbs'],
                        help='Path planning strategy')
@@ -865,22 +1168,6 @@ if __name__=="__main__":
     parser.add_argument('--agent-unallocated-penalty', type=float, default=0.0, help='Penalty for unallocated agents')
     parser.add_argument('--solution-repair-detection-function', type=str, default='none', help='Solution repair detection function')
     parser.add_argument('--solution-repair-function', type=str, default='none', help='Solution repair function')
-    parser.add_argument('--shuffle-percentage', type=float, default=0.0,
-                       help='Per-task probability (0.0-1.0) of generating a shuffle (type=2, '
-                            'shelf-to-shelf) task in CRG. 0.0 disables shuffle generation. '
-                            'This is the 1.4-skeleton on/off switch; the proper rearrangement '
-                            'ratio balancer is roadmap section 3.2.')
-    parser.add_argument('--aisle-dual-cycle', action='store_true',
-                       help='Enable aisle dual cycling (IB->OB chaining within the same '
-                            'warehouse aisle). When set, after an agent completes an inbound '
-                            'task it will immediately pick up a same-aisle outbound task if '
-                            'one is unallocated, instead of returning to the Free state. '
-                            'Default off so it can be ablated independently of rearrangement.')
-    parser.add_argument('--driveway-dual-cycle', action='store_true',
-                       help='Enable driveway dual cycling (OB->IB chaining at the driveway). '
-                            'When set, after an agent completes an outbound delivery at a '
-                            'driveway cell it will immediately pick up an unallocated inbound '
-                            'task whose pickup is at any driveway cell. Default off.')
     parser.add_argument('--pick-place-time', action='store_true',
                        help='When set, agents spend 5 seconds picking up and 5 seconds '
                             'placing items at pickup/delivery locations before inventory '
@@ -896,6 +1183,14 @@ if __name__=="__main__":
                             'used by the fast_insertion reallocation path) and record '
                             'it alongside the real observed buffer levels for that '
                             'window. Requires --buffer-capacity-k > 0.')
+    parser.add_argument('--pulse-load-experiment', action='store_true',
+                       help='Enable Ethan\'s irM2M optimal-insertion microbenchmark '
+                            'scaffolding (task_queue commit ba05069): override the '
+                            'CLI --max-tasks value with a 500-tick 0/20 pulse and '
+                            'disable further reallocation-task generation after '
+                            't=300. Off by default so --max-tasks controls the WIP '
+                            'cap normally; only set this to reproduce Ethan\'s '
+                            'insertion-under-choppy-demand runs.')
     parser.add_argument('--use-precomputed-queue', action='store_true',
                        help='Load tasks from a precomputed queue file and skip CRG. '
                             'Requires --queue-file and --initial-inventory-file.')
@@ -903,17 +1198,45 @@ if __name__=="__main__":
                        help='Path to precomputed queue text file (sku_id, task_type)')
     parser.add_argument('--initial-inventory-file', type=str, default=None,
                        help='Path to precomputed initial inventory text file (sku_id, row, col)')
+    parser.add_argument('--use-precomputed-schedule', action='store_true',
+                       help='Load tasks from a precomputed schedule file and skip CRG. '
+                            'Requires --schedule-file and --initial-inventory-file.')
+    parser.add_argument('--schedule-file', type=str, default=None,
+                       help='Path to precomputed schedule text file (task_id, time, sku_id, type)')
+    parser.add_argument('--run-until-schedule-complete', action='store_true',
+                       help='Run until all precomputed schedule tasks are completed instead '
+                            'of stopping at --time-horizon. Requires --use-precomputed-schedule.')
     parser.add_argument('--run-until-queue-complete', action='store_true',
                        help='Run until all precomputed queue tasks are completed instead '
                             'of stopping at --time-horizon. Requires --use-precomputed-queue.')
     parser.add_argument('--W', type=int, default=300,
-                       help='Rearrangement lookahead window (queue indices)')
+                       help='Lookahead window end (queue index, exclusive). Reallocation '
+                            'candidates are generated from outbound tasks in the remaining '
+                            'queue slice queue[B:W]. Only used with --use-precomputed-queue.')
     parser.add_argument('--B', type=int, default=60,
-                       help='Rearrangement lookahead beginning (queue index)')
+                       help='Lookahead window start (queue index, inclusive). Skips the first '
+                            'B upcoming queue tasks when scanning for reallocation candidates, '
+                            'to avoid proactive moves for demand that is already imminent.')
     parser.add_argument('--queue-release-window', type=int, default=60,
                        help='Release precomputed queue tasks only when their '
                             'deadline is within this many timesteps of the '
                             'current time (deadline <= t + window).')
+    parser.add_argument('--enable-rearrangement', action='store_true',
+                       help='Enable crM2M concatenated proactive rearrangement: generate '
+                            'look-ahead shuffle candidates into J_a and assign them alongside '
+                            'real tasks. Requires --use-precomputed-queue.')
+    parser.add_argument('--crm2m-lambda', type=float, default=CRM2M_DEFAULT_LAMBDA,
+                       help='crM2M utility detour weight lambda in U = b - lambda*Delta '
+                            '(lambda >= 1; larger penalizes detours more).')
+    parser.add_argument('--crm2m-detour-cutoff', type=float, default=CRM2M_DEFAULT_DETOUR_CUTOFF,
+                       help='crM2M weighted-detour cutoff: shuffles with lambda*Delta >= this '
+                            'value are rejected (gated to +inf).')
+    parser.add_argument('--crm2m-return-margin', type=float, default=CRM2M_DEFAULT_RETURN_MARGIN,
+                       help='crM2M return margin (ticks) added to the effective delay in the '
+                            'utility penalty only: a shuffle is credited as free only when '
+                            'slack >= Delta + c_pp + margin, forcing it to finish with that much '
+                            'spare buffer-time before a freed slot is re-consumed by other '
+                            'agents\' outbound arrivals. 0 reproduces the pre-margin behaviour.')
     parser.add_argument(
         '--lambda_',
         type=float,
@@ -925,16 +1248,26 @@ if __name__=="__main__":
         type=str,
         default='none',
         choices=list(REALLOCATION_TASK_METHODS),
-        help='Rearrangement task integration method: none, simultaneous (crM2M), '
+        help='irM2M task integration method: none, simultaneous, '
              'insertion (irM2M), or fast_insertion (numpy-vectorized MILP construction, '
              'same result as insertion but faster to build).',
     )
+    parser.add_argument('--pick-place-duration', type=int, default=4,
+                       help='Ticks spent at each pick and each place when --pick-place-time '
+                            'is set (default 4).')
+    parser.add_argument('--output-file', type=str, default=None,
+                       help='Explicit output JSON path, overriding the auto-generated name. '
+                            'Use to run configs that share an auto-name (e.g. M2M vs crM2M) '
+                            'concurrently without clobbering each other.')
     args = parser.parse_args()
     
     main(
         seed=args.seed,
         num_robots=args.num_robots,
         T=args.time_horizon,
+        max_tasks_mode=args.max_tasks_mode,
+        max_tasks_min=args.max_tasks_min,
+        max_tasks_period=args.max_tasks_period,
         max_number_tasks=args.max_tasks,
         task_generation_strategy=args.task_gen_strategy,
         initial_task_assignment_strategy=args.initial_task_assign_strategy,
@@ -965,20 +1298,27 @@ if __name__=="__main__":
         agent_unallocated_penalty=args.agent_unallocated_penalty,
         solution_repair_detection_function=args.solution_repair_detection_function,
         solution_repair_function=args.solution_repair_function,
-        shuffle_percentage=args.shuffle_percentage,
-        aisle_dual_cycle=args.aisle_dual_cycle,
-        driveway_dual_cycle=args.driveway_dual_cycle,
+        use_precomputed_schedule=args.use_precomputed_schedule,
+        schedule_file=args.schedule_file,
+        initial_inventory_file=args.initial_inventory_file,
+        run_until_schedule_complete=args.run_until_schedule_complete,
         use_precomputed_queue=args.use_precomputed_queue,
         queue_file=args.queue_file,
-        initial_inventory_file=args.initial_inventory_file,
         run_until_queue_complete=args.run_until_queue_complete,
         W=args.W,
         B=args.B,
+        enable_rearrangement=args.enable_rearrangement,
+        crm2m_lambda=args.crm2m_lambda,
+        crm2m_detour_cutoff=args.crm2m_detour_cutoff,
+        crm2m_return_margin=args.crm2m_return_margin,
         lambda_=args.lambda_,
         reallocation_task_method=args.reallocation_task_method,
         pick_place_time=args.pick_place_time,
+        pick_place_duration=args.pick_place_duration,
         buffer_capacity_k=args.buffer_capacity_k,
         buffer_consumption_rate=args.buffer_consumption_rate,
         queue_release_window=args.queue_release_window,
         log_buffer_predictions=args.log_buffer_predictions,
+        pulse_load_experiment=args.pulse_load_experiment,
+        output_file_override=args.output_file,
     )
