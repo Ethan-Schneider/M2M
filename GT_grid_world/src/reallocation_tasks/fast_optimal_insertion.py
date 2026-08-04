@@ -116,6 +116,7 @@ def solve_insertion_fast(
     t: int = 0,
     next_rearrangement_task_id: Optional[int] = None,
     pick_place_time: bool = False,
+    pending_task_targets: Optional[Dict[int, Location]] = None,
 ) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float, Dict[int, Dict[str, float]]]:
     """Vectorized equivalent of ``optimal_insertion_gurobi.solve_insertion``.
 
@@ -148,7 +149,7 @@ def solve_insertion_fast(
         dq_row = D[slot_q_idx]  # (num_slots, num_locations): dist(q_slot, *) == dist(*, q_slot)
 
         for n, task_data in tasks_a.items():
-            C_i, _release, _deadline, _sigma, reference_location = task_data
+            C_i, _release, _deadline, _sigma, reference_location, _target_task_id = task_data
             candidates = [(s, g) for s, g in C_i if s not in V_alloc and g not in V_alloc and s[1]]
             if not candidates:
                 continue
@@ -174,7 +175,7 @@ def solve_insertion_fast(
             # U = benefits[np.newaxis, :] - lambda_ * np.maximum(
             #     0.0, dfull - slot_slack[:, np.newaxis]
             # )
-            U = benefits[np.newaxis, :]
+            U = benefits[np.newaxis, :] - lambda_ * dfull # no slack adjustment for now
             slot_rows, cand_cols = np.nonzero(U > 0)
 
             new_obj: Dict[InsertionKey, float] = {}
@@ -245,5 +246,6 @@ def solve_insertion_fast(
         next_rearrangement_task_id=next_rearrangement_task_id,
         lambda_=lambda_,
         pick_place_time=pick_place_time,
+        pending_task_targets=pending_task_targets,
     )
     return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time, objectives

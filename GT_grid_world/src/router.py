@@ -25,15 +25,17 @@ def clear_all_paths(Rs: AgentLoader) -> None:
         agent.blocked_ticks = 0
 
 
-def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats) -> AgentLoader:
+def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stats, seed : int) -> AgentLoader:
     states = [agent.state for agent in Rs.agents]
-
-    
 
     goal_locations = []
     for agent in Rs.agents:
+        # If agent is blocked, set goal location to its current location
+        if agent.blocked_ticks >= BLOCKED_REPLAN_THRESHOLD:
+            goal_locations.append(agent.state)
+
         # If robot is going to pickup, set goal location to the task's start location
-        if agent.status == 1:
+        elif agent.status == 1:
             # Get current assigned task's start location
             goal_locations.append(agent.task_sequence[0][1])
             
@@ -77,7 +79,7 @@ def pathPlan(map : str, Rs : AgentLoader, path_planning_strategy : str, S : Stat
                 print(f"Duplicate agent states: {Rs.get_agent_states()}")
             else:
                 print(f"No duplicate agent states.")
-            sequences = pbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
+            sequences = pbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations, seed)
         elif path_planning_strategy == "ecbs":
             sequences = eecbs.test_cpp_func(map, len(Rs.agents), 1, w, Rs.get_agent_states(), goal_locations)
         if sequences == []:

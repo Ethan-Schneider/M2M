@@ -3,6 +3,7 @@ import os
 import numpy as np
 import argparse
 from typing import List, Optional
+import random
 
 from src import graph, simulate, task_allocation, case_request_generator, import_schedule, router, agent
 from src.task_allocation_algorithms.local_repair.branch_and_bound_V2 import BnB
@@ -21,10 +22,38 @@ from src.reallocation_tasks.fast_optimal_insertion import solve_insertion_fast
 from src.output_buffer import OutputBuffer
 
 REALLOCATION_TASK_METHODS = ("none", "simultaneous", "insertion", "fast_insertion")
+MAX_TASK_NUMBER_MODES = ("constant", "oscillating")
 
-def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float, 
-            T: int, case_request_strategy: str = "uninformed_uniform", 
+
+def compute_max_task_number(t: int, mode: str, min_value: int, max_value: int, period: int) -> int:
+    """
+    Compute the max_task_number for timestep ``t``.
+
+    "constant" always returns ``max_value``. "oscillating" follows a raised-cosine
+    wave that starts at ``min_value`` at t=0 and reaches ``max_value`` after
+    ``period`` timesteps, then continues oscillating between the two with a
+    full cycle length of ``2 * period``.
+    """
+    if mode == "constant":
+        return max_value
+    elif mode == "oscillating":
+        if period <= 0:
+            return max_value
+        phase = (np.pi * t) / period
+        value = min_value + (max_value - min_value) * (1 - np.cos(phase)) / 2
+        return int(round(value))
+    else:
+        raise ValueError(
+            f"Unknown max_task_number_mode {mode!r}; expected one of {MAX_TASK_NUMBER_MODES}"
+        )
+
+
+def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.Graph, frequency : float, inbound_to_outbound_ratio: float,
+            T: int, case_request_strategy: str = "uninformed_uniform",
             max_task_number : int = 20,
+            max_task_number_mode : str = "constant",
+            max_task_number_min : int = 0,
+            max_task_number_period : int = 1800,
             initial_task_assignment_strategy : str = "lns",
             improvement_task_assignment_strategy : str = "py_lns",
             path_planning_strategy : str = "ecbs", time_limit : int = 999999,
@@ -52,11 +81,13 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             B: int = 60,
             lambda_: float = 1.5,
             reallocation_task_method: str = "none",
+            use_item_task_locks: bool = True,
             pick_place_time: bool = False,
             buffer_capacity_k: int = 0,
             buffer_consumption_rate: float = 70.0,
             queue_release_window: int = 60,
-            log_buffer_predictions: bool = False) -> int:
+            log_buffer_predictions: bool = False,
+            seed : int = 0) -> int:
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
@@ -69,6 +100,15 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     # Rearrangement tasks only added when committed to an agent's task sequence
     J_a = {}
     J_a_objectives = {}
+
+    # Persistent {item_location: task_id} pairing built up by
+    # generate_reallocation_tasks: once an item is assigned to a real outbound
+    # task it stays locked to that task (never re-proposed for a different
+    # one) until the task completes. pending_task_targets tracks the
+    # {task_id: goal} of a locked item's committed-but-not-yet-executed
+    # shuffle so the lock follows the item across the move once it lands.
+    item_task_locks = {}
+    pending_task_targets = {}
 
     last_task_id = 0
     last_rearrangement_task_id = 100000
@@ -86,26 +126,30 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
     t = 0
     allow_reallocation_tasks = True
 
-    max_task_number = 0
+    # max_task_number = 0
     while True:
         if not run_until_queue_complete and t >= T:
             break
+
+        current_max_task_number = compute_max_task_number(
+            t, max_task_number_mode, max_task_number_min, max_task_number, max_task_number_period
+        )
 
         print(f"Number of tasks in system: {len(J)}")
         if use_precomputed_queue:
             print(f"Number of tasks remaining in queue: {queue.shape[0]}")
             print(f"Number of deferred tasks: {len(deferred_queue)}")
 
-        if t == 300:
-            allow_reallocation_tasks = False
+        # if t == 300:
+        #     allow_reallocation_tasks = False
 
-        if t%500 == 0 and t > 0:
-            if max_task_number == 0:
-                max_task_number = 20
-                allow_reallocation_tasks = False
-            else:
-                max_task_number = 0
-                allow_reallocation_tasks = True
+        # if t%500 == 0 and t > 0:
+        #     if max_task_number == 0:
+        #         max_task_number = 20
+        #         allow_reallocation_tasks = False
+        #     else:
+        #         max_task_number = 0
+        #         allow_reallocation_tasks = True
 
         print("============================= T : " + str(t) + "=============================")
         # Check if new tasks need to be generated
@@ -123,7 +167,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                 S,
                 G,
                 last_task_id,
-                max_task_number=max_task_number,
+                max_task_number=current_max_task_number,
                 frequency=frequency,
                 deadline_generation_method=deadline_generation_method,
                 deadline_offset=deadline_offset,
@@ -132,18 +176,18 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             tok = time.time()
             S.add_total_CRG_time(tok - tik)
         elif t%frequency == 0:
-            if len(J) < max_task_number:
-                if frequency >= 1.: 
+            if len(J) < current_max_task_number:
+                if frequency >= 1.:
                     N = 1
-                elif frequency < 1.: 
+                elif frequency < 1.:
                     N = frequency**-1
                 else:
                     N = 0
                 # Generate new tasks
                 tik = time.time()
 
-                J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N, 
-                                                                                                inbound_to_outbound_ratio, last_task_id, max_task_number,
+                J, last_task_id, __, __ = case_request_generator.CRG(S, t, J, G, Rs, N,
+                                                                                                inbound_to_outbound_ratio, last_task_id, current_max_task_number,
                                                                                                   G.warehouse, case_request_strategy, 
                                                                                                   deadline_generation_method, deadline_offset, improvement_task_assignment_strategy,
                                                                                                   initial_inventory,
@@ -205,9 +249,11 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
             and queue is not None
         ):
             print("=============================" + "Reallocation Tasks" + "=============================")
-            if allow_reallocation_tasks:
+            if allow_reallocation_tasks and current_max_task_number < len(Rs.agents):
                 tik = time.time()
-                Ta = generate_reallocation_tasks(queue, J, G, Rs, B, W, t)
+                Ta = generate_reallocation_tasks(
+                    queue, J, G, Rs, B, W, t, item_task_locks, pending_task_targets,
+                    use_item_task_locks=use_item_task_locks)
                 generation_time = time.time() - tik
                 S.log_reallocation_tasks_generated(t, len(Ta))
                 S.log_reallocation_generation_time(t, generation_time)
@@ -231,6 +277,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
                         t=t,
                         next_rearrangement_task_id=last_rearrangement_task_id,
                         pick_place_time=pick_place_time,
+                        pending_task_targets=pending_task_targets,
                     )
                     J_a_objectives.update(new_objectives)
                     S.log_reallocation_tasks_chosen(t, num_chosen)
@@ -305,7 +352,7 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
         # paths drive the simulator.
         if improvement_task_assignment_strategy != "hbh_mla_star":
             if router.needs_path_plan(Rs):
-                Rs = router.pathPlan(map, Rs, path_planning_strategy, S)
+                Rs = router.pathPlan(map, Rs, path_planning_strategy, S, seed)
 
         tok = time.time()
         S.add_total_PF_time(tok-tik)
@@ -544,10 +591,13 @@ def execute(S : statistics.Stats, map : str, Rs : agent.AgentLoader, G : graph.G
 
     return t
 
-def main(seed: int, num_robots: int, T: int, max_number_tasks: int, 
+def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          task_generation_strategy: str, initial_task_assignment_strategy: str, improvement_task_assignment_strategy: str,
          path_planning_strategy: str, map_name: str, time_limit: int = 999999,
-         visualize_output: bool = False, initial_inventory: float = 25.0, 
+         max_task_number_mode: str = "constant",
+         max_task_number_min: int = 0,
+         max_task_number_period: int = 1800,
+         visualize_output: bool = False, initial_inventory: float = 25.0,
          frequency: float = 1.0, inbound_outbound_ratio: float = 1.0,
          output_graphs: bool = False, num_skus: int = 10,
          weight_init_method: str = "random",
@@ -575,6 +625,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
          B: int = 60,
          lambda_: float = 1.5,
          reallocation_task_method: str = "none",
+         use_item_task_locks: bool = True,
          pick_place_time: bool = False,
          buffer_capacity_k: int = 0,
          buffer_consumption_rate: float = 70.0,
@@ -619,11 +670,18 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         solution_repair_function: Function to repair solution post allocation and motion planning
     """
     np.random.seed(seed)
+    random.seed(seed)
 
     if reallocation_task_method not in REALLOCATION_TASK_METHODS:
         raise ValueError(
             f"Unknown reallocation_task_method {reallocation_task_method!r}; "
             f"expected one of {REALLOCATION_TASK_METHODS}"
+        )
+
+    if max_task_number_mode not in MAX_TASK_NUMBER_MODES:
+        raise ValueError(
+            f"Unknown max_task_number_mode {max_task_number_mode!r}; "
+            f"expected one of {MAX_TASK_NUMBER_MODES}"
         )
 
     if use_precomputed_queue:
@@ -654,9 +712,10 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         f"{improvement_task_assignment_strategy}_{path_planning_strategy}_"
         f"{stripped_map_name}_{num_robots}_{max_number_tasks}_"
         f"{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_"
-        f"{solution_repair_detection_function}_{solution_repair_function}_{seed}.json"
+        f"{solution_repair_detection_function}_{solution_repair_function}_"
+        f"{buffer_capacity_k}_{buffer_consumption_rate}_{seed}.json"
     )
-    buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{seed}"
+    buffer_file = f"data/buffer_data/{T}_{effective_task_generation_strategy}_{initial_task_assignment_strategy}_{improvement_task_assignment_strategy}_{path_planning_strategy}_{stripped_map_name}_{num_robots}_{max_number_tasks}_{base_cost_weight}_{deadline_weight}_{sku_distribution_weight}_{buffer_capacity_k}_{buffer_consumption_rate}_{seed}"
     
     # B = buffer.Buffer(80, buffer_file)
     S = statistics.Stats(
@@ -667,6 +726,9 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         cost_calculation_method=cost_calculation_method,
         seed=seed,
         max_tasks=max_number_tasks,
+        max_task_number_mode=max_task_number_mode,
+        max_task_number_min=max_task_number_min,
+        max_task_number_period=max_task_number_period,
         task_generation_strategy=effective_task_generation_strategy,
         initial_task_assignment_strategy=initial_task_assignment_strategy,
         improvement_task_assignment_strategy=improvement_task_assignment_strategy,
@@ -699,6 +761,7 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
         B=B,
         lambda_=lambda_,
         reallocation_task_method=reallocation_task_method,
+        use_item_task_locks=use_item_task_locks,
         queue_release_window=queue_release_window,
         pick_place_time=pick_place_time,
         buffer_capacity_k=buffer_capacity_k,
@@ -736,9 +799,12 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
     tik = time.time()
     # Execute online algorithm
     simulated_timesteps = execute(S, map_name, Rs, G, frequency, inbound_outbound_ratio, T, 
-            case_request_strategy=task_generation_strategy, 
-            max_task_number=max_number_tasks, 
-            initial_task_assignment_strategy=initial_task_assignment_strategy, 
+            case_request_strategy=task_generation_strategy,
+            max_task_number=max_number_tasks,
+            max_task_number_mode=max_task_number_mode,
+            max_task_number_min=max_task_number_min,
+            max_task_number_period=max_task_number_period,
+            initial_task_assignment_strategy=initial_task_assignment_strategy,
             improvement_task_assignment_strategy=improvement_task_assignment_strategy, 
             path_planning_strategy=path_planning_strategy, 
             time_limit=time_limit,
@@ -769,10 +835,12 @@ def main(seed: int, num_robots: int, T: int, max_number_tasks: int,
             B=B,
             lambda_=lambda_,
             reallocation_task_method=reallocation_task_method,
+            use_item_task_locks=use_item_task_locks,
             pick_place_time=pick_place_time,
             buffer_capacity_k=buffer_capacity_k,
             buffer_consumption_rate=buffer_consumption_rate,
             queue_release_window=queue_release_window,
+            seed=seed
     )
     if run_until_queue_complete:
         S.set_simulation_time(simulated_timesteps)
@@ -806,8 +874,23 @@ if __name__=="__main__":
     parser.add_argument('--seed', type=int, required=True, help='Random seed for reproducibility')
     parser.add_argument('--num-robots', type=int, required=True, help='Number of robots')
     parser.add_argument('--time-horizon', type=int, required=True, help='Time horizon T')
-    parser.add_argument('--max-tasks', type=int, required=True, help='Maximum number of tasks')
-    parser.add_argument('--task-gen-strategy', type=str, required=True, 
+    parser.add_argument('--max-tasks', type=int, required=True,
+                       help='Maximum number of tasks. Used directly as the constant value when '
+                            '--max-tasks-mode=constant, or as the peak value when '
+                            '--max-tasks-mode=oscillating.')
+    parser.add_argument('--max-tasks-mode', type=str, default='constant',
+                       choices=list(MAX_TASK_NUMBER_MODES),
+                       help='How max_task_number varies over time: "constant" (always '
+                            '--max-tasks) or "oscillating" (a sine-like wave starting at '
+                            '--max-tasks-min at t=0 and reaching --max-tasks after '
+                            '--max-tasks-period timesteps, then continuing to oscillate).')
+    parser.add_argument('--max-tasks-min', type=int, default=0,
+                       help='Minimum max_task_number value at t=0 when --max-tasks-mode=oscillating.')
+    parser.add_argument('--max-tasks-period', type=int, default=1800,
+                       help='Timesteps for max_task_number to ramp from --max-tasks-min to '
+                            '--max-tasks when --max-tasks-mode=oscillating (half the full '
+                            'oscillation cycle).')
+    parser.add_argument('--task-gen-strategy', type=str, required=True,
                        choices=['informed_uniform', 'uninformed_uniform', 'feedback_control'],
                        help='Task generation strategy')
     parser.add_argument('--initial-task-assign-strategy', type=str, required=True,
@@ -929,6 +1012,16 @@ if __name__=="__main__":
              'insertion (irM2M), or fast_insertion (numpy-vectorized MILP construction, '
              'same result as insertion but faster to build).',
     )
+    parser.add_argument(
+        '--disable-item-task-locks',
+        dest='use_item_task_locks',
+        action='store_false',
+        help='Disable persistent item->task locking in generate_reallocation_tasks: '
+             'every rearrangement-task generation round recomputes a fresh min-cost '
+             'assignment from scratch instead of keeping an item committed to the '
+             'same outbound task across calls. Locking is enabled by default.',
+    )
+    parser.set_defaults(use_item_task_locks=True)
     args = parser.parse_args()
     
     main(
@@ -936,6 +1029,9 @@ if __name__=="__main__":
         num_robots=args.num_robots,
         T=args.time_horizon,
         max_number_tasks=args.max_tasks,
+        max_task_number_mode=args.max_tasks_mode,
+        max_task_number_min=args.max_tasks_min,
+        max_task_number_period=args.max_tasks_period,
         task_generation_strategy=args.task_gen_strategy,
         initial_task_assignment_strategy=args.initial_task_assign_strategy,
         improvement_task_assignment_strategy=args.improvement_task_assign_strategy,
@@ -976,9 +1072,10 @@ if __name__=="__main__":
         B=args.B,
         lambda_=args.lambda_,
         reallocation_task_method=args.reallocation_task_method,
+        use_item_task_locks=args.use_item_task_locks,
         pick_place_time=args.pick_place_time,
         buffer_capacity_k=args.buffer_capacity_k,
         buffer_consumption_rate=args.buffer_consumption_rate,
         queue_release_window=args.queue_release_window,
-        log_buffer_predictions=args.log_buffer_predictions,
+        log_buffer_predictions=args.log_buffer_predictions
     )

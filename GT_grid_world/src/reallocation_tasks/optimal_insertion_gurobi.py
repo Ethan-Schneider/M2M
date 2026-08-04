@@ -40,7 +40,11 @@ from ..simulate import (
 )
 
 Location = Tuple[int, int]
-ReallocationTask = Tuple[Set[Location], float, float, int, Location]
+# (C_i, r_i, d_i, sigma_i, reference_location, target_task_id) -- see
+# ``generate_reallocation_tasks.generate_reallocation_tasks``. ``target_task_id``
+# is the real outbound task in ``J`` this candidate is locked to fulfill, or
+# ``None`` for a tentative match against a not-yet-released future task.
+ReallocationTask = Tuple[Set[Location], float, float, int, Location, Optional[int]]
 InsertionKey = Tuple[int, int, Location, Location, int, int]
 # (task_key, candidate_idx, start, goal, agent_idx, insertion_position)
 #
@@ -493,6 +497,7 @@ def apply_insertions(
     next_rearrangement_task_id: Optional[int] = None,
     lambda_: float = 1.0,
     pick_place_time: bool = False,
+    pending_task_targets: Optional[Dict[int, Location]] = None,
 ) -> Tuple[AgentLoader, Dict[int, Tuple], Dict[int, Dict[str, float]]]:
     """Insert Gurobi-selected rearrangement tasks into agent task sequences.
 
@@ -511,6 +516,11 @@ def apply_insertions(
             updates KeyError on the un-initialized task id.
         next_task_id: Optional starting id; defaults to rearrangement id range.
         lambda_: Detour penalty used when computing insertion utility.
+        pending_task_targets: When given, mutated in place -- for every chosen
+            insertion whose candidate is locked to a real outbound task (see
+            ``generate_reallocation_tasks``), records ``{target_task_id:
+            goal}`` so ``generate_reallocation_tasks`` can carry that task's
+            item lock across the move once it physically executes.
 
     Returns:
         Deep copy of ``Rs`` with chosen insertions applied, updated ``J_a``,
@@ -533,7 +543,7 @@ def apply_insertions(
         for insertion_position, task_key, start, goal in sorted(
             insertions, key=lambda item: -item[0]
         ):
-            _C_i, _release, deadline, sigma, reference_location = tasks_a[task_key]
+            _C_i, _release, deadline, sigma, reference_location, target_task_id = tasks_a[task_key]
             task_benefit, detour_cost, utility = compute_insertion_objectives(
                 G, Rs, start, goal, agent_idx, insertion_position, lambda_,
                 reference_location, pick_place_time
@@ -541,6 +551,9 @@ def apply_insertions(
             task_tuple = (current_id, start, goal, int(deadline))
             agent = modified.agents[agent_idx]
             agent.task_sequence.insert(insertion_position, task_tuple)
+
+            if pending_task_targets is not None and target_task_id is not None:
+                pending_task_targets[target_task_id] = goal
 
             if insertion_position == 0:
                 # Agent had no tasks at all -- this insertion is its only
@@ -586,6 +599,7 @@ def solve_insertion(
     t: int = 0,
     next_rearrangement_task_id: Optional[int] = None,
     pick_place_time: bool = False,
+    pending_task_targets: Optional[Dict[int, Location]] = None,
 ) -> Tuple[AgentLoader, Dict[int, Tuple], int, int, float, float, Dict[int, Dict[str, float]]]:
     """Build, solve, and apply the rearrangement insertion MILP with Gurobi.
 
@@ -612,7 +626,7 @@ def solve_insertion(
     z: Dict[InsertionKey, gp.Var] = {}
     if insertion_slots:
         for n, task_data in tasks_a.items():
-            C_i, _release, _deadline, _sigma, reference_location = task_data
+            C_i, _release, _deadline, _sigma, reference_location, _target_task_id = task_data
             for k, (s, g) in enumerate(C_i):
                 if s in V_alloc or g in V_alloc:
                     continue
@@ -687,5 +701,6 @@ def solve_insertion(
         next_rearrangement_task_id=next_rearrangement_task_id,
         lambda_=lambda_,
         pick_place_time=pick_place_time,
+        pending_task_targets=pending_task_targets,
     )
     return Rs_modified, J_a, num_chosen, num_binary_vars, construct_time, solve_time, objectives

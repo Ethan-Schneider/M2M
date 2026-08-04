@@ -132,7 +132,9 @@ def compute_nonzero_tardiness_stats(task_tardiness: dict) -> dict:
 
 class Stats: 
     def __init__(self, num_robots: int, simulation_time: int, output_file: str, map_name: str, cost_calculation_method: str,
-                 seed: int = None, max_tasks: int = None, task_generation_strategy: str = None,
+                 seed: int = None, max_tasks: int = None,
+                 max_task_number_mode: str = None, max_task_number_min: int = None, max_task_number_period: int = None,
+                 task_generation_strategy: str = None,
                  initial_task_assignment_strategy: str = None, improvement_task_assignment_strategy: str = None, path_planning_strategy: str = None,
                  time_limit: int = None, visualize_output: bool = None, initial_inventory: float = None,
                  frequency: float = None, inbound_outbound_ratio: float = None, output_graphs: bool = None,
@@ -144,6 +146,7 @@ class Stats:
                  schedule_name: str = None, W: int = None, B: int = None,
                  lambda_: float = None,
                  reallocation_task_method: str = None,
+                 use_item_task_locks: bool = None,
                  queue_release_window: int = None,
                  pick_place_time: bool = None,
                  buffer_capacity_k: int = None,
@@ -160,6 +163,9 @@ class Stats:
         self.__num_of_robots = num_robots
         self.__T = simulation_time
         self.__max_tasks = max_tasks
+        self.__max_task_number_mode = max_task_number_mode
+        self.__max_task_number_min = max_task_number_min
+        self.__max_task_number_period = max_task_number_period
         self.__task_generation_strategy = task_generation_strategy
         self.__initial_task_assignment_strategy = initial_task_assignment_strategy
         self.__improvement_task_assignment_strategy = improvement_task_assignment_strategy
@@ -194,6 +200,7 @@ class Stats:
         self.__B = B
         self.__lambda_ = lambda_
         self.__reallocation_task_method = reallocation_task_method
+        self.__use_item_task_locks = use_item_task_locks
         self.__queue_release_window = queue_release_window
         self.__pick_place_time = pick_place_time
         self.__buffer_capacity_k = buffer_capacity_k
@@ -1104,6 +1111,9 @@ class Stats:
             "num_robots": self.__num_of_robots,
             "time_horizon": self.__T,
             "max_tasks": self.__max_tasks,
+            "max_task_number_mode": self.__max_task_number_mode,
+            "max_task_number_min": self.__max_task_number_min,
+            "max_task_number_period": self.__max_task_number_period,
             "task_generation_strategy": self.__task_generation_strategy,
             "initial_task_assignment_strategy": self.__initial_task_assignment_strategy,
             "improvement_task_assignment_strategy": self.__improvement_task_assignment_strategy,
@@ -1138,6 +1148,7 @@ class Stats:
             "B": self.__B,
             "lambda_": self.__lambda_,
             "reallocation_task_method": self.__reallocation_task_method,
+            "use_item_task_locks": self.__use_item_task_locks,
             "queue_release_window": self.__queue_release_window,
             "pick_place_time": self.__pick_place_time,
             "buffer_capacity_k": self.__buffer_capacity_k,
