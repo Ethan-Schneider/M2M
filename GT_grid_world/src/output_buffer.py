@@ -1,4 +1,18 @@
-"""Shared capacity buffer for outbound (driveway) output nodes."""
+"""Shared capacity buffer for outbound (driveway) output nodes.
+
+Ported from Ethan's ``task_queue`` branch (commit 58bb27f). Behaviour is
+identical; the only change from the source is that the debug ``print``
+statements inside ``consumption_tick`` were removed (they fired every tick and
+would flood the simulation log) and a module logger is used instead.
+
+Model: a single shared pool drains ``consumption_rate_per_min / 60`` items per
+simulation tick (1 tick == 1 second). Each completed *outbound* driveway
+delivery adds one item via ``record_outbound_delivery``. When the pool is at
+capacity, outbound deliveries are blocked (``outbound_delivery_blocked``) and
+the delivering agent waits, creating backpressure that caps outbound
+throughput at the consumption rate. Inbound and shuffle tasks never touch the
+buffer.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +20,10 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
+
+from .logging_config import get_logger
+
+_log = get_logger("output_buffer")
 
 TASK_TYPE_OUTBOUND = 0
 QUEUE_TASK_TYPE = 1
@@ -76,12 +94,33 @@ class OutputBuffer:
 
     def consumption_tick(self) -> float:
         """Drain the buffer by one tick of consumption. Returns amount removed."""
-        print(f"Consumption rate per tick: {self.consumption_rate_per_tick}")
-        print(f"Level: {self.level}")
         drained = min(self.level, self.consumption_rate_per_tick)
         self.level = max(0.0, self.level - self.consumption_rate_per_tick)
-        print(f"Level after consumption: {self.level}")
+        _log.debug(
+            "consumption_tick: drained=%.4f level=%.4f (rate/tick=%.4f)",
+            drained, self.level, self.consumption_rate_per_tick,
+        )
         return drained
+
+    @staticmethod
+    def estimate_outbound_fraction(queue: NDArray, W: int) -> float:
+        """Fraction of the next ``W`` queue rows that are outbound tasks.
+
+        Works with the timeless demand-driven queue format ``[sku_id, task_type]``
+        (no deadline / arrival-time column): it only reads the task-type column,
+        so unlike ``estimate_arrival_rate`` it does not require temporal data.
+        Returns a value in ``[0, 1]``; ``0.0`` for an empty queue.
+        """
+        if queue is None or queue.size == 0:
+            return 0.0
+        window = np.atleast_2d(queue[:W])
+        if window.shape[1] <= QUEUE_TASK_TYPE:
+            return 0.0
+        n = window.shape[0]
+        if n == 0:
+            return 0.0
+        outbound_count = int((window[:, QUEUE_TASK_TYPE] == TASK_TYPE_OUTBOUND).sum())
+        return outbound_count / n
 
     @staticmethod
     def estimate_arrival_rate(queue: NDArray, W: int) -> float:

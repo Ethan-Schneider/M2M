@@ -7,7 +7,7 @@ from ..agent import *
 
 
 def _json_safe_location(loc):
-    """Convert task locations to JSON-serializable lists."""
+    """Convert task locations (tuples / frozensets) to JSON-serializable lists."""
     if isinstance(loc, frozenset):
         if len(loc) == 1:
             loc = next(iter(loc))
@@ -143,21 +143,21 @@ class Stats:
                  deadline_offset: float = None, output_intermediate_data: bool = None, intermediate_data_interval: int = None,
                  base_cost_weight: float = None, deadline_weight: float = None, sku_distribution_weight: float = None,
                  agent_unallocated_penalty: float = None, solution_repair_detection_function: str = None, solution_repair_function: str = None,
+                 buffer_capacity_k: int = None, buffer_consumption_rate: float = None,
                  schedule_name: str = None, W: int = None, B: int = None,
                  lambda_: float = None,
                  reallocation_task_method: str = None,
                  use_item_task_locks: bool = None,
                  queue_release_window: int = None,
                  pick_place_time: bool = None,
-                 buffer_capacity_k: int = None,
-                 buffer_consumption_rate: float = None,
                  use_precomputed_queue: bool = None,
                  queue_file: str = None,
                  initial_inventory_file: str = None,
                  run_until_queue_complete: bool = None,
-                 aisle_dual_cycle: bool = None,
-                 driveway_dual_cycle: bool = None,
-                 log_buffer_predictions: bool = False) -> None:
+                 log_buffer_predictions: bool = False,
+                 max_tasks_mode: str = None,
+                 max_tasks_min: int = None,
+                 max_tasks_period: int = None) -> None:
         # Store input parameters
         self.__seed = seed
         self.__num_of_robots = num_robots
@@ -195,6 +195,8 @@ class Stats:
         self.__agent_unallocated_penalty = agent_unallocated_penalty
         self.__solution_repair_detection_function = solution_repair_detection_function
         self.__solution_repair_function = solution_repair_function
+        self.__buffer_capacity_k = buffer_capacity_k
+        self.__buffer_consumption_rate = buffer_consumption_rate
         self.__schedule_name = schedule_name
         self.__W = W
         self.__B = B
@@ -203,14 +205,10 @@ class Stats:
         self.__use_item_task_locks = use_item_task_locks
         self.__queue_release_window = queue_release_window
         self.__pick_place_time = pick_place_time
-        self.__buffer_capacity_k = buffer_capacity_k
-        self.__buffer_consumption_rate = buffer_consumption_rate
         self.__use_precomputed_queue = use_precomputed_queue
         self.__queue_file = queue_file
         self.__initial_inventory_file = initial_inventory_file
         self.__run_until_queue_complete = run_until_queue_complete
-        self.__aisle_dual_cycle = aisle_dual_cycle
-        self.__driveway_dual_cycle = driveway_dual_cycle
         self.__log_buffer_predictions = log_buffer_predictions
 
         self.__num_improved_assignments = 0
@@ -291,6 +289,12 @@ class Stats:
         self.__completed_rearrangement_task_ids = []
         self.__rearrangement_task_completion_timestamps = {}  # task_id -> timestep
         self.__completed_rearrangement_task_details = {}  # task_id -> (start, goal, deadline, sku, type)
+        # crM2M rearrangement objective terms for *committed* shuffles, refreshed
+        # each tick from live post-allocation state (last-write-wins). Keyed by
+        # task_id -> {"benefit", "detour", "utility"}. Joined against
+        # ``__rearrangement_task_completion_timestamps`` at plot time so only
+        # completed shuffles are charted.
+        self.__rearrangement_task_scores = {}
         self.__completed_rearrangement_task_benefit = {}  # task_id -> benefit
         self.__completed_rearrangement_task_utility = {}  # task_id -> utility
         self.__completed_rearrangement_task_detour_cost = {}  # task_id -> detour cost
@@ -300,8 +304,27 @@ class Stats:
         self.__reallocation_milp_construct_time_per_timestep = {}  # t -> seconds
         self.__reallocation_milp_solve_time_per_timestep = {}  # t -> seconds
         self.__reallocation_milp_binary_vars_per_timestep = {}  # t -> count
-        self.__output_buffer_level_per_timestep = {}  # t -> buffer level
         self.__completed_to_pickup_task_ids = []
+
+        # crM2M reallocation diagnostics (per-tick)
+        self.__reallocation_tasks_generated = {}   # t -> number of candidates generated
+        self.__reallocation_generation_time = {}   # t -> seconds spent generating candidates
+        self.__reallocation_tasks_committed = {}   # t -> shuffles staged in J_a after pruning
+
+        # Output buffer (outbound capacity model) diagnostics
+        self.__output_buffer_level_per_timestep = {}  # t -> buffer level
+
+        # Outbound placement blocking (backpressure when the buffer is full).
+        # Mirrors Ethan's task_queue instrumentation: a running count of every
+        # tick an agent is prevented from placing an outbound box because the
+        # buffer is at capacity, the open block-event start per agent (so a
+        # contiguous block can be resolved into a duration), and the list of
+        # finalized block durations. ``__buffer_blocks_per_timestep`` is a crM2M
+        # addition so the count can be charted as a time series.
+        self.__outbound_buffer_placement_blocks = 0   # total blocked agent-ticks
+        self.__agent_buffer_block_start = {}          # agent_id -> t block began
+        self.__buffer_block_durations = []            # ticks per finalized block event
+        self.__buffer_blocks_per_timestep = {}        # t -> new block occurrences this tick
         
         # Runtime Stastics: 
         self.__total_runtime = []
@@ -634,7 +657,13 @@ class Stats:
         utility: float = None,
         detour_cost: float = None,
     ) -> None:
-        """Record completion of a rearrangement (shuffle) task."""
+        """Record completion of a rearrangement (shuffle / type=2) task.
+
+        Kept separate from ``add_completed_task_id`` so rearrangement throughput
+        is reported independently of real (inbound/outbound) task completions and
+        does not pollute service-time / tardiness statistics, which are
+        deadline-graded concepts that do not apply to opportunistic shuffles.
+        """
         self.__completed_rearrangement_task_ids.append(int(task_id))
         self.__rearrangement_task_completion_timestamps[task_id] = int(timestep)
         if start_location is not None and goal_location is not None:
@@ -655,20 +684,49 @@ class Stats:
     def get_completed_rearrangement_task_ids(self) -> list:
         return self.__completed_rearrangement_task_ids
 
+    def record_rearrangement_task_score(
+        self, task_id: int, benefit: float, detour: float, utility: float
+    ) -> None:
+        """Record the objective terms (benefit, detour, utility) of a committed
+        shuffle. Overwrites any prior value for ``task_id`` so the score reflects
+        the most recent (execution-driving) allocation decision. See
+        ``committed_shuffle_terms`` for the definitions."""
+        self.__rearrangement_task_scores[int(task_id)] = {
+            "benefit": float(benefit),
+            "detour": float(detour),
+            "utility": float(utility),
+        }
+
+    def get_rearrangement_task_scores(self) -> dict:
+        return self.__rearrangement_task_scores
+
     def get_total_completed_rearrangement_tasks(self) -> int:
         return len(self.__completed_rearrangement_task_ids)
 
     def log_reallocation_tasks_generated(self, t: int, count: int) -> None:
-        """Record how many reallocation tasks were generated at timestep t."""
+        """Record how many shuffle/reallocation candidates were generated at tick ``t``.
+
+        Writes to both the crM2M store (``__reallocation_tasks_generated``) and the
+        irM2M per-timestep store so getters on either path resolve correctly.
+        """
+        self.__reallocation_tasks_generated[int(t)] = int(count)
         self.__reallocation_tasks_generated_per_timestep[int(t)] = int(count)
 
     def log_reallocation_tasks_chosen(self, t: int, count: int) -> None:
         """Record how many reallocation tasks were selected by the insertion MILP at t."""
         self.__reallocation_tasks_chosen_per_timestep[int(t)] = int(count)
 
-    def log_reallocation_generation_time(self, t: int, elapsed: float) -> None:
-        """Record wall time to generate reallocation tasks at timestep t."""
-        self.__reallocation_generation_time_per_timestep[int(t)] = float(elapsed)
+    def log_reallocation_generation_time(self, t: int, seconds: float) -> None:
+        """Record candidate-generation wall time (seconds) at tick ``t``.
+
+        Writes to both the crM2M and irM2M per-timestep stores.
+        """
+        self.__reallocation_generation_time[int(t)] = float(seconds)
+        self.__reallocation_generation_time_per_timestep[int(t)] = float(seconds)
+
+    def log_reallocation_tasks_committed(self, t: int, count: int) -> None:
+        """Record how many shuffles remain staged in ``J_a`` after pruning at ``t``."""
+        self.__reallocation_tasks_committed[int(t)] = int(count)
 
     def log_reallocation_milp_construct_time(self, t: int, elapsed: float) -> None:
         """Record wall time to build the insertion MILP at timestep t."""
@@ -683,18 +741,23 @@ class Stats:
         self.__reallocation_milp_binary_vars_per_timestep[int(t)] = int(count)
 
     def log_output_buffer_level(self, t: int, level: float) -> None:
-        """Record shared outbound output buffer level at timestep t."""
+        """Record the shared output-buffer level at tick ``t``."""
         self.__output_buffer_level_per_timestep[int(t)] = float(level)
 
     def record_outbound_buffer_placement_blocked(self, agent_id: int, t: int) -> None:
         """Increment when an outbound delivery is blocked by a full output buffer.
 
-        Tracks the start of a new blocking event per agent so duration can be
-        computed when the agent eventually places successfully.
+        Called once per tick that ``agent_id`` is prevented from placing an
+        outbound box (buffer at capacity). Tracks the start of a new blocking
+        event per agent so its duration can be computed when the agent finally
+        places, and bins the occurrence by tick for the over-time chart.
         """
         self.__outbound_buffer_placement_blocks += 1
         if agent_id not in self.__agent_buffer_block_start:
-            self.__agent_buffer_block_start[agent_id] = t
+            self.__agent_buffer_block_start[agent_id] = int(t)
+        self.__buffer_blocks_per_timestep[int(t)] = (
+            self.__buffer_blocks_per_timestep.get(int(t), 0) + 1
+        )
 
     def record_outbound_buffer_unblocked(self, agent_id: int, t: int) -> None:
         """Finalize a buffer blocking event when an agent successfully places.
@@ -702,12 +765,15 @@ class Stats:
         No-op if the agent was not previously recorded as blocked.
         """
         if agent_id in self.__agent_buffer_block_start:
-            duration = t - self.__agent_buffer_block_start.pop(agent_id)
+            duration = int(t) - self.__agent_buffer_block_start.pop(agent_id)
             if duration > 0:
                 self.__buffer_block_durations.append(duration)
 
     def get_outbound_buffer_placement_blocks(self) -> int:
         return self.__outbound_buffer_placement_blocks
+
+    def get_buffer_blocks_per_timestep(self) -> dict:
+        return self.__buffer_blocks_per_timestep
 
     def append_agents_waiting_at_buffer(self, count: int) -> None:
         """Record how many agents are flagged as waiting at the buffer at this timestep."""
@@ -787,7 +853,7 @@ class Stats:
 
     def get_reallocation_milp_binary_vars_per_timestep(self) -> dict:
         return self.__reallocation_milp_binary_vars_per_timestep
-            
+
     # ====================== Completed To-Pickup Task Id Functions
     
     def add_completed_to_pickup_task_id(self, task_id : int) -> None:
@@ -1088,7 +1154,8 @@ class Stats:
 
         tardiness_stats = compute_nonzero_tardiness_stats(self.__task_tardiness)
 
-        # Finalize any blocking events still open at end-of-simulation.
+        # Finalize any outbound-buffer blocking events still open at end-of-run so
+        # their durations are counted, then summarize (mirrors Ethan's task_queue).
         final_t = self.return_actual_timesteps()
         for agent_id, start_t in list(self.__agent_buffer_block_start.items()):
             duration = final_t - start_t
@@ -1099,7 +1166,9 @@ class Stats:
             _block_arr = np.asarray(self.__buffer_block_durations, dtype=np.float64)
             buffer_block_avg = float(_block_arr.mean())
             buffer_block_median = float(np.median(_block_arr))
-            buffer_block_std = float(_block_arr.std(ddof=0)) if len(self.__buffer_block_durations) > 1 else 0.0
+            buffer_block_std = (
+                float(_block_arr.std(ddof=0)) if len(self.__buffer_block_durations) > 1 else 0.0
+            )
         else:
             buffer_block_avg = 0.0
             buffer_block_median = 0.0
@@ -1110,6 +1179,9 @@ class Stats:
             "seed": self.__seed,
             "num_robots": self.__num_of_robots,
             "time_horizon": self.__T,
+            "max_tasks_mode": self.__max_tasks_mode,
+            "max_tasks_min": self.__max_tasks_min,
+            "max_tasks_period": self.__max_tasks_period,
             "max_tasks": self.__max_tasks,
             "max_task_number_mode": self.__max_task_number_mode,
             "max_task_number_min": self.__max_task_number_min,
@@ -1157,8 +1229,6 @@ class Stats:
             "queue_file": self.__queue_file,
             "initial_inventory_file": self.__initial_inventory_file,
             "run_until_queue_complete": self.__run_until_queue_complete,
-            "aisle_dual_cycle": self.__aisle_dual_cycle,
-            "driveway_dual_cycle": self.__driveway_dual_cycle,
             "log_buffer_predictions": self.__log_buffer_predictions,
             # Simulation results
             "timesteps_completed": self.return_actual_timesteps(),
@@ -1170,14 +1240,18 @@ class Stats:
             ),
             "completed_rearrangement_tasks": self.__completed_rearrangement_task_ids,
             "completed_rearrangement_task_details": self.__completed_rearrangement_task_details,
+            "rearrangement_task_completion_timestamps": (
+                self.__rearrangement_task_completion_timestamps
+            ),
+            "rearrangement_task_scores": self.__rearrangement_task_scores,
             "completed_rearrangement_task_benefit": self.__completed_rearrangement_task_benefit,
             "completed_rearrangement_task_utility": self.__completed_rearrangement_task_utility,
             "completed_rearrangement_task_detour_cost": (
                 self.__completed_rearrangement_task_detour_cost
             ),
-            "rearrangement_task_completion_timestamps": (
-                self.__rearrangement_task_completion_timestamps
-            ),
+            "reallocation_tasks_generated": self.__reallocation_tasks_generated,
+            "reallocation_generation_time": self.__reallocation_generation_time,
+            "reallocation_tasks_committed": self.__reallocation_tasks_committed,
             "reallocation_tasks_generated_per_timestep": (
                 self.__reallocation_tasks_generated_per_timestep
             ),
@@ -1198,6 +1272,7 @@ class Stats:
             ),
             "output_buffer_level_per_timestep": self.__output_buffer_level_per_timestep,
             "outbound_buffer_placement_blocks": int(self.__outbound_buffer_placement_blocks),
+            "buffer_blocks_per_timestep": self.__buffer_blocks_per_timestep,
             "buffer_block_durations": self.__buffer_block_durations,
             "average_buffer_block_duration": buffer_block_avg,
             "median_buffer_block_duration": buffer_block_median,
@@ -1374,6 +1449,10 @@ class Stats:
                 goal_location = agent.task_sequence[0][1]  # First task's start location
             elif agent.status == 2:  # Going to delivery
                 goal_location = agent.task_sequence[0][2]  # First task's goal location
+            elif agent.status == 3:  # Picking: still servicing the pickup cell
+                goal_location = agent.task_sequence[0][1]
+            elif agent.status == 4:  # Placing: still servicing the delivery cell
+                goal_location = agent.task_sequence[0][2]
             else:  # status == 0, idle
                 goal_location = None
                 
