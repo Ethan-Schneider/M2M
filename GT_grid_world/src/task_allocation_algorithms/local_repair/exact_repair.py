@@ -25,6 +25,7 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
     # print(f"Allocated Locations: {allocated_locations}")
             
     locations = set()
+    current_goals = {}
     
     # print(f"Reallocation group: {reallocation_group}")
     
@@ -45,15 +46,22 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
         # print(f"Task Goal Locations: {J[task_id][1]}")
         # If status is 1, get locations of current task's pickup location
         if agent_status == 1:
+            current_goal = Rs.get_agent(agent_id).task_sequence[0][1]
             locations = locations.union(J[task_id][0])
-            allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][1])
+            allocated_locations.remove(current_goal)
         # If status is 2, get locations of current task's dropoff location
         elif agent_status == 2:
+            current_goal = Rs.get_agent(agent_id).task_sequence[0][2]
             locations = locations.union(J[task_id][1])
-            allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][2])
+            allocated_locations.remove(current_goal)
         else:
             print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
-            
+
+        # Always keep the agent's currently assigned goal as a candidate column,
+        # even if J no longer lists it for this task/status.
+        locations.add(current_goal)
+
+        current_goals[agent_id] = current_goal
     locations = list(locations)
 
     S.reallocation_data[t_key]["num_candidate_goal_locations"].append(len(locations))
@@ -70,6 +78,8 @@ def HA_exact_repair(Rs : AgentLoader, G : Graph, S : Stats, J : set, reallocatio
             task_loc_set = J[task_id][1]
         else:
             print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
+
+        task_loc_set = set(task_loc_set) | {current_goals[agent_id]}
         
         row = []
         for loc in locations:

@@ -33,6 +33,7 @@ class BnB:
 
         self.allocated_locations = set()
         self.goals = set()
+        self.current_goals = {}
 
         tasks = []
         goals_per_task = []
@@ -56,16 +57,25 @@ class BnB:
                 exit()
                 
             if agent_status == 1:
-                self.goals = self.goals.union(J[task_id][0])
-                goals_per_task.append(len(J[task_id][0]))
-                self.allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][1])
+                current_goal = Rs.get_agent(agent_id).task_sequence[0][1]
+                task_loc_set = set(J[task_id][0]) | {current_goal}
+                self.goals = self.goals.union(task_loc_set)
+                goals_per_task.append(len(task_loc_set))
+                self.allocated_locations.remove(current_goal)
             # If status is 2, get locations of current task's dropoff location
             elif agent_status == 2:
-                self.goals = self.goals.union(J[task_id][1])
-                goals_per_task.append(len(J[task_id][1]))
-                self.allocated_locations.remove(Rs.get_agent(agent_id).task_sequence[0][2])
+                current_goal = Rs.get_agent(agent_id).task_sequence[0][2]
+                task_loc_set = set(J[task_id][1]) | {current_goal}
+                self.goals = self.goals.union(task_loc_set)
+                goals_per_task.append(len(task_loc_set))
+                self.allocated_locations.remove(current_goal)
             else:
                 print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
+                continue
+
+            # Always keep the agent's currently assigned goal as a candidate,
+            # even if J no longer lists it for this task/status.
+            self.current_goals[agent_id] = current_goal
 
         num_combinations = np.prod(goals_per_task) + (np.sum(goals_per_task)**2 - np.sum(np.square(goals_per_task)))/2 + np.sum(goals_per_task)
         self.S.reallocation_data[self.t_key]["possible_number_nodes"] = int(num_combinations)
@@ -97,6 +107,9 @@ class BnB:
                 task_loc_set = J[task_id][1]
             else:
                 print(f"Agent {agent_id} with status {Rs.get_agent(agent_id).status}")
+
+            if agent_id in self.current_goals:
+                task_loc_set = set(task_loc_set) | {self.current_goals[agent_id]}
             
             row = []
             for loc in self.goals:
